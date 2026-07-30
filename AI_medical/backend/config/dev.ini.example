@@ -1,0 +1,48 @@
+# Template for the backend configuration file.
+#
+#   copy config\dev.ini.example config\dev.ini     (then fill in the blanks)
+#
+# config.py reads config/dev.ini by default, or config/prod.ini when
+# APP_ENV=production. A real environment variable always wins over the value
+# written here -- the variable name is listed above each key -- so a
+# production host can inject its secrets without putting them on disk.
+#
+# Values are read literally: '%', '$' and spaces need no escaping. Comments
+# must be on their own line; anything after '=' is part of the value.
+
+[flask]
+# FLASK_ENV -- development | production
+env = development
+
+# SECRET_KEY / JWT_SECRET_KEY -- long random strings, generate with:
+#   python -c "import secrets; print(secrets.token_urlsafe(48))"
+secret_key =
+jwt_secret_key =
+
+[database]
+# DB_HOST
+host = 127.0.0.1
+# DB_PORT
+port = 3306
+# DB_NAME
+name = hospital
+# DB_USER
+user = root
+# DB_PASSWORD
+password =
+
+[ai]
+# GEMINI_API_KEY
+gemini_api_key =
+# GEMINI_MODEL
+gemini_model = gemini-flash-latest
+# WHISPER_MODEL
+whisper_model = small
+# WHISPER_LANGUAGE -- leave empty so Whisper auto-detects the spoken language
+# per segment (handles English/Hindi/Telugu/Tamil code-switching); it always
+# translates to English.
+whisper_language =
+
+[server]
+# CORS_ORIGINS -- comma-separated list of allowed browser origins.
+cors_origins = http://localhost:5173
