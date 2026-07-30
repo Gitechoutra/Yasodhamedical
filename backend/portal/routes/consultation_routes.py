@@ -1,14 +1,17 @@
 import json
-from datetime import datetime
+from datetime import datetime, time, timedelta
 
 from flask import Blueprint, request
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from portal.ai import gemini_client, whisper_client
 from portal.extensions import db, socketio
 from portal.helpers.auth_helper import get_current_doctor
+from portal.helpers.broadcast import dashboard_changed
+from portal.helpers.notify import notify, role_user_ids
+from portal.helpers.patient_access import can_access_patient
+from portal.helpers.queue_helper import claim_appointment_for, complete_appointment_for
 from portal.helpers.response import error, success
-from portal.models.appointment import Appointment
 from portal.models.consultation import Consultation
 from portal.models.consultation_summary import ConsultationSummary
 from portal.models.conversation_message import ConversationMessage
@@ -20,11 +23,77 @@ from portal.websocket.consultation_socket import consultation_room
 consultation_bp = Blueprint("consultations", __name__)
 
 
+VALID_CONSULTATION_STATUSES = ("scheduled", "in_progress", "completed")
+
+# How far back each ?period= value looks, in days. "all" means no limit.
+PERIOD_DAYS = {"today": 0, "week": 7, "month": 30, "year": 365}
+
+LIST_LIMIT = 100
+
+
 @consultation_bp.get("")
 @jwt_required()
 def list_consultations():
-    consultations = Consultation.query.order_by(Consultation.created_at.desc()).limit(50).all()
-    return success([c.to_dict() for c in consultations])
+    """Consultation history — completed consultations only.
+
+    A consultation still in progress lives in the Appointments queue (with a
+    Resume button) until it's finished, so this page is purely the record of
+    finished visits. ?status= can still ask for another status explicitly.
+    """
+    query = Consultation.query
+
+    status = request.args.get("status", "completed")
+    if status != "all":
+        if status not in VALID_CONSULTATION_STATUSES:
+            allowed = ", ".join(VALID_CONSULTATION_STATUSES)
+            return error(f"status must be one of: {allowed}, all", status=422)
+        query = query.filter(Consultation.status == status)
+
+    # A doctor's own work only, matching how the dashboard counts them.
+    doctor = get_current_doctor()
+    if doctor:
+        query = query.filter(Consultation.doctor_id == doctor.id)
+
+    period = request.args.get("period")
+    if period and period != "all":
+        if period not in PERIOD_DAYS:
+            allowed = ", ".join(list(PERIOD_DAYS) + ["all"])
+            return error(f"period must be one of: {allowed}", status=422)
+        days = PERIOD_DAYS[period]
+        since = datetime.combine(datetime.utcnow().date() - timedelta(days=days), time.min)
+        # Falls back to created_at for a consultation that has no start time.
+        query = query.filter(
+            db.func.coalesce(Consultation.started_at, Consultation.created_at) >= since
+        )
+
+    search = (request.args.get("search") or "").strip()
+    if search:
+        query = query.outerjoin(Patient, Consultation.patient_id == Patient.id).outerjoin(
+            ConsultationSummary, ConsultationSummary.consultation_id == Consultation.id
+        )
+        like = f"%{search}%"
+        conditions = [
+            Patient.name.ilike(like),
+            ConsultationSummary.possible_diagnosis.ilike(like),
+            ConsultationSummary.symptoms.ilike(like),
+            ConsultationSummary.summary.ilike(like),
+        ]
+        # "PAT0004" / "4" should find that patient by id, not just by name.
+        digits = "".join(ch for ch in search if ch.isdigit())
+        if digits:
+            conditions.append(Patient.id == int(digits))
+        query = query.filter(db.or_(*conditions))
+
+    consultations = (
+        query.order_by(
+            # Newest visit first; ended_at is the moment that matters for a
+            # completed consultation.
+            db.func.coalesce(Consultation.ended_at, Consultation.started_at, Consultation.created_at).desc()
+        )
+        .limit(LIST_LIMIT)
+        .all()
+    )
+    return success([c.to_dict(include_summary=True) for c in consultations])
 
 
 @consultation_bp.post("")
@@ -40,6 +109,8 @@ def start_consultation():
     patient = Patient.query.get(patient_id)
     if not patient:
         return error("Patient not found", status=404)
+    if not can_access_patient(patient, doctor):
+        return error("This patient is assigned to another doctor", status=403)
 
     consultation = Consultation(
         doctor_id=doctor.id,
@@ -48,7 +119,14 @@ def start_consultation():
         started_at=datetime.utcnow(),
     )
     db.session.add(consultation)
+    db.session.flush()  # assigns consultation.id before the appointment links to it
+
+    # If this patient was also sitting in the queue, claim that entry now so
+    # it moves with the consultation instead of being stranded on "waiting".
+    claim_appointment_for(consultation, doctor)
+
     db.session.commit()
+    dashboard_changed("consultation_started")
 
     data = consultation.to_dict(include_detail=True)
     data["can_manage"] = True
@@ -115,6 +193,124 @@ def transcribe_turn(consultation_id):
     return success(payload, status=201)
 
 
+MAX_PRESCRIPTION_ITEMS = 30
+
+
+@consultation_bp.put("/<int:consultation_id>/prescriptions")
+@jwt_required()
+def replace_prescriptions(consultation_id):
+    """Replaces the prescription with the doctor's edited version.
+
+    Gemini's suggestion is a draft; the doctor is the prescriber. Sending the
+    whole list rather than per-row edits keeps the saved prescription exactly
+    what was on screen — no partial-update races between rows.
+    """
+    consultation = Consultation.query.get(consultation_id)
+    if not consultation:
+        return error("Consultation not found", status=404)
+    if not _is_owning_doctor(consultation):
+        return error("Only the doctor who ran this consultation can edit its prescription", status=403)
+
+    if consultation.prescription_verified_at:
+        # Verification locks the prescription. Withdrawing the sign-off is the
+        # deliberate way back in, so a signed prescription can never change
+        # underneath the signature — enforced here, not just in the UI.
+        return error(
+            "This prescription is verified and locked. Unlock it to make changes.",
+            status=409,
+        )
+
+    payload = request.get_json(silent=True) or {}
+    items = payload.get("prescriptions")
+    if not isinstance(items, list):
+        return error("prescriptions must be a list", status=422)
+    if len(items) > MAX_PRESCRIPTION_ITEMS:
+        return error(f"A prescription can hold at most {MAX_PRESCRIPTION_ITEMS} medicines", status=422)
+
+    cleaned = []
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            return error(f"Item {index + 1} is not valid", status=422)
+        name = (item.get("medicine_name") or "").strip()
+        if not name:
+            return error(f"Item {index + 1} needs a medicine name", status=422)
+        cleaned.append(
+            {
+                "medicine_name": name[:150],
+                "dose": (item.get("dose") or "").strip()[:255] or None,
+                "frequency": (item.get("frequency") or "").strip()[:255] or None,
+                "duration": (item.get("duration") or "").strip()[:255] or None,
+            }
+        )
+
+    # Re-match against the formulary so the "off-formulary" flag reflects what
+    # the doctor actually typed, not the original suggestion.
+    formulary_by_name = {m.name.lower(): m for m in Medicine.query.all()}
+
+    for existing in list(consultation.prescriptions):
+        db.session.delete(existing)
+    db.session.flush()
+
+    for item in cleaned:
+        matched = formulary_by_name.get(item["medicine_name"].lower())
+        db.session.add(
+            GeneratedPrescription(
+                consultation_id=consultation.id,
+                medicine_id=matched.id if matched else None,
+                **item,
+            )
+        )
+
+    db.session.commit()
+
+    data = consultation.to_dict(include_detail=True)
+    data["can_manage"] = True
+    return success(data, message="Prescription updated")
+
+
+@consultation_bp.post("/<int:consultation_id>/prescriptions/verify")
+@jwt_required()
+def verify_prescription(consultation_id):
+    """Records the treating doctor's sign-off on the prescription."""
+    consultation = Consultation.query.get(consultation_id)
+    if not consultation:
+        return error("Consultation not found", status=404)
+    if not _is_owning_doctor(consultation):
+        return error("Only the doctor who ran this consultation can verify its prescription", status=403)
+    if consultation.status != "completed":
+        return error("Finish the consultation before verifying its prescription", status=409)
+
+    consultation.prescription_verified_at = datetime.utcnow()
+    consultation.prescription_verified_by = int(get_jwt_identity())
+    db.session.commit()
+    # Flips the Rx badge on any open Consultations list.
+    dashboard_changed("prescription_verified")
+
+    data = consultation.to_dict(include_detail=True)
+    data["can_manage"] = True
+    return success(data, message="Prescription verified")
+
+
+@consultation_bp.delete("/<int:consultation_id>/prescriptions/verify")
+@jwt_required()
+def unverify_prescription(consultation_id):
+    """Withdraws a sign-off, e.g. it was clicked by mistake."""
+    consultation = Consultation.query.get(consultation_id)
+    if not consultation:
+        return error("Consultation not found", status=404)
+    if not _is_owning_doctor(consultation):
+        return error("Only the doctor who ran this consultation can change its verification", status=403)
+
+    consultation.prescription_verified_at = None
+    consultation.prescription_verified_by = None
+    db.session.commit()
+    dashboard_changed("prescription_unverified")
+
+    data = consultation.to_dict(include_detail=True)
+    data["can_manage"] = True
+    return success(data, message="Verification withdrawn")
+
+
 @consultation_bp.post("/<int:consultation_id>/end")
 @jwt_required()
 def end_consultation(consultation_id):
@@ -145,9 +341,9 @@ def end_consultation(consultation_id):
     consultation.status = "completed"
     consultation.ended_at = datetime.utcnow()
 
-    linked_appointment = Appointment.query.filter_by(consultation_id=consultation.id).first()
-    if linked_appointment:
-        linked_appointment.status = "completed"
+    # Drops the patient out of the Appointments queue — completed patients
+    # must never remain there.
+    complete_appointment_for(consultation)
 
     summary = ConsultationSummary(
         consultation_id=consultation.id,
@@ -175,6 +371,17 @@ def end_consultation(consultation_id):
             )
         )
 
+    doctor_name = consultation.doctor.user.name if consultation.doctor and consultation.doctor.user else "A doctor"
+    patient_name = consultation.patient.name if consultation.patient else "a patient"
+    notify(
+        role_user_ids("admin"),
+        title="Consultation completed",
+        body=f"{doctor_name} finished a consultation with {patient_name}. Summary is ready.",
+        category="consultation",
+        link=f"/dashboard/consultations/{consultation.id}",
+        exclude_user_id=get_jwt_identity(),
+    )
+
     try:
         db.session.commit()
     except Exception as exc:  # noqa: BLE001 - surface DB failure as a clean JSON error
@@ -184,4 +391,6 @@ def end_consultation(consultation_id):
     result = consultation.to_dict(include_detail=True)
     result["can_manage"] = True
     socketio.emit("consultation_completed", result, room=consultation_room(consultation.id))
+    # Moves the patient out of Appointments and out of the active count.
+    dashboard_changed("consultation_completed")
     return success(result, message="Consultation completed")

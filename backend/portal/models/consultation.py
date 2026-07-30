@@ -15,8 +15,16 @@ class Consultation(db.Model):
     )
     started_at = db.Column(db.DateTime, nullable=True)
     ended_at = db.Column(db.DateTime, nullable=True)
+    # Set when a doctor signs off the AI-suggested prescription. Cleared
+    # whenever the prescription is edited, so a signature always refers to
+    # the exact medicines that were reviewed.
+    prescription_verified_at = db.Column(db.DateTime, nullable=True)
+    prescription_verified_by = db.Column(
+        db.Integer, db.ForeignKey("users.id"), nullable=True
+    )
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
 
+    verified_by = db.relationship("User", foreign_keys=[prescription_verified_by])
     doctor = db.relationship("Doctor", back_populates="consultations")
     patient = db.relationship("Patient", back_populates="consultations")
     messages = db.relationship(
@@ -34,8 +42,20 @@ class Consultation(db.Model):
     prescriptions = db.relationship(
         "GeneratedPrescription", back_populates="consultation", cascade="all, delete-orphan"
     )
+    # One report per consultation (reports.consultation_id is unique).
+    report = db.relationship("Report", uselist=False, viewonly=True)
 
-    def to_dict(self, include_detail=False):
+    @property
+    def duration_seconds(self):
+        """How long the consultation ran, or None while it's still open."""
+        if not self.started_at or not self.ended_at:
+            return None
+        return max(0, int((self.ended_at - self.started_at).total_seconds()))
+
+    def to_dict(self, include_detail=False, include_summary=False):
+        """`include_summary` adds everything the Consultations list renders;
+        `include_detail` adds the full transcript on top, which is only worth
+        sending for a single consultation."""
         data = {
             "id": self.id,
             "doctor_id": self.doctor_id,
@@ -45,13 +65,26 @@ class Consultation(db.Model):
             "status": self.status,
             "started_at": to_utc_iso(self.started_at),
             "ended_at": to_utc_iso(self.ended_at),
+            "duration_seconds": self.duration_seconds,
+            "prescription_verified": self.prescription_verified_at is not None,
+            "prescription_verified_at": to_utc_iso(self.prescription_verified_at),
+            "prescription_verified_by": (
+                self.verified_by.name if self.verified_by else None
+            ),
         }
 
-        if include_detail:
+        if include_summary or include_detail:
             data["patient_detail"] = self.patient.to_dict() if self.patient else None
-            data["messages"] = [m.to_dict() for m in self.messages]
             data["summary"] = self.summary.to_dict() if self.summary else None
             data["prescriptions"] = [p.to_dict() for p in self.prescriptions]
+            data["report"] = (
+                {"id": self.report.id, "generated_at": to_utc_iso(self.report.generated_at)}
+                if self.report
+                else None
+            )
+
+        if include_detail:
+            data["messages"] = [m.to_dict() for m in self.messages]
 
         return data
 

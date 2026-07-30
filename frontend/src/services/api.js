@@ -4,6 +4,17 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
 });
 
+// The API hands back server-rooted paths like "/api/auth/avatar/<file>".
+// Those need the API host in front of them to be usable in an <img src>,
+// since the Vite dev server is on a different origin.
+const API_ORIGIN = import.meta.env.VITE_API_BASE_URL.replace(/\/api\/?$/, "");
+
+export function assetUrl(path) {
+  if (!path) return null;
+  if (/^https?:\/\//.test(path)) return path;
+  return `${API_ORIGIN}${path}`;
+}
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("yasodha_access_token");
   if (token) {

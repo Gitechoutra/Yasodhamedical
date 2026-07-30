@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
 import {
   HiOutlineCalendarDays,
   HiOutlineChatBubbleLeftRight,
   HiOutlineUsers,
   HiOutlineDocumentChartBar,
+  HiOutlineArrowPath,
 } from "react-icons/hi2";
 import StatCard from "../components/StatCard";
 import { useAuth } from "../context/AuthContext";
-import { fetchDashboardSummary } from "../services/dashboardService";
+import useLiveSummary from "../hooks/useLiveSummary";
 
 const STATUS_STYLES = {
   scheduled: "bg-slate-100 text-slate-600",
@@ -28,36 +28,33 @@ function StatusBadge({ status }) {
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [summary, setSummary] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState("");
-
-  useEffect(() => {
-    let active = true;
-    fetchDashboardSummary()
-      .then((data) => {
-        if (active) setSummary(data);
-      })
-      .catch(() => {
-        if (active) setErrorMsg("Could not load dashboard data.");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+  // Counts refresh themselves on server pushes, tab focus and a slow poll.
+  const { summary, loading, errorMsg, refreshedAt, refresh } = useLiveSummary();
 
   return (
     <div>
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">
-          Welcome back, {user?.name} 👋
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Here&apos;s what&apos;s happening today
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">
+            Welcome back, {user?.name} 👋
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Here&apos;s what&apos;s happening today
+          </p>
+        </div>
+
+        <button
+          onClick={refresh}
+          title={
+            refreshedAt
+              ? `Updated at ${refreshedAt.toLocaleTimeString()} — updates automatically`
+              : "Refresh"
+          }
+          className="flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+        >
+          <HiOutlineArrowPath className="h-3.5 w-3.5" />
+          {refreshedAt ? `Updated ${refreshedAt.toLocaleTimeString()}` : "Refresh"}
+        </button>
       </div>
 
       {errorMsg && (
@@ -79,24 +76,32 @@ export default function Dashboard() {
               <StatCard
                 label="Today's Appointments"
                 value={summary.todays_appointments}
+                hint="Pending & ongoing"
                 icon={HiOutlineCalendarDays}
+                to="/dashboard/appointments?filter=today"
               />
               <StatCard
                 label="Active Consultations"
                 value={summary.active_consultations}
                 hint="In progress"
                 icon={HiOutlineChatBubbleLeftRight}
+                // In-progress visits live in the queue (with a Resume button);
+                // Consultations is the completed-only record.
+                to="/dashboard/appointments?status=in_progress"
               />
               <StatCard
                 label="Patients"
                 value={summary.total_patients}
                 hint="Total patients"
                 icon={HiOutlineUsers}
+                to="/dashboard/patients"
               />
               <StatCard
                 label="Reports Generated"
                 value={summary.reports_generated}
+                hint={`${summary.todays_reports} today · ${summary.reports_generated} total`}
                 icon={HiOutlineDocumentChartBar}
+                to="/dashboard/reports"
               />
             </div>
 

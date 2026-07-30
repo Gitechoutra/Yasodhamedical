@@ -11,6 +11,9 @@ class User(db.Model):
     email = db.Column(db.String(150), nullable=False, unique=True)
     password_hash = db.Column(db.String(255), nullable=False)
     role_id = db.Column(db.Integer, db.ForeignKey("roles.id"), nullable=False)
+    # Bare filename inside uploads/avatars (not a full path) so the storage
+    # directory can move without a data migration.
+    avatar_path = db.Column(db.String(255), nullable=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     last_login_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
@@ -29,13 +32,25 @@ class User(db.Model):
     def check_password(self, raw_password):
         return check_password_hash(self.password_hash, raw_password)
 
+    @property
+    def avatar_url(self):
+        """URL the browser can put straight in an <img src>, or None."""
+        return f"/api/auth/avatar/{self.avatar_path}" if self.avatar_path else None
+
     def to_dict(self):
         return {
             "id": self.id,
             "name": self.name,
             "email": self.email,
             "role": self.role.name if self.role else None,
+            "avatar_url": self.avatar_url,
             "is_active": self.is_active,
+            "specialization": (
+                self.doctor_profile.specialization if self.doctor_profile else None
+            ),
+            "registration_no": (
+                self.doctor_profile.registration_no if self.doctor_profile else None
+            ),
             "department": (
                 self.doctor_profile.department.name
                 if self.doctor_profile and self.doctor_profile.department

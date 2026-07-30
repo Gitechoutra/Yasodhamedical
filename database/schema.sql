@@ -4,10 +4,10 @@
 -- conversation_messages, prescriptions, reports, notifications) are stubbed
 -- here for reference and will be filled out functionally in later milestones.
 
-CREATE DATABASE IF NOT EXISTS yasodha_ai
+CREATE DATABASE IF NOT EXISTS hospital
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-USE yasodha_ai;
+USE hospital;
 
 -- ---------------------------------------------------------------------
 -- Roles

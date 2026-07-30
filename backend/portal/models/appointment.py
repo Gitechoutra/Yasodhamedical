@@ -24,17 +24,35 @@ class Appointment(db.Model):
     doctor = db.relationship("Doctor")
     consultation = db.relationship("Consultation")
 
-    def to_dict(self):
+    def to_dict(self, queue_number=None):
+        patient = self.patient
         return {
             "id": self.id,
             "patient_id": self.patient_id,
-            "patient": self.patient.name if self.patient else None,
+            # Flat name kept for existing callers; `patient_detail` carries
+            # what the queue cards render (photo, age, code).
+            "patient": patient.name if patient else None,
+            "patient_detail": (
+                {
+                    "id": patient.id,
+                    "code": patient.code,
+                    "name": patient.name,
+                    "age": patient.age,
+                    "gender": patient.gender,
+                    "photo_url": patient.photo_url,
+                }
+                if patient
+                else None
+            ),
             "department_id": self.department_id,
             "department": self.department.name if self.department else None,
             "doctor": self.doctor.user.name if self.doctor and self.doctor.user else None,
             "consultation_id": self.consultation_id,
             "status": self.status,
             "reason": self.reason,
+            # Position in the waiting queue, assigned by the listing route;
+            # None for an appointment already in consultation.
+            "queue_number": queue_number,
             "created_at": to_utc_iso(self.created_at),
         }
 

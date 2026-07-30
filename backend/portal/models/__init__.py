@@ -10,6 +10,7 @@ from portal.models.consultation_summary import ConsultationSummary
 from portal.models.generated_prescription import GeneratedPrescription
 from portal.models.appointment import Appointment
 from portal.models.report import Report
+from portal.models.notification import Notification
 from portal.models.audit_log import AuditLog
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "GeneratedPrescription",
     "Appointment",
     "Report",
+    "Notification",
     "AuditLog",
 ]
