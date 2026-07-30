@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"/c/Users/ADMIN/Downloads/AI_medical/backend/config\" \\\\ *)",
+      "Bash(pip --version)",
+      "Bash(npm view *)",
+      "Bash(npm run *)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"Vite root: %{http_code}\\\\n\" http://localhost:5173/)",
+      "Bash(curl -s -o /dev/null -w \"Flask health: %{http_code}\\\\n\" http://127.0.0.1:5000/api/health)",
+      "Bash(command -v chromium-cli)",
+      "Bash(find / -iname \"chromium-cli*\" -maxdepth 6 2>/dev/null | head -20 *)",
+      "Read(//c//**)",
+      "Read(//c/Users/ADMIN/AppData/Local/Temp/claude/**)",
+      "Bash(npx --yes playwright --version)",
+      "Bash(npx --yes playwright install chromium)",
+      "Bash(npm init *)",
+      "Bash(node verify.mjs)",
+      "Bash(node verify2.mjs)",
+      "Bash(./venv/Scripts/python.exe -m pip install flask-socketio python-socketio imageio-ffmpeg google-genai --no-cache-dir)",
+      "Bash(./venv/Scripts/python.exe -c \"import flask_socketio, imageio_ffmpeg; from google import genai; print\\('ok'\\)\")",
+      "Bash(./venv/Scripts/python.exe -m pip install torch --index-url https://download.pytorch.org/whl/cpu --no-cache-dir)",
+      "Bash(./venv/Scripts/python.exe -m flask db migrate -m \"consultation conversation summary prescriptions\")",
+      "Bash(./venv/Scripts/python.exe -c \"import torch; print\\('torch', torch.__version__\\)\")",
+      "Bash(./venv/Scripts/python.exe -m pip install openai-whisper --no-cache-dir)",
+      "Bash(./venv/Scripts/python.exe -c ' *)",
+      "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 5000 -State Listen | Select-Object -ExpandProperty OwningProcess\")",
+      "PowerShell(Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue)",
+      "Bash(netstat -ano)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\ADMIN\\Downloads\\AI_medical\\backend"
+    ]
+  }
+}
