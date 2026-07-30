@@ -27,7 +27,8 @@
       "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 5000 -State Listen | Select-Object -ExpandProperty OwningProcess\")",
       "PowerShell(Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue)",
       "PowerShell(Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue)",
-      "Bash(netstat -ano)"
+      "Bash(netstat -ano)",
+      "Bash(./venv/Scripts/flask.exe db *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\ADMIN\\Downloads\\AI_medical\\backend"

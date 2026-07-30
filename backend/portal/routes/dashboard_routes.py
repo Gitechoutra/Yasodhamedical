@@ -4,7 +4,7 @@ from flask import Blueprint
 from flask_jwt_extended import jwt_required
 
 from portal.helpers.auth_helper import get_current_doctor
-from portal.helpers.patient_access import scope_patients
+from portal.helpers.patient_access import patient_scope, scope_patients
 from portal.helpers.response import success
 from portal.models.appointment import Appointment
 from portal.models.consultation import Consultation
@@ -35,9 +35,15 @@ def summary():
 
     if doctor:
         # Explicit columns: the appointments query is joined to Consultation,
-        # so filter_by would bind department_id to the wrong entity.
-        appointments_query = appointments_query.filter(
-            Appointment.department_id == doctor.department_id
+        # so filter_by would bind department_id to the wrong entity. The
+        # patient join + scope has to match list_appointments exactly, or this
+        # count would include patients assigned to another doctor and disagree
+        # with the rows the card links to.
+        appointments_query = appointments_query.join(
+            Patient, Appointment.patient_id == Patient.id
+        ).filter(
+            Appointment.department_id == doctor.department_id,
+            patient_scope(doctor),
         )
         consultations_query = consultations_query.filter(Consultation.doctor_id == doctor.id)
         recent_query = recent_query.filter(Consultation.doctor_id == doctor.id)

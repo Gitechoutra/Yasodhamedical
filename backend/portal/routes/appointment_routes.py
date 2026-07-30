@@ -8,7 +8,7 @@ from portal.helpers.auth_helper import get_current_doctor
 from portal.helpers.broadcast import dashboard_changed
 from portal.helpers.decorators import role_required
 from portal.helpers.notify import department_doctor_user_ids, notify
-from portal.helpers.patient_access import can_access_patient
+from portal.helpers.patient_access import can_access_patient, patient_scope
 from portal.helpers.response import error, success
 from portal.models.appointment import Appointment
 from portal.models.consultation import Consultation
@@ -81,14 +81,11 @@ def list_appointments():
     # Explicit column, not filter_by: the query may already be joined to
     # Consultation, and filter_by would bind to that entity instead.
     if doctor:
-        # A doctor's queue is their own assigned patients (plus anyone not
-        # yet assigned, who is still up for grabs within their department).
+        # A doctor's queue is strictly the patients assigned to them, within
+        # their own department. Same rule as every other patient-facing route.
         query = query.join(Patient, Appointment.patient_id == Patient.id).filter(
             Appointment.department_id == doctor.department_id,
-            db.or_(
-                Patient.assigned_doctor_id == doctor.id,
-                Patient.assigned_doctor_id.is_(None),
-            ),
+            patient_scope(doctor),
         )
     else:
         department_id = request.args.get("department_id", type=int)

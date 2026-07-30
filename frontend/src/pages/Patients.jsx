@@ -6,7 +6,12 @@ import Modal from "../components/Modal";
 import { useAuth } from "../context/AuthContext";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDoctors } from "../services/doctorService";
-import { fetchPatients, createPatient, uploadPatientPhoto } from "../services/patientService";
+import {
+  fetchPatients,
+  createPatient,
+  uploadPatientPhoto,
+  assignPatientDoctor,
+} from "../services/patientService";
 
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024; // must match the backend's limit
 
@@ -202,6 +207,53 @@ function AddPatientModal({ onClose, onCreated, doctors, mustAssign }) {
   );
 }
 
+function AssignDoctorCell({ patient, doctors, onAssigned }) {
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  // Highlighted, because an unassigned patient is invisible to every doctor
+  // until the front desk routes them — it needs to look like an open task.
+  const unassigned = !patient.assigned_doctor;
+
+  async function handleChange(e) {
+    const doctorId = e.target.value;
+    if (!doctorId) return;
+    setSaving(true);
+    setErrorMsg("");
+    try {
+      await assignPatientDoctor(patient.id, doctorId);
+      onAssigned();
+    } catch (err) {
+      setErrorMsg(err.response?.data?.message || "Could not save assignment.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="min-w-[12rem]">
+      <select
+        value={patient.assigned_doctor_id ?? ""}
+        onChange={handleChange}
+        disabled={saving}
+        className={`w-full rounded-lg border px-2 py-1.5 text-xs outline-none transition focus:ring-2 focus:ring-brand-100 disabled:opacity-60 ${
+          unassigned
+            ? "border-amber-300 bg-amber-50 font-semibold text-amber-700"
+            : "border-slate-200 text-slate-700"
+        }`}
+      >
+        <option value="">Unassigned — pick a doctor</option>
+        {doctors.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.name}
+            {d.department ? ` (${d.department})` : ""}
+          </option>
+        ))}
+      </select>
+      {errorMsg && <p className="mt-1 text-[11px] text-red-600">{errorMsg}</p>}
+    </div>
+  );
+}
+
 export default function Patients() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -296,20 +348,11 @@ export default function Patients() {
                   <td className="px-6 py-3 text-slate-500">{p.blood_group || "—"}</td>
                   {mustAssign && (
                     <td className="px-6 py-3 text-slate-500">
-                      {p.assigned_doctor ? (
-                        <span>
-                          {p.assigned_doctor.name}
-                          {p.assigned_doctor.department && (
-                            <span className="block text-xs text-slate-400">
-                              {p.assigned_doctor.department}
-                            </span>
-                          )}
-                        </span>
-                      ) : (
-                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                          Unassigned
-                        </span>
-                      )}
+                      <AssignDoctorCell
+                        patient={p}
+                        doctors={doctors}
+                        onAssigned={() => load(true)}
+                      />
                     </td>
                   )}
                   {canScheduleAppointments && (

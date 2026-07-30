@@ -3,16 +3,15 @@
 One rule, defined once, applied by every route that returns patient data:
 
   * admin / reception (no doctor profile) — the whole hospital
-  * a doctor — patients assigned to them, plus any patient not yet assigned
-    to anyone
+  * a doctor — only the patients assigned to them
 
-The unassigned fallback exists so a patient registered before assignment was
-introduced (or one whose assignment was cleared) is still reachable and can be
-worked on. New registrations always carry an assigned doctor, so in practice a
-doctor only ever sees their own list.
+Assignment happens at registration: the front desk picks the treating doctor
+based on the patient's condition. A patient with no assigned doctor is
+deliberately invisible to every doctor — nobody has been made responsible for
+them yet, so routing them is front-desk work via
+`PATCH /patients/<id>/assignment`.
 """
 
-from portal.extensions import db
 from portal.models.patient import Patient
 
 
@@ -21,10 +20,7 @@ def patient_scope(doctor):
     unrestricted access. Apply to any query joined to Patient."""
     if not doctor:
         return None
-    return db.or_(
-        Patient.assigned_doctor_id == doctor.id,
-        Patient.assigned_doctor_id.is_(None),
-    )
+    return Patient.assigned_doctor_id == doctor.id
 
 
 def scope_patients(query, doctor):
@@ -37,4 +33,4 @@ def can_access_patient(patient, doctor):
     """Whether this caller may see one specific patient."""
     if not doctor:
         return True
-    return patient.assigned_doctor_id in (None, doctor.id)
+    return patient.assigned_doctor_id == doctor.id
