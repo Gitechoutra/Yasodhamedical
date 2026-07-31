@@ -85,6 +85,19 @@ def seed_admin():
         db.session.commit()
 
 
+def seed_receptionist():
+    receptionist_role = Role.query.filter_by(name="receptionist").first()
+    if not User.query.filter_by(email="reception@yasodhahospitals.com").first():
+        receptionist = User(
+            name="Reception Desk",
+            email="reception@yasodhahospitals.com",
+            role_id=receptionist_role.id,
+        )
+        receptionist.set_password("Reception@123")
+        db.session.add(receptionist)
+        db.session.commit()
+
+
 def seed_doctors(departments):
     doctor_role = Role.query.filter_by(name="doctor").first()
     for name, email, password, dept_name, specialization, reg_no in DOCTORS:
@@ -126,11 +139,13 @@ def run():
     seed_roles()
     departments = seed_departments()
     seed_admin()
+    seed_receptionist()
     seed_doctors(departments)
     seed_formulary()
     seed_demo_patients()
     print("Seed complete.")
-    print("  Admin  -> admin@yasodhahospitals.com / Admin@123")
+    print("  Admin        -> admin@yasodhahospitals.com / Admin@123")
+    print("  Receptionist -> reception@yasodhahospitals.com / Reception@123")
     for name, email, password, dept_name, _spec, _reg in DOCTORS:
         print(f"  Doctor -> {email} / {password}  ({dept_name})")
     print(f"  Seeded {len(FORMULARY)} formulary medicines, {len(DEMO_PATIENTS)} demo patients")

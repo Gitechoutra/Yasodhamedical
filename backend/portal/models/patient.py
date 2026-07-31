@@ -1,4 +1,5 @@
 from portal.extensions import db
+from portal.helpers.datetime_helper import to_utc_iso
 
 
 class Patient(db.Model):
@@ -13,6 +14,11 @@ class Patient(db.Model):
     blood_group = db.Column(db.String(5), nullable=True)
     allergies = db.Column(db.Text, nullable=True)
     medical_history = db.Column(db.Text, nullable=True)
+    # OP (out-patient) registration status for this patient's most recent OP:
+    # 'paid' on their very first registration, then 'free' if they register
+    # again within 15 days (follow-up), 'paid' otherwise.
+    op_status = db.Column(db.Enum("free", "paid", name="op_status"), nullable=True)
+    last_registered_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
     updated_at = db.Column(
         db.TIMESTAMP, server_default=db.func.now(), onupdate=db.func.now()
@@ -31,6 +37,8 @@ class Patient(db.Model):
             "blood_group": self.blood_group,
             "allergies": self.allergies,
             "medical_history": self.medical_history,
+            "op_status": self.op_status,
+            "last_registered_at": to_utc_iso(self.last_registered_at),
         }
 
     def __repr__(self):

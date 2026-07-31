@@ -29,6 +29,7 @@ class Appointment(db.Model):
             "id": self.id,
             "patient_id": self.patient_id,
             "patient": self.patient.name if self.patient else None,
+            "patient_op_status": self.patient.op_status if self.patient else None,
             "department_id": self.department_id,
             "department": self.department.name if self.department else None,
             "doctor": self.doctor.user.name if self.doctor and self.doctor.user else None,

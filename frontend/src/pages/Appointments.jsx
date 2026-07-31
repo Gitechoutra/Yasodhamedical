@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { HiOutlinePlus, HiOutlinePlay } from "react-icons/hi2";
 import Modal from "../components/Modal";
+import OpStatusBadge from "../components/OpStatusBadge";
 import { useAuth } from "../context/AuthContext";
 import { fetchAppointments, createAppointment, startAppointment } from "../services/appointmentService";
 import { fetchDepartments } from "../services/departmentService";
@@ -24,7 +25,7 @@ function StatusBadge({ status }) {
   );
 }
 
-function NewAppointmentModal({ patients, departments, preselectedPatientId, onClose, onCreated }) {
+function CreateOpModal({ patients, departments, preselectedPatientId, onClose, onCreated }) {
   const [patientId, setPatientId] = useState(preselectedPatientId || "");
   const [departmentId, setDepartmentId] = useState("");
   const [reason, setReason] = useState("");
@@ -46,14 +47,14 @@ function NewAppointmentModal({ patients, departments, preselectedPatientId, onCl
       });
       onCreated(appointment);
     } catch (err) {
-      setErrorMsg(err.response?.data?.message || "Could not create appointment.");
+      setErrorMsg(err.response?.data?.message || "Could not create OP.");
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <Modal title="New Appointment" onClose={onClose}>
+    <Modal title="Create OP" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">Patient *</label>
@@ -109,7 +110,7 @@ function NewAppointmentModal({ patients, departments, preselectedPatientId, onCl
           disabled={saving}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
-          {saving ? "Creating…" : "Create Appointment"}
+          {saving ? "Creating…" : "Create OP"}
         </button>
       </form>
     </Modal>
@@ -175,7 +176,7 @@ export default function Appointments() {
           <h1 className="text-2xl font-bold text-slate-900">Appointments</h1>
           <p className="mt-1 text-sm text-slate-500">
             {user?.department ? `${user.department} queue` : "All departments"} ·{" "}
-            {appointments.length} appointment{appointments.length === 1 ? "" : "s"}
+            {appointments.length} OP{appointments.length === 1 ? "" : "s"}
           </p>
         </div>
         {canScheduleAppointments && (
@@ -184,7 +185,7 @@ export default function Appointments() {
             className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
           >
             <HiOutlinePlus className="h-4 w-4" />
-            New Appointment
+            Create OP
           </button>
         )}
       </div>
@@ -207,6 +208,7 @@ export default function Appointments() {
                 <th className="px-6 py-3 font-medium">Patient</th>
                 <th className="px-6 py-3 font-medium">Department</th>
                 <th className="px-6 py-3 font-medium">Reason</th>
+                <th className="px-6 py-3 font-medium">OP Status</th>
                 <th className="px-6 py-3 font-medium">Doctor</th>
                 <th className="px-6 py-3 font-medium">Status</th>
                 <th className="px-6 py-3 font-medium"></th>
@@ -218,6 +220,9 @@ export default function Appointments() {
                   <td className="px-6 py-3 font-medium text-slate-800">{a.patient}</td>
                   <td className="px-6 py-3 text-slate-500">{a.department}</td>
                   <td className="px-6 py-3 text-slate-500">{a.reason || "—"}</td>
+                  <td className="px-6 py-3">
+                    <OpStatusBadge status={a.patient_op_status} />
+                  </td>
                   <td className="px-6 py-3 text-slate-500">{a.doctor || "—"}</td>
                   <td className="px-6 py-3">
                     <StatusBadge status={a.status} />
@@ -250,7 +255,7 @@ export default function Appointments() {
       </div>
 
       {showModal && canScheduleAppointments && (
-        <NewAppointmentModal
+        <CreateOpModal
           patients={patients}
           departments={departments}
           preselectedPatientId={searchParams.get("patient_id")}

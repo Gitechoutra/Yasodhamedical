@@ -1,3 +1,5 @@
+import OpStatusBadge from "./OpStatusBadge";
+
 function Field({ label, value }) {
   return (
     <div>
@@ -30,6 +32,12 @@ export default function PatientInfoPanel({ patient }) {
           </p>
         </div>
       </div>
+
+      {patient.op_status && (
+        <div className="mt-3">
+          <OpStatusBadge status={patient.op_status} />
+        </div>
+      )}
 
       <div className="mt-5 space-y-4">
         <Field label="Phone" value={patient.phone} />

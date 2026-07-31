@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HiOutlinePlus, HiOutlineCalendarDays } from "react-icons/hi2";
 import Modal from "../components/Modal";
+import OpStatusBadge from "../components/OpStatusBadge";
 import { useAuth } from "../context/AuthContext";
 import { fetchPatients, createPatient } from "../services/patientService";
 
@@ -153,6 +154,7 @@ export default function Patients() {
                 <th className="px-6 py-3 font-medium">Gender</th>
                 <th className="px-6 py-3 font-medium">Phone</th>
                 <th className="px-6 py-3 font-medium">Blood Group</th>
+                <th className="px-6 py-3 font-medium">OP Status</th>
                 {canScheduleAppointments && <th className="px-6 py-3 font-medium"></th>}
               </tr>
             </thead>
@@ -163,6 +165,9 @@ export default function Patients() {
                   <td className="px-6 py-3 capitalize text-slate-500">{p.gender || "—"}</td>
                   <td className="px-6 py-3 text-slate-500">{p.phone || "—"}</td>
                   <td className="px-6 py-3 text-slate-500">{p.blood_group || "—"}</td>
+                  <td className="px-6 py-3">
+                    <OpStatusBadge status={p.op_status} />
+                  </td>
                   {canScheduleAppointments && (
                     <td className="px-6 py-3 text-right">
                       <button
@@ -170,7 +175,7 @@ export default function Patients() {
                         className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100"
                       >
                         <HiOutlineCalendarDays className="h-3.5 w-3.5" />
-                        New Appointment
+                        Create OP
                       </button>
                     </td>
                   )}
