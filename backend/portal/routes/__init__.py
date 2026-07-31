@@ -7,6 +7,7 @@ from portal.routes.appointment_routes import appointment_bp
 from portal.routes.doctor_routes import doctor_bp
 from portal.routes.report_routes import report_bp
 from portal.routes.notification_routes import notification_bp
+from portal.routes.nursing_routes import nursing_bp
 
 
 def register_routes(app):
@@ -19,3 +20,4 @@ def register_routes(app):
     app.register_blueprint(doctor_bp, url_prefix="/api/doctors")
     app.register_blueprint(report_bp, url_prefix="/api/reports")
     app.register_blueprint(notification_bp, url_prefix="/api/notifications")
+    app.register_blueprint(nursing_bp, url_prefix="/api/nursing")

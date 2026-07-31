@@ -5,6 +5,7 @@ import {
   HiOutlineCalendarDays,
   HiOutlineChatBubbleLeftRight,
   HiOutlineClipboardDocumentList,
+  HiOutlineHeart,
   HiOutlineDocumentChartBar,
   HiOutlineBeaker,
   HiOutlineUserGroup,
@@ -26,6 +27,14 @@ const NAV_ITEMS = [
   { to: "/dashboard/patients", label: "Patients", icon: HiOutlineUsers },
   { to: "/dashboard/appointments", label: "Appointments", icon: HiOutlineCalendarDays },
   { to: "/dashboard/consultations", label: "Consultations", icon: HiOutlineChatBubbleLeftRight },
+  // Where a doctor watches the patients they've handed to a nurse. Hidden
+  // from reception: assigning and reviewing nursing care is clinical work.
+  {
+    to: "/dashboard/nursing",
+    label: "Nursing Care",
+    icon: HiOutlineHeart,
+    hideFrom: ["receptionist"],
+  },
   { to: "/dashboard/prescriptions", label: "Prescriptions", icon: HiOutlineClipboardDocumentList },
   { to: "/dashboard/reports", label: "Reports", icon: HiOutlineDocumentChartBar },
   { to: "/dashboard/medicines", label: "Medicines", icon: HiOutlineBeaker },

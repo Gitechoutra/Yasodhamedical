@@ -1,3 +1,16 @@
+"""
+portal/__init__.py
+==================
+Application factory.
+
+`InitApp().app()` builds the Flask app: config, extensions, models, routes,
+websocket handlers and error handlers, in that order. `create_app()` is the
+public alias, and it is what `app.py`, `portal/seeds.py` and the Flask CLI
+import -- keep it exported.
+"""
+
+import os
+
 from flask import Flask
 
 from config.config import get_config
@@ -5,40 +18,111 @@ from portal.extensions import cors, db, jwt, migrate, socketio
 from portal.helpers.response import error
 from portal.logger import configure_logger
 
+# The most recently built app. Handy from a shell (`from portal import APP`),
+# but deliberately not used as a cache: see InitApp.app for why.
+APP = None
 
-def create_app():
-    app = Flask(__name__)
-    app.config.from_object(get_config())
 
-    db.init_app(app)
-    migrate.init_app(app, db)
-    jwt.init_app(app)
+def init_cors(app):
+    """Browser access is limited to the origins in CORS_ORIGINS, and only for
+    /api/*. The uploads and socket routes are same-origin or token-free by
+    design and don't need the header."""
     cors.init_app(app, resources={r"/api/*": {"origins": app.config["CORS_ORIGINS"]}})
-    socketio.init_app(app, cors_allowed_origins=app.config["CORS_ORIGINS"], async_mode="threading")
+    app.logger.info("Initialized CORS for %s", app.config["CORS_ORIGINS"])
 
-    configure_logger(app)
 
-    # Import models so Flask-Migrate can see them via db.metadata.
-    from portal import models  # noqa: F401
+class InitApp:
+    def app(self, config_name=None):
+        """Builds and returns a fully wired Flask app.
 
-    from portal.routes import register_routes
+        A fresh app every call, rather than caching one in the module-level
+        APP: caching would pin the first config chosen for the process, which
+        would make TestingConfig unusable from a test suite that also imports
+        the app normally. Building is cheap; a wrong-config app is not.
+        """
+        global APP
 
-    register_routes(app)
+        app = Flask(__name__)
+        app.config.from_object(get_config(config_name))
 
-    # Registers Socket.IO event handlers (join_consultation, etc.) on `socketio`.
-    from portal.websocket import consultation_socket  # noqa: F401
+        # -- Logging -------------------------------------------------------
+        # Rotating file handler in logs/portal.log. Attached before anything
+        # else so a failure during wiring below is actually recorded.
+        configure_logger(app)
+        app.logger.info(
+            "Initializing portal -- environment: %s, debug: %s",
+            app.config["ENV_NAME"],
+            app.config["DEBUG"],
+        )
 
-    @app.errorhandler(404)
-    def not_found(_e):
-        return error("Resource not found", status=404)
+        # -- Extensions ----------------------------------------------------
+        db.init_app(app)
+        migrate.init_app(app, db)
+        jwt.init_app(app)
+        init_cors(app)
+        socketio.init_app(
+            app,
+            cors_allowed_origins=app.config["CORS_ORIGINS"],
+            async_mode="threading",
+        )
 
-    @app.errorhandler(500)
-    def server_error(e):
-        app.logger.exception(e)
-        return error("Internal server error", status=500)
+        # -- File storage --------------------------------------------------
+        # Created up front so the first avatar upload isn't the thing that
+        # discovers the directory is missing or unwritable.
+        os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
-    @app.get("/api/health")
-    def health():
-        return {"status": "ok"}
+        try:
+            # Imported for the side effect of registering models on
+            # db.metadata, which is what Flask-Migrate autogenerates from.
+            from portal import models  # noqa: F401
 
-    return app
+            from portal.routes import register_routes
+
+            register_routes(app)
+
+            # Registers Socket.IO event handlers (join_consultation, etc.)
+            # on the shared `socketio` instance.
+            from portal.websocket import consultation_socket  # noqa: F401
+
+        except Exception as exc:
+            app.logger.exception("Failed to initialize app components: %s", exc)
+            raise
+
+        self._register_error_handlers(app)
+        self._register_health(app)
+
+        app.logger.info("Portal initialization completed successfully")
+
+        APP = app
+        return app
+
+    @staticmethod
+    def _register_error_handlers(app):
+        """Every error leaves as the same JSON envelope the routes use, so a
+        404 on a bad URL doesn't hand the frontend an HTML page it can't
+        parse."""
+
+        @app.errorhandler(404)
+        def not_found(_e):
+            return error("Resource not found", status=404)
+
+        @app.errorhandler(413)
+        def payload_too_large(_e):
+            return error("That upload is too large", status=413)
+
+        @app.errorhandler(500)
+        def server_error(e):
+            app.logger.exception(e)
+            return error("Internal server error", status=500)
+
+    @staticmethod
+    def _register_health(app):
+        @app.get("/api/health")
+        def health():
+            return {"status": "ok", "environment": app.config["ENV_NAME"]}
+
+
+def create_app(config_name=None):
+    """Public entry point. `app.py`, `portal/seeds.py` and the Flask CLI all
+    import this name."""
+    return InitApp().app(config_name)

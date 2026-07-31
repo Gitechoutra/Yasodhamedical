@@ -15,6 +15,9 @@ function Field({ label, value }) {
 
 export default function Settings() {
   const { user } = useAuth();
+  // This page is entirely account-level, so it serves the nursing module too —
+  // only the cross-link has to know which shell it's rendered inside.
+  const home = user?.role === "nurse" ? "/nurse" : "/dashboard";
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -59,7 +62,7 @@ export default function Settings() {
         <div className="flex items-start justify-between gap-4">
           <h2 className="text-sm font-semibold text-slate-900">Account</h2>
           <Link
-            to="/dashboard/profile"
+            to={`${home}/profile`}
             className="text-xs font-semibold text-brand-600 transition hover:text-brand-700"
           >
             Edit profile →

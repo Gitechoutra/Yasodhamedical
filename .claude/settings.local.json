@@ -28,7 +28,23 @@
       "PowerShell(Get-NetTCPConnection -LocalPort 5000 -State Listen -ErrorAction SilentlyContinue)",
       "PowerShell(Get-NetTCPConnection -LocalPort 5000 -ErrorAction SilentlyContinue)",
       "Bash(netstat -ano)",
-      "Bash(./venv/Scripts/flask.exe db *)"
+      "Bash(./venv/Scripts/flask.exe db *)",
+      "Bash(git mv *)",
+      "PowerShell($pids = @\\(\\); foreach \\($port in 5000, 5173\\) { $c = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { $pids += $c.OwningProcess } }; $pids = $pids | Select-Object -Unique; Write-Output \"stopping: $\\($pids -join ','\\)\"; foreach \\($p in $pids\\) { try { Stop-Process -Id $p -Force -ErrorAction Stop; Write-Output \"stopped $p\" } catch { Write-Output \"could not stop $p\" } }; Start-Sleep -Milliseconds 1500; foreach \\($port in 5000, 5173\\) { $c = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if \\($c\\) { Write-Output \"port $port STILL listening \\(pid $\\($c.OwningProcess\\)\\)\" } else { Write-Output \"port $port free\" } })",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='node.exe'\" | Select-Object ProcessId, Name, @{n='cmd';e={$_.CommandLine}} | Format-Table -AutoSize -Wrap)",
+      "PowerShell(foreach \\($p in 7680, 14544\\) { try { Stop-Process -Id $p -Force -ErrorAction Stop; Write-Output \"stopped $p\" } catch { Write-Output \"already gone: $p\" } }; Start-Sleep -Milliseconds 1500; $r = Get-CimInstance Win32_Process -Filter \"Name='python.exe' OR Name='node.exe'\" | Select-Object ProcessId, @{n='cmd';e={$_.CommandLine}}; if \\($r\\) { Write-Output \"remaining:\"; $r | Format-Table -AutoSize } else { Write-Output \"no python/node processes remain\" })",
+      "PowerShell(Set-Location \"C:\\\\Users\\\\Mahesh\\\\OneDrive\\\\Desktop\\\\Medical\"; try { Rename-Item -Path \"backend\" -NewName \"yasodha\" -ErrorAction Stop; Write-Output \"renamed backend OK\" } catch { Write-Output \"ERROR: $\\($_.Exception.GetType\\(\\).Name\\)\"; Write-Output $_.Exception.Message })",
+      "PowerShell(Set-Location \"C:\\\\Users\\\\Mahesh\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-Mahesh-OneDrive-Desktop-Medical\\\\2088147a-9513-49ae-b031-eb52b3187bfe\\\\scratchpad\"; Write-Output \"pwsh cwd: $\\(\\(Get-Location\\).Path\\)\"; try { Rename-Item -Path \"C:\\\\Users\\\\Mahesh\\\\OneDrive\\\\Desktop\\\\Medical\\\\backend\" -NewName \"yasodha\" -ErrorAction Stop; Write-Output \"renamed backend -> yasodha\" } catch { Write-Output \"STILL LOCKED: $\\($_.Exception.Message\\)\" })",
+      "PowerShell($base = \"C:\\\\Users\\\\Mahesh\\\\OneDrive\\\\Desktop\\\\Medical\"; foreach \\($n in \"frontend\",\"documentation\",\"database\"\\) { $p = Join-Path $base $n; try { Rename-Item -Path $p -NewName \"$n-locktest\" -ErrorAction Stop; Rename-Item -Path \\(Join-Path $base \"$n-locktest\"\\) -NewName $n -ErrorAction Stop; Write-Output \"$n : renameable\" } catch { Write-Output \"$n : LOCKED\" } })",
+      "Bash(PYTHONPATH=\"c:/Users/Mahesh/OneDrive/Desktop/Medical/backend\" venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/15a2830e-da66-47e0-892e-bec278d4d562/scratchpad/inspect_db.py\")",
+      "Bash(venv/Scripts/python.exe -c \"import sqlalchemy, flask, sys; print\\('sqlalchemy', sqlalchemy.__version__\\); print\\('flask', flask.__version__\\); print\\(sys.version\\)\")",
+      "Bash(PYTHONPATH=c:/Users/Mahesh/OneDrive/Desktop/Medical/backend venv/Scripts/python.exe -c ' *)",
+      "Bash(PYTHONPATH=\"c:/Users/Mahesh/OneDrive/Desktop/Medical/backend\" venv/Scripts/python.exe -m flask db migrate -m \"nursing module\")",
+      "Bash(PYTHONPATH=\"c:/Users/Mahesh/OneDrive/Desktop/Medical/backend\" venv/Scripts/python.exe -m flask db upgrade)",
+      "Bash(PYTHONPATH=\"c:/Users/Mahesh/OneDrive/Desktop/Medical/backend\" venv/Scripts/python.exe -m portal.seeds)",
+      "Bash(PYTHONPATH=\"c:/Users/Mahesh/OneDrive/Desktop/Medical/backend\" venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/15a2830e-da66-47e0-892e-bec278d4d562/scratchpad/cleanup_db.py\")",
+      "Bash(venv/Scripts/python.exe -c \"import requests; print\\(requests.__version__\\)\")",
+      "Bash(venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/15a2830e-da66-47e0-892e-bec278d4d562/scratchpad/test_nursing.py\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\ADMIN\\Downloads\\AI_medical\\backend"

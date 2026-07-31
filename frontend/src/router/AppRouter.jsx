@@ -9,11 +9,19 @@ import ConsultationRoom from "../pages/ConsultationRoom";
 import Doctors from "../pages/Doctors";
 import Departments from "../pages/Departments";
 import DepartmentDetail from "../pages/DepartmentDetail";
+import NursingMonitor from "../pages/NursingMonitor";
+import NursingRecord from "../pages/NursingRecord";
 import Reports from "../pages/Reports";
 import Settings from "../pages/Settings";
 import Profile from "../pages/Profile";
 import ComingSoon from "../pages/ComingSoon";
+import NurseLogin from "../pages/nurse/NurseLogin";
+import NurseDashboard from "../pages/nurse/NurseDashboard";
+import NursePatients from "../pages/nurse/NursePatients";
+import NursePatientRecord from "../pages/nurse/NursePatientRecord";
+import NurseAlerts from "../pages/nurse/NurseAlerts";
 import DashboardLayout from "../layouts/DashboardLayout";
+import NurseLayout from "../layouts/NurseLayout";
 import ProtectedRoute from "../components/ProtectedRoute";
 import RoleRoute from "../components/RoleRoute";
 
@@ -32,6 +40,19 @@ export default function AppRouter() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/nurse/login" element={<NurseLogin />} />
+
+        {/* The nursing module is its own tree, not a branch of /dashboard:
+            a nurse's whole job is the assignments handed to them, and none of
+            the doctor/admin screens apply. NurseLayout guards the role. */}
+        <Route path="/nurse" element={<NurseLayout />}>
+          <Route index element={<NurseDashboard />} />
+          <Route path="patients" element={<NursePatients />} />
+          <Route path="patients/:id" element={<NursePatientRecord />} />
+          <Route path="alerts" element={<NurseAlerts />} />
+          <Route path="profile" element={<Profile />} />
+          <Route path="settings" element={<Settings />} />
+        </Route>
 
         <Route element={<ProtectedRoute />}>
           <Route path="/dashboard" element={<DashboardLayout />}>
@@ -40,6 +61,12 @@ export default function AppRouter() {
             <Route path="appointments" element={<Appointments />} />
             <Route path="consultations" element={<Consultations />} />
             <Route path="consultations/:id" element={<ConsultationRoom />} />
+            <Route path="nursing" element={<NursingMonitor />} />
+            <Route
+              path="nursing/alerts"
+              element={<NurseAlerts basePath="/dashboard/nursing" title="Nursing alerts" />}
+            />
+            <Route path="nursing/:id" element={<NursingRecord />} />
             <Route path="reports" element={<Reports />} />
             <Route path="settings" element={<Settings />} />
             <Route path="profile" element={<Profile />} />

@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { HiOutlinePlus, HiOutlineCalendarDays, HiOutlineCamera } from "react-icons/hi2";
+import {
+  HiOutlinePlus,
+  HiOutlineCalendarDays,
+  HiOutlineCamera,
+  HiOutlineHeart,
+} from "react-icons/hi2";
 import Avatar from "../components/Avatar";
 import Modal from "../components/Modal";
+import AssignNurseModal from "../components/nursing/AssignNurseModal";
 import { useAuth } from "../context/AuthContext";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDoctors } from "../services/doctorService";
@@ -263,11 +269,15 @@ export default function Patients() {
   // Front desk picks the treating doctor; a doctor registering a patient is
   // implicitly assigning them to themselves, so no picker is needed.
   const mustAssign = user?.role !== "doctor";
+  // Handing a patient to a nurse is the treating doctor's call — the server
+  // rejects it from anyone else.
+  const canAssignNurse = user?.role === "doctor";
 
   const [patients, setPatients] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [nursePatient, setNursePatient] = useState(null);
 
   const load = useCallback((silent = false) => {
     if (!silent) setLoading(true);
@@ -325,7 +335,9 @@ export default function Patients() {
                 <th className="px-6 py-3 font-medium">Phone</th>
                 <th className="px-6 py-3 font-medium">Blood Group</th>
                 {mustAssign && <th className="px-6 py-3 font-medium">Assigned Doctor</th>}
-                {canScheduleAppointments && <th className="px-6 py-3 font-medium"></th>}
+                {(canScheduleAppointments || canAssignNurse) && (
+                  <th className="px-6 py-3 font-medium"></th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -355,15 +367,26 @@ export default function Patients() {
                       />
                     </td>
                   )}
-                  {canScheduleAppointments && (
+                  {(canScheduleAppointments || canAssignNurse) && (
                     <td className="px-6 py-3 text-right">
-                      <button
-                        onClick={() => navigate(`/dashboard/appointments?patient_id=${p.id}`)}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100"
-                      >
-                        <HiOutlineCalendarDays className="h-3.5 w-3.5" />
-                        New Appointment
-                      </button>
+                      {canScheduleAppointments && (
+                        <button
+                          onClick={() => navigate(`/dashboard/appointments?patient_id=${p.id}`)}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100"
+                        >
+                          <HiOutlineCalendarDays className="h-3.5 w-3.5" />
+                          New Appointment
+                        </button>
+                      )}
+                      {canAssignNurse && (
+                        <button
+                          onClick={() => setNursePatient(p)}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-700 transition hover:bg-teal-100"
+                        >
+                          <HiOutlineHeart className="h-3.5 w-3.5" />
+                          Assign Nurse
+                        </button>
+                      )}
                     </td>
                   )}
                 </tr>
@@ -381,6 +404,18 @@ export default function Patients() {
           onCreated={() => {
             setShowAddModal(false);
             load();
+          }}
+        />
+      )}
+
+      {nursePatient && (
+        <AssignNurseModal
+          patientId={nursePatient.id}
+          patientName={nursePatient.name}
+          onClose={() => setNursePatient(null)}
+          onAssigned={(assignment) => {
+            setNursePatient(null);
+            navigate(`/dashboard/nursing/${assignment.id}`);
           }}
         />
       )}

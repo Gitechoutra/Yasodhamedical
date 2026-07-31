@@ -24,3 +24,17 @@ export function onDashboardChanged(handler) {
   s.on("dashboard_changed", handler);
   return () => s.off("dashboard_changed", handler);
 }
+
+/**
+ * Subscribes to nursing activity — a dose logged, vitals taken, a note or an
+ * alert. Kept separate from the dashboard ping because these fire far more
+ * often, and only the nursing screens care.
+ *
+ * The handler receives `{ reason, assignment_id }`, so a detail page can
+ * ignore changes to a patient it isn't showing.
+ */
+export function onNursingChanged(handler) {
+  const s = getSocket();
+  s.on("nursing_changed", handler);
+  return () => s.off("nursing_changed", handler);
+}

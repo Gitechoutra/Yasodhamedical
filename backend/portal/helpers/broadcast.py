@@ -13,16 +13,31 @@ the reason it fired.
 from portal.extensions import socketio
 
 DASHBOARD_EVENT = "dashboard_changed"
+NURSING_EVENT = "nursing_changed"
+
+
+def _emit(event, payload):
+    """Never lets a broadcast failure break the request that triggered it —
+    the real work is already committed, and a missed ping only costs the
+    client its next poll."""
+    try:
+        socketio.emit(event, payload)
+    except Exception:  # noqa: BLE001 - a dropped notification must not 500 the caller
+        pass
 
 
 def dashboard_changed(reason):
-    """Tells connected clients their dashboard counts may be stale.
+    """Tells connected clients their dashboard counts may be stale."""
+    _emit(DASHBOARD_EVENT, {"reason": reason})
 
-    Never lets a broadcast failure break the request that triggered it — the
-    real work is already committed, and a missed ping only costs the client
-    its next poll.
+
+def nursing_changed(reason, assignment_id=None):
+    """Tells the nurse dashboard and the doctor's nursing monitor that a
+    medication log, observation, note or alert has moved.
+
+    Carries the assignment id so an open detail page can refetch only when the
+    change was actually about the patient on screen. Kept separate from
+    `dashboard_changed` because these fire far more often — a nurse logging
+    doses all shift shouldn't make every doctor's summary cards refetch.
     """
-    try:
-        socketio.emit(DASHBOARD_EVENT, {"reason": reason})
-    except Exception:  # noqa: BLE001 - a dropped notification must not 500 the caller
-        pass
+    _emit(NURSING_EVENT, {"reason": reason, "assignment_id": assignment_id})

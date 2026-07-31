@@ -5,6 +5,7 @@ import {
   HiOutlineCalendarDays,
   HiOutlineChatBubbleLeftRight,
   HiOutlineDocumentChartBar,
+  HiOutlineHeart,
   HiOutlineInformationCircle,
 } from "react-icons/hi2";
 import useDismissable from "../hooks/useDismissable";
@@ -22,6 +23,7 @@ const CATEGORY_ICONS = {
   appointment: HiOutlineCalendarDays,
   consultation: HiOutlineChatBubbleLeftRight,
   report: HiOutlineDocumentChartBar,
+  nursing: HiOutlineHeart,
   system: HiOutlineInformationCircle,
 };
 
