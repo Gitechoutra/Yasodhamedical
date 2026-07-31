@@ -9,16 +9,27 @@ why these images are served without a JWT.
 import os
 import secrets
 
+from flask import current_app, has_app_context
+
 ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MB
 
+# Where uploads land when there's no app to ask -- a script or a shell. The
+# configured UPLOAD_FOLDER defaults to this same path, so the two only differ
+# once a deployment deliberately points storage somewhere else.
 UPLOADS_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "uploads")
 )
 
 
+def uploads_root():
+    if has_app_context():
+        return current_app.config.get("UPLOAD_FOLDER", UPLOADS_ROOT)
+    return UPLOADS_ROOT
+
+
 def upload_dir(subdir):
-    return os.path.join(UPLOADS_ROOT, subdir)
+    return os.path.join(uploads_root(), subdir)
 
 
 class ImageUploadError(Exception):

@@ -25,6 +25,9 @@ class User(db.Model):
     doctor_profile = db.relationship(
         "Doctor", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
+    nurse_profile = db.relationship(
+        "Nurse", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
 
     def set_password(self, raw_password):
         self.password_hash = generate_password_hash(raw_password)
@@ -38,6 +41,10 @@ class User(db.Model):
         return f"/api/auth/avatar/{self.avatar_path}" if self.avatar_path else None
 
     def to_dict(self):
+        # Doctors and nurses both sit in a department; whichever profile this
+        # user has is where the department comes from, so one shape serves
+        # every role instead of the frontend branching on it.
+        profile = self.doctor_profile or self.nurse_profile
         return {
             "id": self.id,
             "name": self.name,
@@ -52,13 +59,15 @@ class User(db.Model):
                 self.doctor_profile.registration_no if self.doctor_profile else None
             ),
             "department": (
-                self.doctor_profile.department.name
-                if self.doctor_profile and self.doctor_profile.department
-                else None
+                profile.department.name if profile and profile.department else None
             ),
-            "department_id": (
-                self.doctor_profile.department_id if self.doctor_profile else None
+            "department_id": profile.department_id if profile else None,
+            # Nurse-only, null for everyone else — the nurse profile page reads
+            # these the same way the doctor page reads specialization.
+            "employee_no": (
+                self.nurse_profile.employee_no if self.nurse_profile else None
             ),
+            "shift": self.nurse_profile.shift if self.nurse_profile else None,
         }
 
     def __repr__(self):

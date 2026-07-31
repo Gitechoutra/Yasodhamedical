@@ -1,11 +1,11 @@
 import { useEffect } from "react";
-import { Outlet } from "react-router-dom";
+import { Navigate, Outlet } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
 import Topbar from "../components/Topbar";
 import { useAuth } from "../context/AuthContext";
 
 export default function DashboardLayout() {
-  const { refreshUser } = useAuth();
+  const { user, refreshUser } = useAuth();
 
   // The cached user in localStorage is whatever the last login returned, so a
   // session that predates a profile edit (or a new field like avatar_url)
@@ -15,6 +15,12 @@ export default function DashboardLayout() {
     refreshUser().catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // A nurse belongs in the nursing module — every screen here is scoped to a
+  // doctor's or admin's work and would come back empty for them.
+  if (user?.role === "nurse") {
+    return <Navigate to="/nurse" replace />;
+  }
 
   return (
     <div className="flex h-screen bg-slate-50">

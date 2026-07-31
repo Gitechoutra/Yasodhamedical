@@ -1,0 +1,1302 @@
+"""The nursing module's API.
+
+Everything here hangs off a `NursingAssignment` — the doctor's hand-off of a
+patient to a nurse for the observation period. Reads are scoped by
+`nursing_access`; writes are split deliberately:
+
+  * the **doctor** owns the plan — who is assigned, the care instructions,
+    which medications are ordered, and when the watch ends
+  * the **nurse** owns the record — doses given, vitals taken, notes written,
+    alerts raised
+
+Neither side can edit the other's half, which is what makes the log an audit
+trail rather than a shared scratchpad.
+"""
+
+from datetime import datetime, timedelta, timezone
+
+from flask import Blueprint, request
+from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
+
+from portal.extensions import db
+from portal.helpers.auth_helper import get_current_doctor, get_current_nurse
+from portal.helpers.broadcast import dashboard_changed, nursing_changed
+from portal.helpers.datetime_helper import to_utc_iso
+from portal.helpers.decorators import role_required
+from portal.helpers.notify import notify
+from portal.helpers.nursing_access import (
+    can_record_on,
+    can_view_assignment,
+    scope_assignments,
+)
+from portal.helpers.patient_access import can_access_patient
+from portal.helpers.response import error, success
+from portal.models.clinical_alert import (
+    ALERT_STATUSES,
+    CATEGORIES as ALERT_CATEGORIES,
+    SEVERITIES,
+    ClinicalAlert,
+)
+from portal.models.consultation import Consultation
+from portal.models.department import Department
+from portal.models.medication_order import (
+    ADMIN_STATUSES,
+    ROUTES,
+    MedicationAdministration,
+    MedicationOrder,
+)
+from portal.models.medicine import Medicine
+from portal.models.nurse import Nurse
+from portal.models.nurse import SHIFTS as NURSE_SHIFTS
+from portal.models.nursing_assignment import (
+    ASSIGNMENT_STATUSES,
+    CARE_TYPES,
+    NursingAssignment,
+)
+from portal.models.nursing_note import NOTE_TYPES, SHIFTS, NursingNote
+from portal.models.patient import Patient
+from portal.models.patient_observation import PatientObservation
+from portal.models.role import Role
+from portal.models.user import User
+
+nursing_bp = Blueprint("nursing", __name__)
+
+# Default length of an observation window when the doctor doesn't set an end
+# date. Most post-procedure watches run two to three days.
+DEFAULT_OBSERVATION_DAYS = 3
+MAX_OBSERVATION_DAYS = 90
+
+MAX_TEXT = 5000
+TIMELINE_LIMIT = 300
+
+
+# --------------------------------------------------------------------------
+# parsing helpers
+# --------------------------------------------------------------------------
+
+
+def _parse_dt(raw, field):
+    """Parses an ISO timestamp into the naive-UTC form the rest of the schema
+    uses. Returns (datetime, error_message); both None means it was absent."""
+    if raw in (None, ""):
+        return None, None
+    if not isinstance(raw, str):
+        return None, f"{field} must be an ISO timestamp"
+    try:
+        # The browser sends "…Z", which older Pythons won't parse; normalising
+        # it first keeps this working regardless of interpreter version.
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None, f"{field} must be an ISO timestamp"
+    # Everything downstream stores naive UTC, so an offset-aware value is
+    # converted rather than stored as-is with its offset silently dropped.
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed, None
+
+
+def _text(payload, field, limit=MAX_TEXT):
+    value = payload.get(field)
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value[:limit] or None
+
+
+def _int(payload, field, low=None, high=None):
+    """Returns (value, error). Missing/blank reads as None, not zero."""
+    raw = payload.get(field)
+    if raw in (None, ""):
+        return None, None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None, f"{field} must be a whole number"
+    if low is not None and value < low:
+        return None, f"{field} must be at least {low}"
+    if high is not None and value > high:
+        return None, f"{field} must be at most {high}"
+    return value, None
+
+
+def _float(payload, field, low=None, high=None):
+    raw = payload.get(field)
+    if raw in (None, ""):
+        return None, None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None, f"{field} must be a number"
+    if low is not None and value < low:
+        return None, f"{field} must be at least {low}"
+    if high is not None and value > high:
+        return None, f"{field} must be at most {high}"
+    return value, None
+
+
+def _is_admin():
+    return get_jwt().get("role") == "admin"
+
+
+def _load_assignment(assignment_id):
+    """Returns (assignment, error_response). 404s rather than 403s on someone
+    else's assignment, for the same reason patient lookups do."""
+    assignment = NursingAssignment.query.get(assignment_id)
+    if not assignment or not can_view_assignment(assignment):
+        return None, error("Assignment not found", status=404)
+    return assignment, None
+
+
+# --------------------------------------------------------------------------
+# nurses directory
+# --------------------------------------------------------------------------
+
+
+@nursing_bp.get("/nurses")
+@role_required("admin", "doctor")
+def list_nurses():
+    """The picker a doctor chooses from when handing a patient over."""
+    query = Nurse.query.join(Nurse.user).order_by(Nurse.department_id)
+
+    department_id = request.args.get("department_id", type=int)
+    if department_id:
+        query = query.filter(Nurse.department_id == department_id)
+
+    nurses = query.all()
+
+    # How much each nurse is already carrying, so the doctor isn't picking
+    # blind — the whole point of a picker is to spread the load.
+    load = dict(
+        db.session.query(NursingAssignment.nurse_id, db.func.count(NursingAssignment.id))
+        .filter(NursingAssignment.status == "active")
+        .group_by(NursingAssignment.nurse_id)
+        .all()
+    )
+
+    return success(
+        [{**n.to_dict(), "active_assignments": load.get(n.id, 0)} for n in nurses]
+    )
+
+
+@nursing_bp.post("/nurses")
+@role_required("admin")
+def create_nurse():
+    """Creates a nurse login plus their ward profile, same shape as
+    `POST /doctors` — staff accounts stay an admin action."""
+    payload = request.get_json(silent=True) or {}
+    name = (payload.get("name") or "").strip()
+    email = (payload.get("email") or "").strip().lower()
+    password = payload.get("password") or ""
+    department_id = payload.get("department_id")
+
+    if not name or not email or not password:
+        return error("name, email and password are required", status=422)
+    if len(password) < 6:
+        return error("Password must be at least 6 characters", status=422)
+    if User.query.filter_by(email=email).first():
+        return error("A user with this email already exists", status=409)
+    if department_id and not Department.query.get(department_id):
+        return error("Department not found", status=404)
+
+    shift = payload.get("shift") or None
+    if shift and shift not in NURSE_SHIFTS:
+        return error(f"shift must be one of: {', '.join(NURSE_SHIFTS)}", status=422)
+
+    nurse_role = Role.query.filter_by(name="nurse").first()
+    if not nurse_role:
+        return error("The nurse role is missing — run the seeder first", status=500)
+
+    user = User(name=name, email=email, role_id=nurse_role.id)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.flush()  # assigns user.id before the Nurse row references it
+
+    nurse = Nurse(
+        user_id=user.id,
+        department_id=department_id or None,
+        employee_no=(payload.get("employee_no") or "").strip()[:50] or None,
+        shift=shift,
+    )
+    db.session.add(nurse)
+    db.session.commit()
+
+    return success(nurse.to_dict(), message="Nurse created", status=201)
+
+
+# --------------------------------------------------------------------------
+# assignments
+# --------------------------------------------------------------------------
+
+
+@nursing_bp.get("/assignments")
+@jwt_required()
+def list_assignments():
+    """The nurse's ward list, and the doctor's monitor, from one query — the
+    scope is what differs, not the shape."""
+    query = scope_assignments(NursingAssignment.query)
+
+    status = request.args.get("status", "active")
+    if status != "all":
+        if status not in ASSIGNMENT_STATUSES:
+            allowed = ", ".join(ASSIGNMENT_STATUSES)
+            return error(f"status must be one of: {allowed}, all", status=422)
+        query = query.filter(NursingAssignment.status == status)
+
+    patient_id = request.args.get("patient_id", type=int)
+    if patient_id:
+        query = query.filter(NursingAssignment.patient_id == patient_id)
+
+    assignments = query.order_by(
+        # Active first, then the ones running out soonest — that ordering is
+        # the work list, not just a sort. Open-ended assignments sort last via
+        # the IS NULL expression, because MySQL has no NULLS LAST.
+        db.case((NursingAssignment.status == "active", 0), else_=1),
+        NursingAssignment.ends_at.is_(None),
+        NursingAssignment.ends_at.asc(),
+        NursingAssignment.created_at.desc(),
+    ).all()
+
+    return success([a.to_dict() for a in assignments])
+
+
+@nursing_bp.post("/assignments")
+@role_required("doctor")
+def create_assignment():
+    """Hands a patient to a nurse for the observation/recovery period."""
+    doctor = get_current_doctor()
+    if not doctor:
+        return error("Only doctors can assign a nurse", status=403)
+
+    payload = request.get_json(silent=True) or {}
+
+    patient = Patient.query.get(payload.get("patient_id"))
+    if not patient:
+        return error("Patient not found", status=404)
+    if not can_access_patient(patient, doctor):
+        return error("This patient is assigned to another doctor", status=403)
+
+    nurse = Nurse.query.get(payload.get("nurse_id"))
+    if not nurse:
+        return error("Nurse not found", status=404)
+
+    care_type = payload.get("care_type") or "observation"
+    if care_type not in CARE_TYPES:
+        return error(f"care_type must be one of: {', '.join(CARE_TYPES)}", status=422)
+
+    consultation = None
+    if payload.get("consultation_id"):
+        consultation = Consultation.query.get(payload["consultation_id"])
+        if not consultation:
+            return error("Consultation not found", status=404)
+        if consultation.patient_id != patient.id:
+            return error("That consultation belongs to a different patient", status=422)
+        if consultation.doctor_id != doctor.id:
+            return error("That consultation belongs to another doctor", status=403)
+
+    # One active assignment per patient: two nurses both believing they own
+    # the medication log is exactly the failure this module exists to prevent.
+    clash = NursingAssignment.query.filter_by(
+        patient_id=patient.id, status="active"
+    ).first()
+    if clash:
+        return error(
+            f"{patient.name} is already under nursing care "
+            f"({clash.nurse.user.name if clash.nurse and clash.nurse.user else 'another nurse'}). "
+            "Close that assignment first.",
+            status=409,
+        )
+
+    ends_at, dt_error = _parse_dt(payload.get("ends_at"), "ends_at")
+    if dt_error:
+        return error(dt_error, status=422)
+
+    starts_at = datetime.utcnow()
+    if ends_at is None:
+        days, days_error = _int(
+            payload, "observation_days", low=1, high=MAX_OBSERVATION_DAYS
+        )
+        if days_error:
+            return error(days_error, status=422)
+        ends_at = starts_at + timedelta(days=days or DEFAULT_OBSERVATION_DAYS)
+    elif ends_at <= starts_at:
+        return error("The observation period must end in the future", status=422)
+
+    assignment = NursingAssignment(
+        patient_id=patient.id,
+        nurse_id=nurse.id,
+        doctor_id=doctor.id,
+        consultation_id=consultation.id if consultation else None,
+        care_type=care_type,
+        treatment_plan=_text(payload, "treatment_plan"),
+        care_instructions=_text(payload, "care_instructions"),
+        starts_at=starts_at,
+        ends_at=ends_at,
+        status="active",
+    )
+    db.session.add(assignment)
+    db.session.flush()  # assigns assignment.id before the orders reference it
+
+    # Carrying the prescription over is the normal case: the nurse should be
+    # working from what the doctor actually prescribed, not a re-typed copy.
+    if consultation and payload.get("import_prescription", True):
+        _import_prescription_orders(assignment, consultation)
+
+    added, order_error = _add_orders_from_payload(assignment, payload.get("medications"))
+    if order_error:
+        db.session.rollback()
+        return error(order_error, status=422)
+
+    notify(
+        [nurse.user_id],
+        title="New patient assigned to you",
+        body=(
+            f"{doctor.user.name} assigned {patient.name} to you for "
+            f"{care_type.replace('_', ' ')} care."
+            if doctor.user
+            else f"{patient.name} has been assigned to you."
+        ),
+        category="nursing",
+        link=f"/nurse/patients/{assignment.id}",
+        exclude_user_id=get_jwt_identity(),
+    )
+
+    db.session.commit()
+    nursing_changed("assignment_created", assignment.id)
+    dashboard_changed("nursing_assignment_created")
+
+    return success(
+        assignment.to_dict(include_detail=True),
+        message=f"{patient.name} assigned to {nurse.user.name if nurse.user else 'nurse'}",
+        status=201,
+    )
+
+
+def _import_prescription_orders(assignment, consultation):
+    """Copies the consultation's prescription into the nurse's medication
+    schedule. Route is guessed from the wording and stays editable — a nurse
+    should never be blocked because a label said 'syrup'."""
+    for item in consultation.prescriptions:
+        db.session.add(
+            MedicationOrder(
+                assignment_id=assignment.id,
+                medicine_id=item.medicine_id,
+                medicine_name=item.medicine_name,
+                route=_guess_route(item.medicine_name),
+                dose=item.dose,
+                frequency=item.frequency,
+                duration=item.duration,
+            )
+        )
+
+
+ROUTE_HINTS = (
+    ("iv", ("iv", "saline", "drip", "infusion", "ringer", "dextrose")),
+    ("injection", ("inject", "im ", "sc ", "vial", "ampoule")),
+    ("inhalation", ("inhal", "nebul", "puff")),
+    ("topical", ("ointment", "cream", "gel", "topical", "patch")),
+)
+
+
+def _guess_route(name):
+    lowered = (name or "").lower()
+    for route, hints in ROUTE_HINTS:
+        if any(hint in lowered for hint in hints):
+            return route
+    return "oral"
+
+
+def _add_orders_from_payload(assignment, items):
+    """Returns (count_added, error_message)."""
+    if not items:
+        return 0, None
+    if not isinstance(items, list):
+        return 0, "medications must be a list"
+
+    formulary = {m.name.lower(): m for m in Medicine.query.all()}
+    added = 0
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            return 0, f"Medication {index + 1} is not valid"
+        name = (item.get("medicine_name") or "").strip()
+        if not name:
+            return 0, f"Medication {index + 1} needs a name"
+        route = item.get("route") or _guess_route(name)
+        if route not in ROUTES:
+            return 0, f"Medication {index + 1}: route must be one of {', '.join(ROUTES)}"
+
+        times_per_day = item.get("times_per_day")
+        if times_per_day in (None, ""):
+            times_per_day = None
+        else:
+            try:
+                times_per_day = int(times_per_day)
+            except (TypeError, ValueError):
+                return 0, f"Medication {index + 1}: times_per_day must be a whole number"
+            if not 1 <= times_per_day <= 24:
+                return 0, f"Medication {index + 1}: times_per_day must be between 1 and 24"
+
+        matched = formulary.get(name.lower())
+        db.session.add(
+            MedicationOrder(
+                assignment_id=assignment.id,
+                medicine_id=matched.id if matched else None,
+                medicine_name=name[:150],
+                route=route,
+                dose=(item.get("dose") or "").strip()[:255] or None,
+                frequency=(item.get("frequency") or "").strip()[:255] or None,
+                duration=(item.get("duration") or "").strip()[:255] or None,
+                instructions=(item.get("instructions") or "").strip()[:MAX_TEXT] or None,
+                times_per_day=times_per_day,
+            )
+        )
+        added += 1
+    return added, None
+
+
+@nursing_bp.get("/assignments/<int:assignment_id>")
+@jwt_required()
+def get_assignment(assignment_id):
+    assignment, failure = _load_assignment(assignment_id)
+    if failure:
+        return failure
+
+    data = assignment.to_dict(include_detail=True)
+    # Lets the UI hide controls that would 403 anyway — the real check is on
+    # each write route, not here.
+    data["can_record"] = can_record_on(assignment)
+    data["can_manage_plan"] = _can_manage_plan(assignment)
+    data["today"] = _todays_medication_progress(assignment)
+    return success(data)
+
+
+def _can_manage_plan(assignment):
+    doctor = get_current_doctor()
+    return bool(doctor and doctor.id == assignment.doctor_id)
+
+
+def _todays_medication_progress(assignment):
+    """Doses expected vs. logged since midnight UTC, per order.
+
+    Expectation comes from `times_per_day`; an as-needed order has no target
+    and is never reported as behind.
+    """
+    since = datetime.combine(datetime.utcnow().date(), datetime.min.time())
+    logged = {}
+    for record in assignment.administrations:
+        stamp = record.administered_at or record.created_at
+        if stamp and stamp >= since and record.order_id:
+            logged[record.order_id] = logged.get(record.order_id, 0) + 1
+
+    rows = []
+    expected_total = 0
+    logged_total = 0
+    for order in assignment.medication_orders:
+        if not order.is_active:
+            continue
+        count = logged.get(order.id, 0)
+        rows.append(
+            {
+                "order_id": order.id,
+                "medicine_name": order.medicine_name,
+                "expected": order.times_per_day,
+                "logged": count,
+                "remaining": (
+                    max(0, order.times_per_day - count) if order.times_per_day else None
+                ),
+            }
+        )
+        logged_total += count
+        if order.times_per_day:
+            expected_total += order.times_per_day
+
+    return {
+        "date": datetime.utcnow().date().isoformat(),
+        "expected": expected_total,
+        "logged": logged_total,
+        "orders": rows,
+    }
+
+
+@nursing_bp.patch("/assignments/<int:assignment_id>")
+@role_required("doctor")
+def update_assignment(assignment_id):
+    """The doctor's half: revise the plan, extend the watch, or close it."""
+    assignment = NursingAssignment.query.get(assignment_id)
+    if not assignment:
+        return error("Assignment not found", status=404)
+    if not _can_manage_plan(assignment):
+        return error("This assignment belongs to another doctor", status=403)
+
+    payload = request.get_json(silent=True) or {}
+
+    if "care_instructions" in payload:
+        assignment.care_instructions = _text(payload, "care_instructions")
+    if "treatment_plan" in payload:
+        assignment.treatment_plan = _text(payload, "treatment_plan")
+
+    if "care_type" in payload:
+        care_type = payload.get("care_type")
+        if care_type not in CARE_TYPES:
+            return error(f"care_type must be one of: {', '.join(CARE_TYPES)}", status=422)
+        assignment.care_type = care_type
+
+    if "nurse_id" in payload:
+        nurse = Nurse.query.get(payload.get("nurse_id"))
+        if not nurse:
+            return error("Nurse not found", status=404)
+        if nurse.id != assignment.nurse_id:
+            previous_nurse_id = assignment.nurse.user_id if assignment.nurse else None
+            assignment.nurse_id = nurse.id
+            # Both nurses need to know: one has picked the patient up, the
+            # other must stop expecting to round on them.
+            notify(
+                [uid for uid in (nurse.user_id, previous_nurse_id) if uid],
+                title="Nursing assignment reassigned",
+                body=f"{assignment.patient.name if assignment.patient else 'A patient'} is now under {nurse.user.name if nurse.user else 'another nurse'}.",
+                category="nursing",
+                link=f"/nurse/patients/{assignment.id}",
+                exclude_user_id=get_jwt_identity(),
+            )
+
+    if "ends_at" in payload:
+        ends_at, dt_error = _parse_dt(payload.get("ends_at"), "ends_at")
+        if dt_error:
+            return error(dt_error, status=422)
+        assignment.ends_at = ends_at
+
+    if "status" in payload:
+        status = payload.get("status")
+        if status not in ASSIGNMENT_STATUSES:
+            allowed = ", ".join(ASSIGNMENT_STATUSES)
+            return error(f"status must be one of: {allowed}", status=422)
+        assignment.status = status
+        assignment.completed_at = (
+            datetime.utcnow() if status in ("completed", "cancelled") else None
+        )
+        if status != "active" and assignment.nurse:
+            notify(
+                [assignment.nurse.user_id],
+                title=f"Nursing care {status}",
+                body=f"{assignment.patient.name if assignment.patient else 'A patient'} is no longer under your care.",
+                category="nursing",
+                link=f"/nurse/patients/{assignment.id}",
+                exclude_user_id=get_jwt_identity(),
+            )
+
+    db.session.commit()
+    nursing_changed("assignment_updated", assignment.id)
+
+    data = assignment.to_dict(include_detail=True)
+    data["can_record"] = can_record_on(assignment)
+    data["can_manage_plan"] = True
+    data["today"] = _todays_medication_progress(assignment)
+    return success(data, message="Assignment updated")
+
+
+# --------------------------------------------------------------------------
+# medication orders (doctor-owned)
+# --------------------------------------------------------------------------
+
+
+@nursing_bp.post("/assignments/<int:assignment_id>/medications")
+@role_required("doctor")
+def add_medication_order(assignment_id):
+    assignment = NursingAssignment.query.get(assignment_id)
+    if not assignment:
+        return error("Assignment not found", status=404)
+    if not _can_manage_plan(assignment):
+        return error("This assignment belongs to another doctor", status=403)
+
+    payload = request.get_json(silent=True) or {}
+    added, order_error = _add_orders_from_payload(assignment, [payload])
+    if order_error:
+        db.session.rollback()
+        return error(order_error, status=422)
+
+    if assignment.nurse:
+        notify(
+            [assignment.nurse.user_id],
+            title="Medication order updated",
+            body=f"A new medication was added for {assignment.patient.name if assignment.patient else 'your patient'}.",
+            category="nursing",
+            link=f"/nurse/patients/{assignment.id}",
+            exclude_user_id=get_jwt_identity(),
+        )
+
+    db.session.commit()
+    nursing_changed("medication_order_added", assignment.id)
+
+    return success(
+        [o.to_dict() for o in assignment.medication_orders],
+        message="Medication added",
+        status=201,
+    )
+
+
+@nursing_bp.patch("/medications/<int:order_id>")
+@role_required("doctor")
+def update_medication_order(order_id):
+    """Edit or stop an order. Stopping sets is_active=False rather than
+    deleting, so the doses already logged against it keep their context."""
+    order = MedicationOrder.query.get(order_id)
+    if not order:
+        return error("Medication not found", status=404)
+    if not _can_manage_plan(order.assignment):
+        return error("This assignment belongs to another doctor", status=403)
+
+    payload = request.get_json(silent=True) or {}
+
+    if "route" in payload:
+        if payload.get("route") not in ROUTES:
+            return error(f"route must be one of: {', '.join(ROUTES)}", status=422)
+        order.route = payload["route"]
+    for field in ("dose", "frequency", "duration"):
+        if field in payload:
+            setattr(order, field, (payload.get(field) or "").strip()[:255] or None)
+    if "instructions" in payload:
+        order.instructions = _text(payload, "instructions")
+    if "times_per_day" in payload:
+        times, times_error = _int(payload, "times_per_day", low=1, high=24)
+        if times_error:
+            return error(times_error, status=422)
+        order.times_per_day = times
+    if "is_active" in payload:
+        order.is_active = bool(payload.get("is_active"))
+
+    db.session.commit()
+    nursing_changed("medication_order_updated", order.assignment_id)
+    return success(order.to_dict(), message="Medication updated")
+
+
+# --------------------------------------------------------------------------
+# the nursing record (nurse-owned)
+# --------------------------------------------------------------------------
+
+
+def _require_recording_nurse(assignment):
+    """Returns (nurse, error_response) for a route that writes to the record."""
+    nurse = get_current_nurse()
+    if not nurse:
+        return None, error("Only a nurse can update the nursing record", status=403)
+    if assignment.nurse_id != nurse.id:
+        return None, error("This patient is assigned to another nurse", status=403)
+    if assignment.status != "active":
+        return None, error("This assignment is closed", status=409)
+    return nurse, None
+
+
+@nursing_bp.post("/assignments/<int:assignment_id>/administrations")
+@jwt_required()
+def record_administration(assignment_id):
+    """Logs one dose: what was given (or not), when, and why."""
+    assignment, failure = _load_assignment(assignment_id)
+    if failure:
+        return failure
+    nurse, failure = _require_recording_nurse(assignment)
+    if failure:
+        return failure
+
+    payload = request.get_json(silent=True) or {}
+
+    status = payload.get("status")
+    if status not in ADMIN_STATUSES:
+        return error(f"status must be one of: {', '.join(ADMIN_STATUSES)}", status=422)
+
+    order = None
+    if payload.get("order_id"):
+        order = MedicationOrder.query.get(payload["order_id"])
+        if not order or order.assignment_id != assignment.id:
+            return error("Medication not found on this assignment", status=404)
+
+    medicine_name = (payload.get("medicine_name") or "").strip()
+    if order and not medicine_name:
+        medicine_name = order.medicine_name
+    if not medicine_name:
+        return error("medicine_name is required for an unscheduled dose", status=422)
+
+    route = payload.get("route") or (order.route if order else "oral")
+    if route not in ROUTES:
+        return error(f"route must be one of: {', '.join(ROUTES)}", status=422)
+
+    scheduled_at, dt_error = _parse_dt(payload.get("scheduled_at"), "scheduled_at")
+    if dt_error:
+        return error(dt_error, status=422)
+    administered_at, dt_error = _parse_dt(payload.get("administered_at"), "administered_at")
+    if dt_error:
+        return error(dt_error, status=422)
+
+    # A dose that was given needs a time; one that wasn't must not carry one,
+    # or the log would claim it happened.
+    if status in ("completed", "delayed"):
+        administered_at = administered_at or datetime.utcnow()
+    else:
+        administered_at = None
+
+    record = MedicationAdministration(
+        assignment_id=assignment.id,
+        order_id=order.id if order else None,
+        nurse_id=nurse.id,
+        medicine_name=medicine_name[:150],
+        route=route,
+        dose=(payload.get("dose") or (order.dose if order else "") or "").strip()[:255] or None,
+        scheduled_at=scheduled_at,
+        administered_at=administered_at,
+        status=status,
+        notes=_text(payload, "notes"),
+    )
+    db.session.add(record)
+    db.session.flush()
+
+    # A missed dose is exactly the thing the doctor asked to be flagged on, so
+    # it raises an alert on its own rather than waiting for the nurse to
+    # remember to escalate it.
+    alert = None
+    if status == "missed":
+        alert = _raise_alert(
+            assignment,
+            nurse,
+            category="missed_medication",
+            severity="warning",
+            message=(
+                f"{medicine_name} was not given"
+                + (f" — {record.notes}" if record.notes else ".")
+            ),
+        )
+    else:
+        _notify_doctor(
+            assignment,
+            title="Medication logged",
+            body=f"{medicine_name} marked {status} for {assignment.patient.name if assignment.patient else 'your patient'}.",
+        )
+
+    db.session.commit()
+    nursing_changed("medication_administered", assignment.id)
+
+    return success(
+        {
+            "administration": record.to_dict(),
+            "alert": alert.to_dict() if alert else None,
+            "compliance": assignment.compliance(),
+            "today": _todays_medication_progress(assignment),
+        },
+        message="Medication logged",
+        status=201,
+    )
+
+
+@nursing_bp.post("/assignments/<int:assignment_id>/observations")
+@jwt_required()
+def record_observation(assignment_id):
+    """Records a round: vitals, symptoms, recovery, complications."""
+    assignment, failure = _load_assignment(assignment_id)
+    if failure:
+        return failure
+    nurse, failure = _require_recording_nurse(assignment)
+    if failure:
+        return failure
+
+    payload = request.get_json(silent=True) or {}
+
+    recorded_at, dt_error = _parse_dt(payload.get("recorded_at"), "recorded_at")
+    if dt_error:
+        return error(dt_error, status=422)
+
+    # Bounds are physiological sanity checks, not clinical ranges — they catch
+    # a slipped decimal point. What counts as abnormal is decided by the model.
+    numeric_fields = (
+        ("temperature_c", _float, 25.0, 45.0),
+        ("blood_sugar", _float, 10.0, 900.0),
+        ("pulse_bpm", _int, 20, 260),
+        ("systolic_bp", _int, 40, 300),
+        ("diastolic_bp", _int, 20, 200),
+        ("respiratory_rate", _int, 4, 80),
+        ("spo2", _int, 40, 100),
+        ("pain_score", _int, 0, 10),
+    )
+    values = {}
+    for field, parser, low, high in numeric_fields:
+        value, parse_error = parser(payload, field, low, high)
+        if parse_error:
+            return error(parse_error, status=422)
+        values[field] = value
+
+    observation = PatientObservation(
+        assignment_id=assignment.id,
+        nurse_id=nurse.id,
+        recorded_at=recorded_at or datetime.utcnow(),
+        symptoms=_text(payload, "symptoms"),
+        recovery_progress=_text(payload, "recovery_progress"),
+        complications=_text(payload, "complications"),
+        **values,
+    )
+    observation.evaluate()
+
+    # `is None`, not falsiness: a pain score of 0 and an SpO₂ of 0 are both
+    # real readings that must not read as "nothing was entered".
+    has_vitals = any(value is not None for value in values.values())
+    has_text = any(
+        (observation.symptoms, observation.recovery_progress, observation.complications)
+    )
+    if not has_vitals and not has_text:
+        return error("Record at least one vital sign or note", status=422)
+
+    db.session.add(observation)
+    db.session.flush()
+
+    alert = None
+    if observation.is_abnormal:
+        flagged = observation.abnormal_vitals()
+        detail = ", ".join(flagged) if flagged else "complications reported"
+        alert = _raise_alert(
+            assignment,
+            nurse,
+            category="abnormal_observation",
+            severity="critical" if observation.complications else "warning",
+            message=(
+                f"Abnormal observation: {detail}."
+                + (f" {observation.complications}" if observation.complications else "")
+            ),
+        )
+    else:
+        _notify_doctor(
+            assignment,
+            title="Observation recorded",
+            body=f"New vitals logged for {assignment.patient.name if assignment.patient else 'your patient'}.",
+        )
+
+    db.session.commit()
+    nursing_changed("observation_recorded", assignment.id)
+
+    return success(
+        {"observation": observation.to_dict(), "alert": alert.to_dict() if alert else None},
+        message="Observation recorded",
+        status=201,
+    )
+
+
+@nursing_bp.post("/assignments/<int:assignment_id>/notes")
+@jwt_required()
+def add_note(assignment_id):
+    """A nursing note, or an end-of-shift handover to the next nurse."""
+    assignment, failure = _load_assignment(assignment_id)
+    if failure:
+        return failure
+    nurse, failure = _require_recording_nurse(assignment)
+    if failure:
+        return failure
+
+    payload = request.get_json(silent=True) or {}
+
+    content = _text(payload, "content")
+    if not content:
+        return error("A note cannot be empty", status=422)
+
+    note_type = payload.get("note_type") or "note"
+    if note_type not in NOTE_TYPES:
+        return error(f"note_type must be one of: {', '.join(NOTE_TYPES)}", status=422)
+
+    shift = payload.get("shift") or None
+    if shift and shift not in SHIFTS:
+        return error(f"shift must be one of: {', '.join(SHIFTS)}", status=422)
+
+    handover_to = None
+    if payload.get("handover_to_nurse_id"):
+        handover_to = Nurse.query.get(payload["handover_to_nurse_id"])
+        if not handover_to:
+            return error("Nurse not found", status=404)
+        if handover_to.id == nurse.id:
+            return error("Hand over to a different nurse", status=422)
+
+    note = NursingNote(
+        assignment_id=assignment.id,
+        nurse_id=nurse.id,
+        note_type=note_type,
+        shift=shift,
+        content=content,
+        handover_to_nurse_id=handover_to.id if handover_to else None,
+    )
+    db.session.add(note)
+
+    if handover_to:
+        # The incoming nurse takes over the assignment as well as the note —
+        # otherwise they'd be told to read a handover for a patient that never
+        # appears on their list.
+        assignment.nurse_id = handover_to.id
+        notify(
+            [handover_to.user_id],
+            title="Shift handover received",
+            body=f"{nurse.user.name if nurse.user else 'A nurse'} handed over {assignment.patient.name if assignment.patient else 'a patient'} to you.",
+            category="nursing",
+            link=f"/nurse/patients/{assignment.id}",
+            exclude_user_id=get_jwt_identity(),
+        )
+
+    _notify_doctor(
+        assignment,
+        title="Nursing note added" if note_type == "note" else "Shift handover logged",
+        body=f"{nurse.user.name if nurse.user else 'A nurse'} updated the record for {assignment.patient.name if assignment.patient else 'your patient'}.",
+    )
+
+    db.session.commit()
+    nursing_changed("note_added", assignment.id)
+
+    return success(note.to_dict(), message="Note saved", status=201)
+
+
+# --------------------------------------------------------------------------
+# alerts
+# --------------------------------------------------------------------------
+
+
+def _raise_alert(assignment, nurse, category, severity, message):
+    """Creates the alert and pings the doctor. Added to the caller's open
+    session so it commits with the event that caused it."""
+    alert = ClinicalAlert(
+        assignment_id=assignment.id,
+        nurse_id=nurse.id,
+        doctor_id=assignment.doctor_id,
+        category=category,
+        severity=severity,
+        message=message,
+    )
+    db.session.add(alert)
+
+    patient_name = assignment.patient.name if assignment.patient else "A patient"
+    _notify_doctor(
+        assignment,
+        title=f"{'🚨 ' if severity == 'critical' else ''}Nursing alert — {patient_name}",
+        body=message[:255],
+    )
+    return alert
+
+
+def _notify_doctor(assignment, title, body):
+    if not assignment.doctor:
+        return
+    notify(
+        [assignment.doctor.user_id],
+        title=title,
+        body=body[:255],
+        category="nursing",
+        link=f"/dashboard/nursing/{assignment.id}",
+        exclude_user_id=get_jwt_identity(),
+    )
+
+
+@nursing_bp.post("/assignments/<int:assignment_id>/alerts")
+@jwt_required()
+def create_alert(assignment_id):
+    """The nurse flagging something to the doctor by hand."""
+    assignment, failure = _load_assignment(assignment_id)
+    if failure:
+        return failure
+    nurse, failure = _require_recording_nurse(assignment)
+    if failure:
+        return failure
+
+    payload = request.get_json(silent=True) or {}
+
+    category = payload.get("category") or "other"
+    if category not in ALERT_CATEGORIES:
+        return error(f"category must be one of: {', '.join(ALERT_CATEGORIES)}", status=422)
+
+    severity = payload.get("severity") or "warning"
+    if severity not in SEVERITIES:
+        return error(f"severity must be one of: {', '.join(SEVERITIES)}", status=422)
+
+    message = _text(payload, "message")
+    if not message:
+        return error("Describe what the doctor needs to know", status=422)
+
+    alert = _raise_alert(assignment, nurse, category, severity, message)
+
+    db.session.commit()
+    nursing_changed("alert_raised", assignment.id)
+    dashboard_changed("nursing_alert")
+
+    return success(alert.to_dict(), message="Doctor notified", status=201)
+
+
+@nursing_bp.get("/alerts")
+@jwt_required()
+def list_alerts():
+    """Open alerts across everything the caller can see."""
+    query = ClinicalAlert.query.join(ClinicalAlert.assignment)
+    query = scope_assignments(query)
+
+    status = request.args.get("status", "open")
+    if status != "all":
+        if status not in ALERT_STATUSES:
+            allowed = ", ".join(ALERT_STATUSES)
+            return error(f"status must be one of: {allowed}, all", status=422)
+        query = query.filter(ClinicalAlert.status == status)
+
+    alerts = query.order_by(
+        db.case((ClinicalAlert.severity == "critical", 0), else_=1),
+        ClinicalAlert.created_at.desc(),
+    ).limit(100).all()
+
+    return success([a.to_dict(include_patient=True) for a in alerts])
+
+
+@nursing_bp.post("/alerts/<int:alert_id>/acknowledge")
+@role_required("doctor", "admin")
+def acknowledge_alert(alert_id):
+    """The doctor confirming they've seen it, with an optional instruction
+    back to the nurse."""
+    alert = ClinicalAlert.query.get(alert_id)
+    if not alert:
+        return error("Alert not found", status=404)
+
+    doctor = get_current_doctor()
+    if doctor and alert.doctor_id != doctor.id:
+        return error("This alert belongs to another doctor", status=403)
+    if not doctor and not _is_admin():
+        return error("Forbidden", status=403)
+
+    payload = request.get_json(silent=True) or {}
+    status = payload.get("status") or "acknowledged"
+    if status not in ("acknowledged", "resolved"):
+        return error("status must be 'acknowledged' or 'resolved'", status=422)
+
+    alert.status = status
+    alert.acknowledged_at = datetime.utcnow()
+    alert.acknowledged_by = int(get_jwt_identity())
+    response = _text(payload, "doctor_response")
+    if response:
+        alert.doctor_response = response
+
+    if alert.nurse:
+        notify(
+            [alert.nurse.user_id],
+            title=f"Doctor {status} your alert",
+            body=response[:255] if response else alert.message[:255],
+            category="nursing",
+            link=f"/nurse/patients/{alert.assignment_id}",
+            exclude_user_id=get_jwt_identity(),
+        )
+
+    db.session.commit()
+    nursing_changed("alert_acknowledged", alert.assignment_id)
+
+    return success(alert.to_dict(include_patient=True), message=f"Alert {status}")
+
+
+# --------------------------------------------------------------------------
+# timeline
+# --------------------------------------------------------------------------
+
+TIMELINE_STATUS_SEVERITY = {"missed": "critical", "skipped": "warning", "delayed": "warning"}
+
+
+@nursing_bp.get("/assignments/<int:assignment_id>/timeline")
+@jwt_required()
+def get_timeline(assignment_id):
+    """Every nursing activity on this patient, newest first.
+
+    Assembled from the four record tables rather than kept in a fifth: a
+    separate timeline table would be a second copy of the truth, and the first
+    time the two disagreed nobody would know which one to believe.
+    """
+    assignment, failure = _load_assignment(assignment_id)
+    if failure:
+        return failure
+
+    events = [
+        {
+            "type": "assignment",
+            "at": to_utc_iso(assignment.starts_at or assignment.created_at),
+            "title": "Nursing care started",
+            "detail": (
+                f"{assignment.care_type.replace('_', ' ').capitalize()} care assigned by "
+                f"{assignment.doctor.user.name if assignment.doctor and assignment.doctor.user else 'the doctor'}"
+            ),
+            "actor": assignment.nurse.user.name if assignment.nurse and assignment.nurse.user else None,
+            "severity": "info",
+        }
+    ]
+
+    for record in assignment.administrations:
+        events.append(
+            {
+                "type": "medication",
+                "at": to_utc_iso(record.administered_at or record.created_at),
+                "title": f"{record.medicine_name} — {record.status}",
+                "detail": " · ".join(
+                    part for part in (record.dose, record.route_label, record.notes) if part
+                ),
+                "actor": record.nurse.user.name if record.nurse and record.nurse.user else None,
+                "severity": TIMELINE_STATUS_SEVERITY.get(record.status, "success"),
+                "ref_id": record.id,
+            }
+        )
+
+    for observation in assignment.observations:
+        vitals = _vitals_line(observation)
+        events.append(
+            {
+                "type": "observation",
+                "at": to_utc_iso(observation.recorded_at),
+                "title": "Observation recorded",
+                "detail": " · ".join(
+                    part
+                    for part in (vitals, observation.symptoms, observation.complications)
+                    if part
+                ),
+                "actor": observation.nurse.user.name
+                if observation.nurse and observation.nurse.user
+                else None,
+                "severity": "warning" if observation.is_abnormal else "info",
+                "ref_id": observation.id,
+            }
+        )
+
+    for note in assignment.notes:
+        events.append(
+            {
+                "type": note.note_type,
+                "at": to_utc_iso(note.created_at),
+                "title": "Shift handover" if note.note_type == "handover" else "Nursing note",
+                "detail": note.content,
+                "actor": note.nurse.user.name if note.nurse and note.nurse.user else None,
+                "severity": "info",
+                "ref_id": note.id,
+            }
+        )
+
+    for alert in assignment.alerts:
+        events.append(
+            {
+                "type": "alert",
+                "at": to_utc_iso(alert.created_at),
+                "title": f"Doctor flagged — {alert.category.replace('_', ' ')}",
+                "detail": alert.message,
+                "actor": alert.nurse.user.name if alert.nurse and alert.nurse.user else None,
+                "severity": alert.severity,
+                "ref_id": alert.id,
+                "status": alert.status,
+            }
+        )
+        if alert.acknowledged_at:
+            events.append(
+                {
+                    "type": "acknowledgement",
+                    "at": to_utc_iso(alert.acknowledged_at),
+                    "title": f"Doctor {alert.status} the alert",
+                    "detail": alert.doctor_response,
+                    "actor": alert.acknowledger.name if alert.acknowledger else None,
+                    "severity": "success",
+                    "ref_id": alert.id,
+                }
+            )
+
+    if assignment.completed_at:
+        events.append(
+            {
+                "type": "assignment",
+                "at": to_utc_iso(assignment.completed_at),
+                "title": f"Nursing care {assignment.status}",
+                "detail": None,
+                "actor": None,
+                "severity": "info",
+            }
+        )
+
+    # Anything with no usable timestamp sorts last rather than blowing up the
+    # comparison.
+    events.sort(key=lambda e: e["at"] or "", reverse=True)
+    return success(events[:TIMELINE_LIMIT])
+
+
+def _vitals_line(observation):
+    parts = []
+    if observation.temperature_c is not None:
+        parts.append(f"{float(observation.temperature_c)}°C")
+    if observation.pulse_bpm is not None:
+        parts.append(f"{observation.pulse_bpm} bpm")
+    if observation.systolic_bp and observation.diastolic_bp:
+        parts.append(f"{observation.systolic_bp}/{observation.diastolic_bp} mmHg")
+    if observation.spo2 is not None:
+        parts.append(f"SpO₂ {observation.spo2}%")
+    if observation.respiratory_rate is not None:
+        parts.append(f"RR {observation.respiratory_rate}")
+    if observation.blood_sugar is not None:
+        parts.append(f"BG {float(observation.blood_sugar)}")
+    if observation.pain_score is not None:
+        parts.append(f"Pain {observation.pain_score}/10")
+    return ", ".join(parts)
+
+
+# --------------------------------------------------------------------------
+# summary cards
+# --------------------------------------------------------------------------
+
+
+@nursing_bp.get("/summary")
+@jwt_required()
+def nursing_summary():
+    """Counts for whichever nursing dashboard the caller is looking at."""
+    base = scope_assignments(NursingAssignment.query)
+    active = base.filter(NursingAssignment.status == "active").all()
+
+    now = datetime.utcnow()
+    since = datetime.combine(now.date(), datetime.min.time())
+
+    assignment_ids = [a.id for a in active]
+    doses_today = 0
+    missed_today = 0
+    if assignment_ids:
+        rows = (
+            db.session.query(
+                MedicationAdministration.status,
+                db.func.count(MedicationAdministration.id),
+            )
+            .filter(
+                MedicationAdministration.assignment_id.in_(assignment_ids),
+                MedicationAdministration.created_at >= since,
+            )
+            .group_by(MedicationAdministration.status)
+            .all()
+        )
+        for status, count in rows:
+            doses_today += count
+            if status == "missed":
+                missed_today += count
+
+    open_alerts = 0
+    critical_alerts = 0
+    if assignment_ids:
+        alert_rows = (
+            db.session.query(ClinicalAlert.severity, db.func.count(ClinicalAlert.id))
+            .filter(
+                ClinicalAlert.assignment_id.in_(assignment_ids),
+                ClinicalAlert.status == "open",
+            )
+            .group_by(ClinicalAlert.severity)
+            .all()
+        )
+        for severity, count in alert_rows:
+            open_alerts += count
+            if severity == "critical":
+                critical_alerts += count
+
+    # Doses still owed today across every active patient — the single number
+    # that tells a nurse whether the round is finished.
+    doses_due = 0
+    for assignment in active:
+        progress = _todays_medication_progress(assignment)
+        doses_due += max(0, progress["expected"] - progress["logged"])
+
+    return success(
+        {
+            "active_assignments": len(active),
+            "overdue_assignments": sum(1 for a in active if a.is_overdue),
+            "doses_logged_today": doses_today,
+            "doses_due_today": doses_due,
+            "missed_today": missed_today,
+            "open_alerts": open_alerts,
+            "critical_alerts": critical_alerts,
+            "assignments": [a.to_dict() for a in active[:10]],
+            "generated_at": to_utc_iso(now),
+        }
+    )

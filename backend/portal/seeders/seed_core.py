@@ -2,11 +2,11 @@ from portal.extensions import db
 from portal.models.department import Department
 from portal.models.doctor import Doctor
 from portal.models.medicine import Medicine
-from portal.models.patient import Patient
+from portal.models.nurse import Nurse
 from portal.models.role import Role
 from portal.models.user import User
 
-ROLE_NAMES = ["admin", "doctor", "receptionist"]
+ROLE_NAMES = ["admin", "doctor", "nurse", "receptionist"]
 
 DEPARTMENTS = ["Orthopedics", "Gynecology", "Gastroenterology", "General Medicine"]
 
@@ -22,12 +22,6 @@ FORMULARY = [
     ("Cough Syrup (Dextromethorphan)", "Antitussive", "10ml", "Every 8 hours"),
 ]
 
-DEMO_PATIENTS = [
-    dict(name="Ravi Kumar", gender="male", phone="+91 98765 43210", blood_group="O+"),
-    dict(name="Anita Sharma", gender="female", phone="+91 98765 11223", blood_group="B+"),
-    dict(name="Vikram Patel", gender="male", phone="+91 98765 44556", blood_group="A+"),
-]
-
 # (name, email, password, department, specialization, registration_no)
 DOCTORS = [
     (
@@ -39,8 +33,8 @@ DOCTORS = [
         "12545",
     ),
     (
-        "Dr. Priya Nair",
-        "priya.nair@yasodhahospitals.com",
+        "Dr. Sahithi",
+        "sahithi@yasodhahospitals.com",
         "Doctor@123",
         "Gynecology",
         "Gynecologist",
@@ -53,6 +47,35 @@ DOCTORS = [
         "Gastroenterology",
         "Gastroenterologist",
         "12811",
+    ),
+]
+
+
+# (name, email, password, department, employee_no, shift)
+NURSES = [
+    (
+        "Sr. Lakshmi Rao",
+        "lakshmi.rao@yasodhahospitals.com",
+        "Nurse@123",
+        "Orthopedics",
+        "NUR1001",
+        "morning",
+    ),
+    (
+        "Sr. Fatima Begum",
+        "fatima.begum@yasodhahospitals.com",
+        "Nurse@123",
+        "Gynecology",
+        "NUR1002",
+        "evening",
+    ),
+    (
+        "Sr. Joseph Thomas",
+        "joseph.thomas@yasodhahospitals.com",
+        "Nurse@123",
+        "General Medicine",
+        "NUR1003",
+        "night",
     ),
 ]
 
@@ -119,6 +142,28 @@ def seed_doctors(departments):
             db.session.commit()
 
 
+def seed_nurses(departments):
+    nurse_role = Role.query.filter_by(name="nurse").first()
+    for name, email, password, dept_name, employee_no, shift in NURSES:
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            user = User(name=name, email=email, role_id=nurse_role.id)
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+
+        if not Nurse.query.filter_by(user_id=user.id).first():
+            db.session.add(
+                Nurse(
+                    user_id=user.id,
+                    department_id=departments[dept_name].id,
+                    employee_no=employee_no,
+                    shift=shift,
+                )
+            )
+            db.session.commit()
+
+
 def seed_formulary():
     for name, category, dose, frequency in FORMULARY:
         if not Medicine.query.filter_by(name=name).first():
@@ -128,24 +173,27 @@ def seed_formulary():
     db.session.commit()
 
 
-def seed_demo_patients():
-    for p in DEMO_PATIENTS:
-        if not Patient.query.filter_by(name=p["name"]).first():
-            db.session.add(Patient(**p))
-    db.session.commit()
-
-
 def run():
+    """Seeds the reference data the app can't run without: roles, departments,
+    the formulary and the staff logins.
+
+    Patients are deliberately not seeded. A patient with no assigned doctor is
+    invisible to every doctor (see helpers/patient_access), so demo rows only
+    ever showed up as clutter on the admin's list — real patients come in
+    through the front desk.
+    """
     seed_roles()
     departments = seed_departments()
     seed_admin()
     seed_receptionist()
     seed_doctors(departments)
+    seed_nurses(departments)
     seed_formulary()
-    seed_demo_patients()
     print("Seed complete.")
     print("  Admin        -> admin@yasodhahospitals.com / Admin@123")
     print("  Receptionist -> reception@yasodhahospitals.com / Reception@123")
-    for name, email, password, dept_name, _spec, _reg in DOCTORS:
+    for _name, email, password, dept_name, _spec, _reg in DOCTORS:
         print(f"  Doctor -> {email} / {password}  ({dept_name})")
-    print(f"  Seeded {len(FORMULARY)} formulary medicines, {len(DEMO_PATIENTS)} demo patients")
+    for _name, email, password, dept_name, _emp, shift in NURSES:
+        print(f"  Nurse  -> {email} / {password}  ({dept_name}, {shift} shift)")
+    print(f"  Seeded {len(FORMULARY)} formulary medicines")

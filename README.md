@@ -59,6 +59,13 @@ can be overridden by an environment variable of the name documented in
 Seeded logins:
 - Admin: `admin@yasodhahospitals.com` / `Admin@123`
 - Doctor: `sandeep.viswanadh@yasodhahospitals.com` / `Doctor@123`
+- Nurse: `lakshmi.rao@yasodhahospitals.com` / `Nurse@123`
+
+The seeder creates reference data only — roles, departments, the formulary and
+staff logins. It deliberately does not create patients: a patient with no
+assigned doctor is invisible to every doctor (see
+`portal/helpers/patient_access.py`), so demo rows only ever showed up as
+clutter. Register patients through the front desk instead.
 
 ### 3. Frontend
 
@@ -80,3 +87,46 @@ npm run dev                     # http://localhost:5173
 4. You should land on `/dashboard` showing the doctor's name and live
    (currently zero/seed-level) counts pulled from MySQL — not hardcoded
    numbers.
+
+## Nursing module
+
+After a consultation, surgery or procedure the doctor hands the patient to a
+nurse for the observation period. That hand-off — a **nursing assignment** —
+is what scopes the whole module: a nurse sees exactly the patients assigned to
+them, and every medication log, observation, note and alert hangs off one.
+
+Ownership is split, and enforced server-side rather than only hidden in the UI:
+
+| | Doctor | Nurse |
+|---|---|---|
+| Assign / reassign / close the watch | ✅ | — |
+| Treatment plan & care instructions | ✅ | read-only |
+| Medication schedule (which drugs, how often) | ✅ | read-only |
+| Log each dose (completed / delayed / missed / skipped) | — | ✅ |
+| Vitals, symptoms, recovery, complications | — | ✅ |
+| Nursing notes & shift handover | — | ✅ |
+| Raise an alert | — | ✅ |
+| Acknowledge / resolve an alert | ✅ | — |
+
+Neither side can do the other's job, which is what makes the record an audit
+trail rather than a shared scratchpad.
+
+**Escalation is partly automatic.** Marking a dose *missed*, or recording
+vitals outside the ward ranges in `models/patient_observation.py`, raises a
+clinical alert and notifies the treating doctor without the nurse having to
+remember to escalate. Anything else the nurse flags by hand.
+
+**Where things live**
+
+- Nurse portal: `/nurse/login` → `/nurse` (its own layout; doctors and admins
+  are redirected out, and nurses are redirected out of `/dashboard`)
+- Doctor's remote monitor: `/dashboard/nursing` — compliance, open alerts and
+  the full nursing log for every patient they've handed over
+- API: `/api/nursing/*` (`routes/nursing_routes.py`), scoped by
+  `helpers/nursing_access.py`
+- Live updates ride a `nursing_changed` socket event, so a doctor watching a
+  record sees the nurse's entries as they land
+
+The timeline at `GET /api/nursing/assignments/<id>/timeline` is assembled from
+the four record tables on read — there is no separate timeline table, so there
+is no second copy of the truth to disagree with the first.

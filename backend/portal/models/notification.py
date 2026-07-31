@@ -11,7 +11,14 @@ class Notification(db.Model):
     )
     # Drives the icon/accent the bell menu renders for each row.
     category = db.Column(
-        db.Enum("appointment", "consultation", "report", "system", name="notification_category"),
+        db.Enum(
+            "appointment",
+            "consultation",
+            "report",
+            "nursing",
+            "system",
+            name="notification_category",
+        ),
         nullable=False,
         default="system",
     )

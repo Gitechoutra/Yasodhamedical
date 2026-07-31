@@ -3,23 +3,40 @@
 #   copy config\dev.ini.example config\dev.ini     (then fill in the blanks)
 #
 # config.py reads config/dev.ini by default, or config/prod.ini when
-# APP_ENV=production. A real environment variable always wins over the value
-# written here -- the variable name is listed above each key -- so a
-# production host can inject its secrets without putting them on disk.
+# APP_ENV=production. Precedence, first hit wins:
 #
-# Values are read literally: '%', '$' and spaces need no escaping. Comments
-# must be on their own line; anything after '=' is part of the value.
+#   1. a real environment variable   -- the name is listed above each key
+#   2. a variable in backend/.env
+#   3. the value written here
+#   4. config.py's built-in default
+#
+# so a production host can inject its secrets without putting them on disk.
+#
+# Values are read literally -- no %(...)s interpolation, so '%', '$' and
+# spaces need no escaping. Comments must be on their own line; anything after
+# '=' is part of the value. A key left blank falls back to the built-in
+# default, except where blank is itself the documented answer.
 
 [flask]
-# FLASK_ENV -- development | production
+# FLASK_ENV / APP_ENV -- development | testing | production
 env = development
 
-# SECRET_KEY / JWT_SECRET_KEY -- long random strings, generate with:
+# SECRET_KEY -- long random string, generate with:
 #   python -c "import secrets; print(secrets.token_urlsafe(48))"
 secret_key =
-jwt_secret_key =
+
+[jwt]
+# JWT_SECRET_KEY -- a second, different random string
+secret_key =
+# JWT_ACCESS_HOURS
+access_token_expires_hours = 8
+# JWT_REFRESH_DAYS
+refresh_token_expires_days = 30
 
 [database]
+# DATABASE_URL -- a full SQLAlchemy URL. Set this and the parts below are
+# ignored; leave it blank to build the URL from host/port/name/user/password.
+url =
 # DB_HOST
 host = 127.0.0.1
 # DB_PORT
@@ -30,6 +47,18 @@ name = hospital
 user = root
 # DB_PASSWORD
 password =
+# TEST_DB_NAME -- used only by TestingConfig, never by a running server.
+test_name = hospital_test
+# SQL_ECHO -- log every statement. Noisy; useful when chasing a query.
+echo = false
+# Pooling. Only ProductionConfig applies size/overflow/timeout -- the dev
+# server is single-user and does not need a tuned pool.
+# DB_POOL_SIZE / DB_MAX_OVERFLOW / DB_POOL_TIMEOUT / DB_POOL_RECYCLE
+pool_size = 10
+max_overflow = 20
+pool_timeout = 30
+# Below MySQL's wait_timeout, so a recycled connection is never a dead one.
+pool_recycle = 280
 
 [ai]
 # GEMINI_API_KEY
@@ -40,7 +69,7 @@ gemini_model = gemini-flash-latest
 whisper_model = small
 # WHISPER_LANGUAGE -- leave empty so Whisper auto-detects the spoken language
 # per segment (handles English/Hindi/Telugu/Tamil code-switching); it always
-# translates to English.
+# translates to English. Empty is the intended value here, not a blank to fill.
 whisper_language =
 
 [server]
@@ -49,6 +78,12 @@ cors_origins = http://localhost:5173
 # PORTAL_BASE_URL -- where the frontend is reachable. Encoded in the QR code
 # printed on consultation reports so a scan opens the record.
 portal_base_url = http://localhost:5173
+
+[uploads]
+# UPLOAD_FOLDER -- where avatars and patient photos are written. Blank means
+# backend/uploads. Point this at a mounted volume in production so uploaded
+# images survive a redeploy.
+folder =
 
 # Printed on the consultation report letterhead and footer.
 [hospital]

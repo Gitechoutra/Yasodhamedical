@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { HiOutlineMicrophone, HiOutlineStop, HiArrowLeft } from "react-icons/hi2";
+import {
+  HiOutlineMicrophone,
+  HiOutlineStop,
+  HiArrowLeft,
+  HiOutlineHeart,
+} from "react-icons/hi2";
 import PatientInfoPanel from "../components/PatientInfoPanel";
 import SummaryPanel from "../components/SummaryPanel";
+import AssignNurseModal from "../components/nursing/AssignNurseModal";
 import {
   endConsultation,
   fetchConsultation,
@@ -37,6 +43,7 @@ export default function ConsultationRoom() {
   const [isRecording, setIsRecording] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [assigningNurse, setAssigningNurse] = useState(false);
   const [, forceTick] = useState(0);
 
   // sessionActiveRef drives the segment-record loop; it's a ref (not state)
@@ -191,6 +198,18 @@ export default function ConsultationRoom() {
             )}
           </div>
         )}
+
+        {/* Handing the patient to a nurse only makes sense once the visit is
+            over and there's a prescription to carry across. */}
+        {isCompleted && canManage && (
+          <button
+            onClick={() => setAssigningNurse(true)}
+            className="flex items-center gap-1.5 rounded-full bg-teal-600 px-4 py-1.5 text-sm font-semibold text-white shadow-md transition hover:bg-teal-700"
+          >
+            <HiOutlineHeart className="h-4 w-4" />
+            Assign nurse
+          </button>
+        )}
       </div>
 
       {errorMsg && (
@@ -264,6 +283,20 @@ export default function ConsultationRoom() {
           )}
         </div>
       </div>
+
+      {assigningNurse && (
+        <AssignNurseModal
+          patientId={consultation.patient_id}
+          patientName={consultation.patient}
+          consultationId={consultation.id}
+          defaultPlan={consultation.summary?.possible_diagnosis || ""}
+          onClose={() => setAssigningNurse(false)}
+          onAssigned={(assignment) => {
+            setAssigningNurse(false);
+            navigate(`/dashboard/nursing/${assignment.id}`);
+          }}
+        />
+      )}
     </div>
   );
 }

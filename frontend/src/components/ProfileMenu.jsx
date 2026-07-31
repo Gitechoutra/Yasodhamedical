@@ -27,25 +27,31 @@ export default function ProfileMenu() {
     navigate(path);
   }
 
+  // Nurses live under /nurse, everyone else under /dashboard. The same menu
+  // serves both rather than each module growing its own copy.
+  const isNurse = user?.role === "nurse";
+  const home = isNurse ? "/nurse" : "/dashboard";
+  const loginPath = isNurse ? "/nurse/login" : "/login";
+
   async function handleLogout() {
     setLoggingOut(true);
     try {
       await logout();
-      navigate("/login", { replace: true });
+      navigate(loginPath, { replace: true });
     } finally {
       setLoggingOut(false);
     }
   }
 
   const items = [
-    { label: "My Profile", icon: HiOutlineUserCircle, onClick: () => go("/dashboard/profile") },
+    { label: "My Profile", icon: HiOutlineUserCircle, onClick: () => go(`${home}/profile`) },
     {
       label: "Change profile picture",
       icon: HiOutlineCamera,
       // The profile page reads this flag and opens its file picker on arrival.
-      onClick: () => go("/dashboard/profile?avatar=1"),
+      onClick: () => go(`${home}/profile?avatar=1`),
     },
-    { label: "Settings", icon: HiOutlineCog6Tooth, onClick: () => go("/dashboard/settings") },
+    { label: "Settings", icon: HiOutlineCog6Tooth, onClick: () => go(`${home}/settings`) },
   ];
 
   return (

@@ -18,8 +18,10 @@ export default function Login() {
     e.preventDefault();
     setErrorMsg("");
     try {
-      await login(email, password);
-      navigate(redirectTo, { replace: true });
+      const user = await login(email, password);
+      // Nurses have their own module. Signing in here still works rather than
+      // being rejected — a bookmarked login shouldn't be a dead end.
+      navigate(user?.role === "nurse" ? "/nurse" : redirectTo, { replace: true });
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Unable to sign in. Please try again.");
     }

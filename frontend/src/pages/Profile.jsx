@@ -234,7 +234,7 @@ export default function Profile() {
               {saving ? "Saving…" : "Save changes"}
             </button>
             <Link
-              to="/dashboard/settings"
+              to={`${user?.role === "nurse" ? "/nurse" : "/dashboard"}/settings`}
               className="text-sm font-semibold text-brand-600 transition hover:text-brand-700"
             >
               Change password →
