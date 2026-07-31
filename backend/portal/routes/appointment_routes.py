@@ -130,7 +130,10 @@ def create_appointment():
     if not patient:
         return error("Patient not found", status=404)
 
-<<<<<<< HEAD
+    department = Department.query.get(department_id)
+    if not department:
+        return error("Department not found", status=404)
+
     # OP billing rule: first-ever OP for this patient is always paid. A
     # returning patient's new OP is free if it's within 15 days of their
     # last one (follow-up), otherwise it's a fresh paid registration.
@@ -141,11 +144,6 @@ def create_appointment():
         days_since_last_visit = (now - patient.last_registered_at).days
         patient.op_status = "free" if days_since_last_visit <= 15 else "paid"
     patient.last_registered_at = now
-=======
-    department = Department.query.get(department_id)
-    if not department:
-        return error("Department not found", status=404)
->>>>>>> 553ef01768a8ed935bd963ab73f95e52a4cae980
 
     appointment = Appointment(
         patient_id=patient_id,

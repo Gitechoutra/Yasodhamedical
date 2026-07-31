@@ -1,5 +1,6 @@
 import { HiOutlineArrowRightCircle, HiOutlineClock, HiOutlinePlay } from "react-icons/hi2";
 import Avatar from "./Avatar";
+import OpStatusBadge from "./OpStatusBadge";
 
 const STATUS_META = {
   in_progress: { label: "Ongoing consultation", className: "bg-emerald-100 text-emerald-700" },
@@ -67,6 +68,7 @@ export default function AppointmentCard({ appointment, isNext, onStart, onResume
             <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${status.className}`}>
               {status.label}
             </span>
+            <OpStatusBadge status={appointment.patient_op_status} />
             {isNext && (
               <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-semibold text-brand-700">
                 Next up
