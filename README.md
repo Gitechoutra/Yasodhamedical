@@ -31,10 +31,10 @@ AI_medical/
 
 ### 1. Database
 
-MySQL database `yasodha_ai` already created locally. To recreate elsewhere:
+MySQL database `hospital` already created locally. To recreate elsewhere:
 
 ```sql
-CREATE DATABASE yasodha_ai CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE hospital CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
 ### 2. Backend
@@ -42,13 +42,19 @@ CREATE DATABASE yasodha_ai CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```bash
 cd backend
 python -m venv venv
-./venv/Scripts/activate        # Windows
+./venv/Scripts/activate            # Windows
 pip install -r requirements.txt
-cp .env.example .env           # then fill in DB_PASSWORD, SECRET_KEY, etc.
-flask db upgrade                # create tables
-python -m portal.seeds          # seed roles + demo admin/doctor accounts
-python run.py                   # http://127.0.0.1:5000
+cp config/dev.ini.example config/dev.ini   # then fill in the DB password,
+                                           # secret keys and Gemini key
+flask db upgrade                    # create tables
+python -m portal.seeds              # seed roles + demo admin/doctor accounts
+python app.py                       # http://127.0.0.1:5000
 ```
+
+Configuration lives in `backend/config/dev.ini` (git-ignored). `config.py`
+reads it, or `config/prod.ini` when `APP_ENV=production`; any single value
+can be overridden by an environment variable of the name documented in
+`dev.ini.example`, so a server never needs the file on disk.
 
 Seeded logins:
 - Admin: `admin@yasodhahospitals.com` / `Admin@123`

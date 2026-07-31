@@ -1,26 +1,55 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { HiOutlinePlus, HiOutlineCalendarDays } from "react-icons/hi2";
+import { HiOutlinePlus, HiOutlineCalendarDays, HiOutlineCamera } from "react-icons/hi2";
+import Avatar from "../components/Avatar";
 import Modal from "../components/Modal";
 import OpStatusBadge from "../components/OpStatusBadge";
 import { useAuth } from "../context/AuthContext";
-import { fetchPatients, createPatient } from "../services/patientService";
+import useLiveRefresh from "../hooks/useLiveRefresh";
+import { fetchDoctors } from "../services/doctorService";
+import {
+  fetchPatients,
+  createPatient,
+  uploadPatientPhoto,
+  assignPatientDoctor,
+} from "../services/patientService";
 
-function AddPatientModal({ onClose, onCreated }) {
+const MAX_PHOTO_BYTES = 2 * 1024 * 1024; // must match the backend's limit
+
+function AddPatientModal({ onClose, onCreated, doctors, mustAssign }) {
   const [form, setForm] = useState({
     name: "",
     gender: "",
+    dob: "",
     phone: "",
     email: "",
     blood_group: "",
     allergies: "",
     medical_history: "",
+    assigned_doctor_id: "",
   });
+  const [photo, setPhoto] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const photoInputRef = useRef(null);
 
   function update(field) {
     return (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+  }
+
+  function handlePhotoPick(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > MAX_PHOTO_BYTES) {
+      setErrorMsg("Photo must be 2 MB or smaller.");
+      return;
+    }
+    setErrorMsg("");
+    setPhoto(file);
+    // Local preview, so the photo is visible before the patient row exists.
+    setPhotoPreview(URL.createObjectURL(file));
   }
 
   async function handleSubmit(e) {
@@ -28,7 +57,17 @@ function AddPatientModal({ onClose, onCreated }) {
     setSaving(true);
     setErrorMsg("");
     try {
-      const patient = await createPatient(form);
+      // The photo endpoint keys off a patient id, so it can only be sent
+      // once the row exists.
+      let patient = await createPatient(form);
+      if (photo) {
+        try {
+          patient = await uploadPatientPhoto(patient.id, photo);
+        } catch {
+          // The patient is already saved — don't lose that over a photo.
+          setErrorMsg("Patient saved, but the photo could not be uploaded.");
+        }
+      }
       onCreated(patient);
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Could not create patient.");
@@ -43,10 +82,57 @@ function AddPatientModal({ onClose, onCreated }) {
   return (
     <Modal title="Add Patient" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="flex items-center gap-4">
+          <Avatar name={form.name} imageUrl={photoPreview} size="lg" />
+          <div>
+            <button
+              type="button"
+              onClick={() => photoInputRef.current?.click()}
+              className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+            >
+              <HiOutlineCamera className="h-4 w-4" />
+              {photo ? "Change photo" : "Add photo"}
+            </button>
+            <p className="mt-1 text-[11px] text-slate-400">PNG, JPG or WEBP · up to 2 MB</p>
+          </div>
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            onChange={handlePhotoPick}
+            className="hidden"
+          />
+        </div>
+
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">Name *</label>
           <input required className={inputClass} value={form.name} onChange={update("name")} />
         </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">
+              Date of Birth
+            </label>
+            {/* Age on the queue cards is derived from this — without it the
+                card can only show a dash. The min stops a mistyped year
+                (e.g. "0001") from producing an absurd age; the server
+                rejects out-of-range dates too. */}
+            <input
+              type="date"
+              min={`${new Date().getFullYear() - 130}-01-01`}
+              max={new Date().toISOString().slice(0, 10)}
+              className={inputClass}
+              value={form.dob}
+              onChange={update("dob")}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Phone</label>
+            <input className={inputClass} value={form.phone} onChange={update("phone")} />
+          </div>
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Gender</label>
@@ -62,20 +148,42 @@ function AddPatientModal({ onClose, onCreated }) {
             <input className={inputClass} value={form.blood_group} onChange={update("blood_group")} />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Phone</label>
-            <input className={inputClass} value={form.phone} onChange={update("phone")} />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Email</label>
-            <input type="email" className={inputClass} value={form.email} onChange={update("email")} />
-          </div>
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-slate-600">Email</label>
+          <input type="email" className={inputClass} value={form.email} onChange={update("email")} />
         </div>
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">Allergies</label>
           <input className={inputClass} value={form.allergies} onChange={update("allergies")} />
         </div>
+        {mustAssign && (
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">
+              Assign Doctor *
+            </label>
+            {/* Chosen from the condition the patient presents with — this is
+                also what decides who can see the record afterwards. */}
+            <select
+              required
+              className={inputClass}
+              value={form.assigned_doctor_id}
+              onChange={update("assigned_doctor_id")}
+            >
+              <option value="">Select the treating doctor</option>
+              {doctors.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                  {d.specialization ? ` — ${d.specialization}` : ""}
+                  {d.department ? ` (${d.department})` : ""}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-slate-400">
+              Only this doctor will be able to see this patient.
+            </p>
+          </div>
+        )}
+
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">Medical History</label>
           <textarea
@@ -100,24 +208,86 @@ function AddPatientModal({ onClose, onCreated }) {
   );
 }
 
+function AssignDoctorCell({ patient, doctors, onAssigned }) {
+  const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  // Highlighted, because an unassigned patient is invisible to every doctor
+  // until the front desk routes them — it needs to look like an open task.
+  const unassigned = !patient.assigned_doctor;
+
+  async function handleChange(e) {
+    const doctorId = e.target.value;
+    if (!doctorId) return;
+    setSaving(true);
+    setErrorMsg("");
+    try {
+      await assignPatientDoctor(patient.id, doctorId);
+      onAssigned();
+    } catch (err) {
+      setErrorMsg(err.response?.data?.message || "Could not save assignment.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="min-w-[12rem]">
+      <select
+        value={patient.assigned_doctor_id ?? ""}
+        onChange={handleChange}
+        disabled={saving}
+        className={`w-full rounded-lg border px-2 py-1.5 text-xs outline-none transition focus:ring-2 focus:ring-brand-100 disabled:opacity-60 ${
+          unassigned
+            ? "border-amber-300 bg-amber-50 font-semibold text-amber-700"
+            : "border-slate-200 text-slate-700"
+        }`}
+      >
+        <option value="">Unassigned — pick a doctor</option>
+        {doctors.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.name}
+            {d.department ? ` (${d.department})` : ""}
+          </option>
+        ))}
+      </select>
+      {errorMsg && <p className="mt-1 text-[11px] text-red-600">{errorMsg}</p>}
+    </div>
+  );
+}
+
 export default function Patients() {
   const navigate = useNavigate();
   const { user } = useAuth();
   // Scheduling a patient into a department queue is front-desk/admin work —
   // doctors just work whatever lands in their own Appointments queue.
   const canScheduleAppointments = user?.role !== "doctor";
+  // Front desk picks the treating doctor; a doctor registering a patient is
+  // implicitly assigning them to themselves, so no picker is needed.
+  const mustAssign = user?.role !== "doctor";
+
   const [patients, setPatients] = useState([]);
+  const [doctors, setDoctors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
 
-  function load() {
-    setLoading(true);
-    fetchPatients()
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
+    return fetchPatients()
       .then(setPatients)
       .finally(() => setLoading(false));
-  }
+  }, []);
 
-  useEffect(load, []);
+  useEffect(() => {
+    if (!mustAssign) return;
+    fetchDoctors().then(setDoctors).catch(() => setDoctors([]));
+  }, [mustAssign]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Front desk registering a patient should show up here immediately.
+  useLiveRefresh(load);
 
   return (
     <div>
@@ -150,24 +320,52 @@ export default function Patients() {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
-                <th className="px-6 py-3 font-medium">Name</th>
+                <th className="px-6 py-3 font-medium">Patient</th>
+                <th className="px-6 py-3 font-medium">Age</th>
                 <th className="px-6 py-3 font-medium">Gender</th>
                 <th className="px-6 py-3 font-medium">Phone</th>
                 <th className="px-6 py-3 font-medium">Blood Group</th>
+<<<<<<< HEAD
                 <th className="px-6 py-3 font-medium">OP Status</th>
+=======
+                {mustAssign && <th className="px-6 py-3 font-medium">Assigned Doctor</th>}
+>>>>>>> 553ef01768a8ed935bd963ab73f95e52a4cae980
                 {canScheduleAppointments && <th className="px-6 py-3 font-medium"></th>}
               </tr>
             </thead>
             <tbody>
               {patients.map((p) => (
                 <tr key={p.id} className="border-b border-slate-50 last:border-0">
-                  <td className="px-6 py-3 font-medium text-slate-800">{p.name}</td>
+                  <td className="px-6 py-3">
+                    <div className="flex items-center gap-3">
+                      <Avatar name={p.name} imageUrl={p.photo_url} size="sm" />
+                      <div>
+                        <p className="font-medium text-slate-800">{p.name}</p>
+                        <p className="text-xs text-slate-400">{p.code}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-3 text-slate-500">
+                    {p.age != null ? `${p.age}` : "—"}
+                  </td>
                   <td className="px-6 py-3 capitalize text-slate-500">{p.gender || "—"}</td>
                   <td className="px-6 py-3 text-slate-500">{p.phone || "—"}</td>
                   <td className="px-6 py-3 text-slate-500">{p.blood_group || "—"}</td>
+<<<<<<< HEAD
                   <td className="px-6 py-3">
                     <OpStatusBadge status={p.op_status} />
                   </td>
+=======
+                  {mustAssign && (
+                    <td className="px-6 py-3 text-slate-500">
+                      <AssignDoctorCell
+                        patient={p}
+                        doctors={doctors}
+                        onAssigned={() => load(true)}
+                      />
+                    </td>
+                  )}
+>>>>>>> 553ef01768a8ed935bd963ab73f95e52a4cae980
                   {canScheduleAppointments && (
                     <td className="px-6 py-3 text-right">
                       <button
@@ -188,6 +386,8 @@ export default function Patients() {
 
       {showAddModal && (
         <AddPatientModal
+          doctors={doctors}
+          mustAssign={mustAssign}
           onClose={() => setShowAddModal(false)}
           onCreated={() => {
             setShowAddModal(false);

@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
+import Avatar from "../components/Avatar";
 import { useAuth } from "../context/AuthContext";
 import { changePassword } from "../services/authService";
 
@@ -54,12 +56,23 @@ export default function Settings() {
       <p className="mt-1 text-sm text-slate-500">Manage your account</p>
 
       <div className="mt-6 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-900">Account</h2>
-        <div className="mt-4 grid grid-cols-2 gap-4">
-          <Field label="Name" value={user?.name} />
-          <Field label="Email" value={user?.email} />
-          <Field label="Role" value={user?.role} />
-          {user?.department && <Field label="Department" value={user.department} />}
+        <div className="flex items-start justify-between gap-4">
+          <h2 className="text-sm font-semibold text-slate-900">Account</h2>
+          <Link
+            to="/dashboard/profile"
+            className="text-xs font-semibold text-brand-600 transition hover:text-brand-700"
+          >
+            Edit profile →
+          </Link>
+        </div>
+        <div className="mt-4 flex items-center gap-4">
+          <Avatar name={user?.name} imageUrl={user?.avatar_url} size="lg" />
+          <div className="grid flex-1 grid-cols-2 gap-4">
+            <Field label="Name" value={user?.name} />
+            <Field label="Email" value={user?.email} />
+            <Field label="Role" value={user?.role} />
+            {user?.department && <Field label="Department" value={user.department} />}
+          </div>
         </div>
       </div>
 

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { HiOutlineArrowDownTray } from "react-icons/hi2";
+import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchReports, downloadReport } from "../services/reportService";
 
 export default function Reports() {
@@ -7,11 +8,19 @@ export default function Reports() {
   const [loading, setLoading] = useState(true);
   const [downloadingId, setDownloadingId] = useState(null);
 
-  useEffect(() => {
-    fetchReports()
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
+    return fetchReports()
       .then(setReports)
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // A report generated elsewhere should appear without a page refresh.
+  useLiveRefresh(load);
 
   async function handleDownload(report) {
     setDownloadingId(report.id);
@@ -23,11 +32,18 @@ export default function Reports() {
     }
   }
 
+  // The dashboard card shows both numbers, so the page it links to has to
+  // agree. Counted from the same rows on screen rather than a second request.
+  const todayKey = new Date().toDateString();
+  const todaysReports = reports.filter(
+    (r) => r.generated_at && new Date(r.generated_at).toDateString() === todayKey
+  ).length;
+
   return (
     <div>
       <h1 className="text-2xl font-bold text-slate-900">Reports</h1>
       <p className="mt-1 text-sm text-slate-500">
-        {reports.length} report{reports.length === 1 ? "" : "s"} generated
+        {todaysReports} generated today · {reports.length} total
       </p>
 
       <div className="mt-6 rounded-2xl border border-slate-100 bg-white shadow-sm">

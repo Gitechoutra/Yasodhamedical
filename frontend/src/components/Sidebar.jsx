@@ -17,6 +17,10 @@ import Logo from "./Logo";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
+// `hideFrom` keeps a nav item out of a role's sidebar. Doctors don't manage
+// org structure — staff, departments and user accounts are admin screens —
+// so those three are hidden from the doctor module entirely. The routes
+// themselves are blocked in AppRouter, not just hidden here.
 const NAV_ITEMS = [
   { to: "/dashboard", label: "Dashboard", icon: HiOutlineSquares2X2, end: true },
   { to: "/dashboard/patients", label: "Patients", icon: HiOutlineUsers },
@@ -25,15 +29,27 @@ const NAV_ITEMS = [
   { to: "/dashboard/prescriptions", label: "Prescriptions", icon: HiOutlineClipboardDocumentList },
   { to: "/dashboard/reports", label: "Reports", icon: HiOutlineDocumentChartBar },
   { to: "/dashboard/medicines", label: "Medicines", icon: HiOutlineBeaker },
-  { to: "/dashboard/doctors", label: "Doctors", icon: HiOutlineUserGroup },
-  { to: "/dashboard/departments", label: "Departments", icon: HiOutlineBuildingOffice2 },
-  { to: "/dashboard/users", label: "Users", icon: HiOutlineIdentification },
+  { to: "/dashboard/doctors", label: "Doctors", icon: HiOutlineUserGroup, hideFrom: ["doctor"] },
+  {
+    to: "/dashboard/departments",
+    label: "Departments",
+    icon: HiOutlineBuildingOffice2,
+    hideFrom: ["doctor"],
+  },
+  {
+    to: "/dashboard/users",
+    label: "Users",
+    icon: HiOutlineIdentification,
+    hideFrom: ["doctor"],
+  },
   { to: "/dashboard/settings", label: "Settings", icon: HiOutlineCog6Tooth },
 ];
 
 export default function Sidebar() {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
+
+  const navItems = NAV_ITEMS.filter(({ hideFrom }) => !hideFrom?.includes(user?.role));
 
   async function handleLogout() {
     await logout();
@@ -45,7 +61,7 @@ export default function Sidebar() {
       <Logo className="px-2" />
 
       <nav className="mt-8 flex-1 space-y-1 overflow-y-auto">
-        {NAV_ITEMS.map(({ to, label, icon: Icon, end }) => (
+        {navItems.map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}

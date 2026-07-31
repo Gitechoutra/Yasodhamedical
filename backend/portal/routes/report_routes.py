@@ -1,10 +1,12 @@
 import os
 
 from flask import Blueprint, request, send_file
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from portal.extensions import db
 from portal.helpers.auth_helper import get_current_doctor
+from portal.helpers.broadcast import dashboard_changed
+from portal.helpers.notify import notify
 from portal.helpers.response import error, success
 from portal.models.consultation import Consultation
 from portal.models.report import Report
@@ -49,6 +51,13 @@ def generate_report():
         return error("Report can only be generated after the consultation is completed", status=422)
     if not _can_access(consultation):
         return error("You don't have access to this consultation", status=403)
+    if not consultation.prescription_verified_at:
+        # The PDF is the document that leaves the hospital, so it must not be
+        # printable until a doctor has signed off what it prescribes.
+        return error(
+            "Verify the prescription before generating the report",
+            status=409,
+        )
 
     os.makedirs(UPLOADS_DIR, exist_ok=True)
     filename = f"consultation_{consultation.id}.pdf"
@@ -65,7 +74,25 @@ def generate_report():
         db.session.add(report)
     else:
         report.file_path = filename
+
+    # Tells the owning doctor their report exists when someone else (admin,
+    # front desk) generated it; notify() drops the case where they did it.
+    owning_doctor_user_id = (
+        consultation.doctor.user_id if consultation.doctor else None
+    )
+    if owning_doctor_user_id:
+        patient_name = consultation.patient.name if consultation.patient else "a patient"
+        notify(
+            [owning_doctor_user_id],
+            title="Report ready",
+            body=f"The consultation report for {patient_name} has been generated.",
+            category="report",
+            link="/dashboard/reports",
+            exclude_user_id=get_jwt_identity(),
+        )
+
     db.session.commit()
+    dashboard_changed("report_generated")
 
     return success(report.to_dict(), message="Report generated", status=201)
 

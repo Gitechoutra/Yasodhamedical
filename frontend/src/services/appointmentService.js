@@ -1,7 +1,8 @@
 import api from "./api";
 
-export async function fetchAppointments() {
-  const res = await api.get("/appointments");
+export async function fetchAppointments(params = {}) {
+  // e.g. { filter: "today" } for the dashboard's pending-and-ongoing queue.
+  const res = await api.get("/appointments", { params });
   return res.data.data;
 }
 

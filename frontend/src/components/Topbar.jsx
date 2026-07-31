@@ -1,14 +1,10 @@
-import { HiOutlineBell, HiOutlineCog6Tooth, HiOutlineMagnifyingGlass } from "react-icons/hi2";
-import { useAuth } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom";
+import { HiOutlineCog6Tooth, HiOutlineMagnifyingGlass } from "react-icons/hi2";
+import NotificationMenu from "./NotificationMenu";
+import ProfileMenu from "./ProfileMenu";
 
 export default function Topbar() {
-  const { user } = useAuth();
-  const initials = (user?.name || "?")
-    .split(" ")
-    .map((p) => p[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
+  const navigate = useNavigate();
 
   return (
     <header className="flex items-center justify-between border-b border-slate-100 bg-white px-8 py-4">
@@ -21,16 +17,16 @@ export default function Topbar() {
         />
       </div>
 
-      <div className="flex items-center gap-4">
-        <button className="grid h-10 w-10 place-items-center rounded-full text-slate-500 transition hover:bg-slate-50">
-          <HiOutlineBell className="h-5 w-5" />
-        </button>
-        <button className="grid h-10 w-10 place-items-center rounded-full text-slate-500 transition hover:bg-slate-50">
+      <div className="flex items-center gap-2">
+        <NotificationMenu />
+        <button
+          onClick={() => navigate("/dashboard/settings")}
+          aria-label="Settings"
+          className="grid h-10 w-10 place-items-center rounded-full text-slate-500 transition hover:bg-slate-50"
+        >
           <HiOutlineCog6Tooth className="h-5 w-5" />
         </button>
-        <div className="grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-sm font-semibold text-white">
-          {initials}
-        </div>
+        <ProfileMenu />
       </div>
     </header>
   );

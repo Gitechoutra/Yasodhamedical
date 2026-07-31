@@ -21,6 +21,7 @@ class GeneratedPrescription(db.Model):
 
     def to_dict(self):
         return {
+            "id": self.id,
             "medicine_name": self.medicine_name,
             "dose": self.dose,
             "frequency": self.frequency,

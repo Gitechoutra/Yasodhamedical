@@ -1,13 +1,20 @@
+import os
+import re
 from datetime import datetime
 
-from flask import Blueprint, request
+from flask import Blueprint, request, send_from_directory
 from flask_jwt_extended import create_access_token, create_refresh_token, get_jwt_identity, jwt_required
 
 from portal.extensions import db
 from portal.helpers.response import error, success
+from portal.helpers.uploads import ImageUploadError, delete_image, save_image, upload_dir
 from portal.models.user import User
 
 auth_bp = Blueprint("auth", __name__)
+
+AVATARS_SUBDIR = "avatars"
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 @auth_bp.post("/login")
@@ -51,6 +58,98 @@ def me():
     if not user:
         return error("User not found", status=404)
     return success(user.to_dict())
+
+
+@auth_bp.patch("/me")
+@jwt_required()
+def update_me():
+    """Lets a signed-in user edit their own account details.
+
+    Deliberately narrow: role, is_active and department are org structure, not
+    self-service — changing those stays an admin action.
+    """
+    user = User.query.get(get_jwt_identity())
+    if not user:
+        return error("User not found", status=404)
+
+    payload = request.get_json(silent=True) or {}
+
+    if "name" in payload:
+        name = (payload.get("name") or "").strip()
+        if not name:
+            return error("Name cannot be empty", status=422)
+        user.name = name
+
+    if "email" in payload:
+        email = (payload.get("email") or "").strip().lower()
+        if not EMAIL_RE.match(email):
+            return error("Enter a valid email address", status=422)
+        clash = User.query.filter(User.email == email, User.id != user.id).first()
+        if clash:
+            return error("That email is already in use", status=409)
+        user.email = email
+
+    # Doctor-only fields live on the doctor profile, not the user row.
+    if user.doctor_profile:
+        if "specialization" in payload:
+            user.doctor_profile.specialization = (payload.get("specialization") or "").strip() or None
+        if "registration_no" in payload:
+            user.doctor_profile.registration_no = (payload.get("registration_no") or "").strip() or None
+
+    db.session.commit()
+    return success(user.to_dict(), message="Profile updated")
+
+
+@auth_bp.post("/me/avatar")
+@jwt_required()
+def upload_avatar():
+    user = User.query.get(get_jwt_identity())
+    if not user:
+        return error("User not found", status=404)
+
+    try:
+        filename = save_image(request.files.get("avatar"), AVATARS_SUBDIR)
+    except ImageUploadError as exc:
+        return error(exc.message, status=exc.status)
+
+    previous = user.avatar_path
+    user.avatar_path = filename
+    db.session.commit()
+
+    delete_image(previous, AVATARS_SUBDIR)
+
+    return success(user.to_dict(), message="Profile picture updated")
+
+
+@auth_bp.delete("/me/avatar")
+@jwt_required()
+def delete_avatar():
+    user = User.query.get(get_jwt_identity())
+    if not user:
+        return error("User not found", status=404)
+
+    previous = user.avatar_path
+    user.avatar_path = None
+    db.session.commit()
+
+    delete_image(previous, AVATARS_SUBDIR)
+
+    return success(user.to_dict(), message="Profile picture removed")
+
+
+@auth_bp.get("/avatar/<path:filename>")
+def serve_avatar(filename):
+    """Serves an avatar image.
+
+    Unauthenticated on purpose: an <img> tag cannot send the Authorization
+    header, and blob-fetching every avatar would defeat browser caching. The
+    filename is 32 random hex chars, so a URL is only reachable by someone
+    who was already shown it. send_from_directory rejects traversal itself.
+    """
+    directory = upload_dir(AVATARS_SUBDIR)
+    if not os.path.exists(os.path.join(directory, filename)):
+        return error("Image not found", status=404)
+    return send_from_directory(directory, filename, max_age=3600)
 
 
 @auth_bp.post("/password")

@@ -1,5 +1,9 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { login as loginRequest, logout as logoutRequest } from "../services/authService";
+import {
+  fetchCurrentUser,
+  login as loginRequest,
+  logout as logoutRequest,
+} from "../services/authService";
 
 const AuthContext = createContext(null);
 
@@ -41,12 +45,28 @@ export function AuthProvider({ children }) {
     setUser(null);
   }
 
+  /** Replaces the cached user after a profile/avatar edit, so the topbar and
+   *  every other consumer re-render without a page reload. */
+  function updateUser(updatedUser) {
+    setUser(updatedUser);
+  }
+
+  /** Re-reads the user from the API — used on mount so a profile edited in
+   *  another tab (or a stale localStorage copy) doesn't linger. */
+  async function refreshUser() {
+    const fresh = await fetchCurrentUser();
+    setUser(fresh);
+    return fresh;
+  }
+
   const value = {
     user,
     isAuthenticated: Boolean(user),
     isLoading,
     login,
     logout,
+    updateUser,
+    refreshUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -10,6 +10,8 @@ import {
 } from "../services/consultationService";
 import { getSocket, joinConsultationRoom } from "../services/socket";
 
+const SEGMENT_MS = 8000; // length of each auto-recorded chunk while "live"
+
 function formatElapsed(startedAt) {
   if (!startedAt) return "00:00";
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
@@ -33,19 +35,14 @@ export default function ConsultationRoom() {
   const [consultation, setConsultation] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
   const [isEnding, setIsEnding] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [, forceTick] = useState(0);
 
-  // The mic runs as ONE continuous recording per take — never auto-stopped —
-  // so audio capture is never paused waiting on a transcription round-trip.
-  // A "take" only ends when the doctor clicks stop (or ends the consultation),
-  // which is a visible, deliberate gap rather than a silent automatic one.
-  const recorderRef = useRef(null);
-  const chunksRef = useRef([]);
+  // sessionActiveRef drives the segment-record loop; it's a ref (not state)
+  // so the async loop always sees the latest value without a stale closure.
+  const sessionActiveRef = useRef(false);
   const streamRef = useRef(null);
-  const stopResolverRef = useRef(null);
 
   function addMessageIfNew(message) {
     setConsultation((c) => {
@@ -70,6 +67,7 @@ export default function ConsultationRoom() {
     return () => {
       socket.off("new_message", onNewMessage);
       socket.off("consultation_completed", onCompleted);
+      sessionActiveRef.current = false;
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -81,64 +79,60 @@ export default function ConsultationRoom() {
     return () => clearInterval(interval);
   }, [consultation]);
 
+  // Records one SEGMENT_MS clip and resolves with the completed Blob. Each
+  // segment is its own full MediaRecorder start/stop cycle (not a timeslice
+  // on one long recorder) so every blob is independently a valid, decodable
+  // audio file for Whisper.
+  function recordSegment(stream, durationMs) {
+    return new Promise((resolve) => {
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      recorder.onstop = () => {
+        resolve(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+      };
+      recorder.start();
+      setTimeout(() => {
+        if (recorder.state !== "inactive") recorder.stop();
+      }, durationMs);
+    });
+  }
+
+  async function recordingLoop(stream) {
+    while (sessionActiveRef.current) {
+      const blob = await recordSegment(stream, SEGMENT_MS);
+      if (!sessionActiveRef.current) break;
+      if (blob.size > 0) {
+        try {
+          const message = await transcribeTurn(id, "unknown", blob);
+          addMessageIfNew(message);
+        } catch {
+          // A single silent/unclear segment shouldn't stop the whole session.
+        }
+      }
+    }
+  }
+
   async function startRecording() {
     setErrorMsg("");
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     streamRef.current = stream;
-    chunksRef.current = [];
-
-    const recorder = new MediaRecorder(stream);
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-    recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-      stopResolverRef.current?.(blob);
-      stopResolverRef.current = null;
-    };
-
-    recorderRef.current = recorder;
-    recorder.start();
+    sessionActiveRef.current = true;
     setIsRecording(true);
+    recordingLoop(stream);
   }
 
-  // Stops the active recorder and resolves with its complete Blob (or null
-  // if nothing was recording). Whisper handles long-form audio natively, so
-  // this "take" can span the whole visit with no internal chunking at all.
-  function stopRecorderAndGetBlob() {
-    return new Promise((resolve) => {
-      if (!recorderRef.current || recorderRef.current.state === "inactive") {
-        resolve(null);
-        return;
-      }
-      stopResolverRef.current = resolve;
-      recorderRef.current.stop();
-    });
-  }
-
-  async function stopRecording() {
+  function stopRecording() {
+    sessionActiveRef.current = false;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
     setIsRecording(false);
-    setIsTranscribing(true);
-    setErrorMsg("");
-    try {
-      const blob = await stopRecorderAndGetBlob();
-      if (blob && blob.size > 0) {
-        const message = await transcribeTurn(id, "unknown", blob);
-        addMessageIfNew(message);
-      }
-    } catch (err) {
-      setErrorMsg(err.response?.data?.message || "Could not transcribe that recording.");
-    } finally {
-      setIsTranscribing(false);
-    }
   }
 
   async function handleEndConsultation() {
-    if (isRecording) {
-      await stopRecording(); // capture and transcribe whatever's still running first
-    }
+    stopRecording();
     setIsEnding(true);
     setErrorMsg("");
     try {
@@ -185,14 +179,10 @@ export default function ConsultationRoom() {
             {canManage ? (
               <button
                 onClick={handleEndConsultation}
-                disabled={isEnding || isTranscribing}
+                disabled={isEnding}
                 className="rounded-full border border-red-200 px-4 py-1.5 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
               >
-                {isEnding
-                  ? "Generating summary…"
-                  : isTranscribing
-                    ? "Finishing up…"
-                    : "End Consultation"}
+                {isEnding ? "Generating summary…" : "End Consultation"}
               </button>
             ) : (
               <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-500">
@@ -217,7 +207,7 @@ export default function ConsultationRoom() {
                 {consultation.messages.length === 0 ? (
                   <p className="py-10 text-center text-sm text-slate-400">
                     {canManage
-                      ? "Nothing recorded yet. Press the mic and have the whole consultation normally — no need to tag who's speaking, and no need to pause."
+                      ? "Nothing recorded yet. Press the mic and have the consultation normally — no need to tag who's speaking."
                       : "Nothing recorded yet."}
                   </p>
                 ) : (
@@ -228,18 +218,15 @@ export default function ConsultationRoom() {
               {canManage ? (
                 <div className="mt-4 flex flex-col items-center gap-3 border-t border-slate-100 pt-4">
                   <p className="text-sm text-slate-400">
-                    {isTranscribing
-                      ? "Transcribing… this can take a little while for longer recordings."
-                      : isRecording
-                        ? "Recording — keep talking normally, nothing is missed until you stop."
-                        : "Press the mic to start recording. Leave it running for the whole visit for best results."}
+                    {isRecording
+                      ? "Recording… just talk normally, the AI will sort out who said what."
+                      : "Press the mic to start recording the consultation."}
                   </p>
 
                   <button
                     onClick={isRecording ? stopRecording : startRecording}
-                    disabled={isTranscribing}
                     aria-label={isRecording ? "Stop recording" : "Start recording"}
-                    className={`grid h-14 w-14 place-items-center rounded-full text-white shadow-lg transition disabled:opacity-60 ${
+                    className={`grid h-14 w-14 place-items-center rounded-full text-white shadow-lg transition ${
                       isRecording
                         ? "animate-pulse bg-red-500 shadow-red-500/40"
                         : "bg-gradient-to-br from-brand-500 to-brand-700 shadow-brand-500/40"
@@ -266,6 +253,13 @@ export default function ConsultationRoom() {
               prescriptions={consultation.prescriptions}
               consultationId={consultation.id}
               patientName={consultation.patient}
+              verified={consultation.prescription_verified}
+              verifiedBy={consultation.prescription_verified_by}
+              verifiedAt={consultation.prescription_verified_at}
+              canManage={canManage}
+              // Verifying or editing returns the whole updated consultation,
+              // so the panel re-renders from the server's copy.
+              onConsultationUpdated={setConsultation}
             />
           )}
         </div>

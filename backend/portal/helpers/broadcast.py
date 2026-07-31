@@ -1,0 +1,28 @@
+"""Push notifications for things that change the dashboard's numbers.
+
+Every route that creates, starts, finishes or files something calls
+`dashboard_changed` after its commit. The frontend refetches the summary on
+that signal instead of waiting for a poll, so the cards stay honest while a
+doctor watches them.
+
+Emitted globally rather than per-room: the counts are scoped per viewer by
+the summary endpoint anyway, and the payload carries no patient data — only
+the reason it fired.
+"""
+
+from portal.extensions import socketio
+
+DASHBOARD_EVENT = "dashboard_changed"
+
+
+def dashboard_changed(reason):
+    """Tells connected clients their dashboard counts may be stale.
+
+    Never lets a broadcast failure break the request that triggered it — the
+    real work is already committed, and a missed ping only costs the client
+    its next poll.
+    """
+    try:
+        socketio.emit(DASHBOARD_EVENT, {"reason": reason})
+    except Exception:  # noqa: BLE001 - a dropped notification must not 500 the caller
+        pass
