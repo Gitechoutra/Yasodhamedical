@@ -25,7 +25,7 @@ export default function NurseSidebar() {
 
   async function handleLogout() {
     await logout();
-    navigate("/nurse/login", { replace: true });
+    navigate("/login", { replace: true });
   }
 
   return (

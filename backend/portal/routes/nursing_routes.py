@@ -16,13 +16,27 @@ trail rather than a shared scratchpad.
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, request
-from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
+from flask_jwt_extended import get_jwt, get_jwt_identity
 
 from portal.extensions import db
 from portal.helpers.auth_helper import get_current_doctor, get_current_nurse
+from portal.helpers.audit import (
+    ALERT_ANSWERED,
+    ALERT_RAISED,
+    HANDOVER,
+    MEDICATION_ADMINISTERED,
+    MEDICATION_ORDERED,
+    MESSAGE_SENT,
+    NOTE_ADDED,
+    NURSING_ASSIGNED,
+    NURSING_CLOSED,
+    NURSING_UPDATED,
+    OBSERVATION_RECORDED,
+    audit,
+)
 from portal.helpers.broadcast import dashboard_changed, nursing_changed
 from portal.helpers.datetime_helper import to_utc_iso
-from portal.helpers.decorators import role_required
+from portal.helpers.decorators import clinical_only, role_required
 from portal.helpers.notify import notify
 from portal.helpers.nursing_access import (
     can_record_on,
@@ -31,6 +45,7 @@ from portal.helpers.nursing_access import (
 )
 from portal.helpers.patient_access import can_access_patient
 from portal.helpers.response import error, success
+from portal.models.care_message import CareMessage
 from portal.models.clinical_alert import (
     ALERT_STATUSES,
     CATEGORIES as ALERT_CATEGORIES,
@@ -58,6 +73,7 @@ from portal.models.patient import Patient
 from portal.models.patient_observation import PatientObservation
 from portal.models.role import Role
 from portal.models.user import User
+from portal.websocket.nursing_socket import emit_care_message
 
 nursing_bp = Blueprint("nursing", __name__)
 
@@ -229,7 +245,7 @@ def create_nurse():
 
 
 @nursing_bp.get("/assignments")
-@jwt_required()
+@clinical_only
 def list_assignments():
     """The nurse's ward list, and the doctor's monitor, from one query — the
     scope is what differs, not the shape."""
@@ -256,7 +272,18 @@ def list_assignments():
         NursingAssignment.created_at.desc(),
     ).all()
 
-    return success([a.to_dict() for a in assignments])
+    viewer_id = get_jwt_identity()
+    # Only the treating doctor has a review marker, so only they get the count.
+    doctor = get_current_doctor()
+    return success(
+        [
+            a.to_dict(
+                viewer_id=viewer_id,
+                for_doctor=bool(doctor and doctor.id == a.doctor_id),
+            )
+            for a in assignments
+        ]
+    )
 
 
 @nursing_bp.post("/assignments")
@@ -360,6 +387,12 @@ def create_assignment():
         exclude_user_id=get_jwt_identity(),
     )
 
+    audit(
+        NURSING_ASSIGNED,
+        entity="nursing_assignment",
+        entity_id=assignment.id,
+        detail=f"{patient.name} assigned to {nurse.user.name if nurse.user else 'nurse'} for {care_type.replace('_', ' ')} care",
+    )
     db.session.commit()
     nursing_changed("assignment_created", assignment.id)
     dashboard_changed("nursing_assignment_created")
@@ -454,16 +487,24 @@ def _add_orders_from_payload(assignment, items):
 
 
 @nursing_bp.get("/assignments/<int:assignment_id>")
-@jwt_required()
+@clinical_only
 def get_assignment(assignment_id):
     assignment, failure = _load_assignment(assignment_id)
     if failure:
         return failure
 
-    data = assignment.to_dict(include_detail=True)
+    data = assignment.to_dict(
+        include_detail=True,
+        viewer_id=get_jwt_identity(),
+        for_doctor=_is_treating_doctor(assignment),
+    )
     # Lets the UI hide controls that would 403 anyway — the real check is on
     # each write route, not here.
     data["can_record"] = can_record_on(assignment)
+    # Admins read the thread for oversight but cannot post into it.
+    data["can_message"] = not _is_admin() and (
+        data["can_record"] or bool(get_current_doctor() and get_current_doctor().id == assignment.doctor_id)
+    )
     data["can_manage_plan"] = _can_manage_plan(assignment)
     data["today"] = _todays_medication_progress(assignment)
     return success(data)
@@ -583,12 +624,19 @@ def update_assignment(assignment_id):
                 exclude_user_id=get_jwt_identity(),
             )
 
+    audit(
+        NURSING_CLOSED if assignment.status != "active" else NURSING_UPDATED,
+        entity="nursing_assignment",
+        entity_id=assignment.id,
+        detail=f"Care plan {assignment.status} for {assignment.patient.name if assignment.patient else 'patient'}",
+    )
     db.session.commit()
     nursing_changed("assignment_updated", assignment.id)
 
-    data = assignment.to_dict(include_detail=True)
+    data = assignment.to_dict(include_detail=True, viewer_id=get_jwt_identity())
     data["can_record"] = can_record_on(assignment)
     data["can_manage_plan"] = True
+    data["can_message"] = True
     data["today"] = _todays_medication_progress(assignment)
     return success(data, message="Assignment updated")
 
@@ -623,6 +671,12 @@ def add_medication_order(assignment_id):
             exclude_user_id=get_jwt_identity(),
         )
 
+    audit(
+        MEDICATION_ORDERED,
+        entity="nursing_assignment",
+        entity_id=assignment.id,
+        detail=f"Ordered {payload.get('medicine_name')} for {assignment.patient.name if assignment.patient else 'patient'}",
+    )
     db.session.commit()
     nursing_changed("medication_order_added", assignment.id)
 
@@ -686,7 +740,7 @@ def _require_recording_nurse(assignment):
 
 
 @nursing_bp.post("/assignments/<int:assignment_id>/administrations")
-@jwt_required()
+@clinical_only
 def record_administration(assignment_id):
     """Logs one dose: what was given (or not), when, and why."""
     assignment, failure = _load_assignment(assignment_id)
@@ -769,6 +823,12 @@ def record_administration(assignment_id):
             body=f"{medicine_name} marked {status} for {assignment.patient.name if assignment.patient else 'your patient'}.",
         )
 
+    audit(
+        MEDICATION_ADMINISTERED,
+        entity="nursing_assignment",
+        entity_id=assignment.id,
+        detail=f"{medicine_name} marked {status}",
+    )
     db.session.commit()
     nursing_changed("medication_administered", assignment.id)
 
@@ -785,7 +845,7 @@ def record_administration(assignment_id):
 
 
 @nursing_bp.post("/assignments/<int:assignment_id>/observations")
-@jwt_required()
+@clinical_only
 def record_observation(assignment_id):
     """Records a round: vitals, symptoms, recovery, complications."""
     assignment, failure = _load_assignment(assignment_id)
@@ -864,6 +924,12 @@ def record_observation(assignment_id):
             body=f"New vitals logged for {assignment.patient.name if assignment.patient else 'your patient'}.",
         )
 
+    audit(
+        OBSERVATION_RECORDED,
+        entity="nursing_assignment",
+        entity_id=assignment.id,
+        detail="Abnormal observation recorded" if observation.is_abnormal else "Observation recorded",
+    )
     db.session.commit()
     nursing_changed("observation_recorded", assignment.id)
 
@@ -875,7 +941,7 @@ def record_observation(assignment_id):
 
 
 @nursing_bp.post("/assignments/<int:assignment_id>/notes")
-@jwt_required()
+@clinical_only
 def add_note(assignment_id):
     """A nursing note, or an end-of-shift handover to the next nurse."""
     assignment, failure = _load_assignment(assignment_id)
@@ -937,6 +1003,16 @@ def add_note(assignment_id):
         body=f"{nurse.user.name if nurse.user else 'A nurse'} updated the record for {assignment.patient.name if assignment.patient else 'your patient'}.",
     )
 
+    audit(
+        HANDOVER if note_type == "handover" else NOTE_ADDED,
+        entity="nursing_assignment",
+        entity_id=assignment.id,
+        detail=(
+            f"Shift handed over to {handover_to.user.name if handover_to and handover_to.user else 'the next nurse'}"
+            if note_type == "handover"
+            else "Nursing note added"
+        ),
+    )
     db.session.commit()
     nursing_changed("note_added", assignment.id)
 
@@ -984,7 +1060,7 @@ def _notify_doctor(assignment, title, body):
 
 
 @nursing_bp.post("/assignments/<int:assignment_id>/alerts")
-@jwt_required()
+@clinical_only
 def create_alert(assignment_id):
     """The nurse flagging something to the doctor by hand."""
     assignment, failure = _load_assignment(assignment_id)
@@ -1010,6 +1086,12 @@ def create_alert(assignment_id):
 
     alert = _raise_alert(assignment, nurse, category, severity, message)
 
+    audit(
+        ALERT_RAISED,
+        entity="nursing_assignment",
+        entity_id=assignment.id,
+        detail=f"{severity} alert raised: {category.replace('_', ' ')}",
+    )
     db.session.commit()
     nursing_changed("alert_raised", assignment.id)
     dashboard_changed("nursing_alert")
@@ -1018,7 +1100,7 @@ def create_alert(assignment_id):
 
 
 @nursing_bp.get("/alerts")
-@jwt_required()
+@clinical_only
 def list_alerts():
     """Open alerts across everything the caller can see."""
     query = ClinicalAlert.query.join(ClinicalAlert.assignment)
@@ -1076,10 +1158,222 @@ def acknowledge_alert(alert_id):
             exclude_user_id=get_jwt_identity(),
         )
 
+    audit(
+        ALERT_ANSWERED,
+        entity="nursing_assignment",
+        entity_id=alert.assignment_id,
+        detail=f"Alert {status} by the doctor",
+    )
     db.session.commit()
     nursing_changed("alert_acknowledged", alert.assignment_id)
 
     return success(alert.to_dict(include_patient=True), message=f"Alert {status}")
+
+
+# --------------------------------------------------------------------------
+# the doctor's view of what the nurse has been doing
+# --------------------------------------------------------------------------
+
+UPDATES_LIMIT = 200
+
+
+def _is_treating_doctor(assignment):
+    doctor = get_current_doctor()
+    return bool(doctor and doctor.id == assignment.doctor_id)
+
+
+@nursing_bp.post("/assignments/<int:assignment_id>/seen")
+@clinical_only
+def mark_assignment_seen(assignment_id):
+    """Records that the treating doctor has reviewed this record.
+
+    Clears the "new updates" badge. Deliberately explicit rather than a
+    side effect of GET: a list view prefetching records would otherwise mark
+    them reviewed without anyone reading a word.
+    """
+    assignment, failure = _load_assignment(assignment_id)
+    if failure:
+        return failure
+    if not _is_treating_doctor(assignment):
+        return error("Only the treating doctor reviews this record", status=403)
+
+    assignment.doctor_seen_at = datetime.utcnow()
+    db.session.commit()
+    nursing_changed("assignment_reviewed", assignment.id)
+
+    return success(
+        {"doctor_seen_at": to_utc_iso(assignment.doctor_seen_at), "unreviewed_updates": 0},
+        message="Marked reviewed",
+    )
+
+
+@nursing_bp.get("/updates")
+@clinical_only
+def nursing_updates():
+    """Every nursing update across the caller's patients, newest first.
+
+    The per-record timeline answers "what happened to this patient"; this
+    answers "what has happened while I was away", which is the question a
+    doctor actually opens the app with. Scoped the same way as everything
+    else, so a doctor only ever sees their own patients' activity.
+    """
+    query = scope_assignments(NursingAssignment.query)
+
+    if request.args.get("status", "active") != "all":
+        query = query.filter(NursingAssignment.status == "active")
+
+    unreviewed_only = request.args.get("unreviewed") == "true"
+
+    feed = []
+    for assignment in query.all():
+        seen_at = assignment.doctor_seen_at
+        for at, kind, summary in assignment.nursing_activity():
+            # Same boundary rule as unreviewed_count -- see that docstring.
+            is_new = seen_at is None or at > seen_at
+            if unreviewed_only and not is_new:
+                continue
+            feed.append(
+                {
+                    "assignment_id": assignment.id,
+                    "patient": assignment.patient.name if assignment.patient else None,
+                    "patient_code": assignment.patient.code if assignment.patient else None,
+                    "patient_photo_url": (
+                        assignment.patient.photo_url if assignment.patient else None
+                    ),
+                    "nurse": (
+                        assignment.nurse.user.name
+                        if assignment.nurse and assignment.nurse.user
+                        else None
+                    ),
+                    "kind": kind,
+                    "summary": summary,
+                    "at": to_utc_iso(at),
+                    "is_new": is_new,
+                }
+            )
+
+    feed.sort(key=lambda e: e["at"] or "", reverse=True)
+    return success(feed[:UPDATES_LIMIT])
+
+
+# --------------------------------------------------------------------------
+# doctor <-> nurse messages
+# --------------------------------------------------------------------------
+
+MAX_MESSAGE_CHARS = 2000
+
+
+def _messaging_identity(assignment):
+    """Returns (sender_role, counterpart_user_ids, error_response).
+
+    Only the two people responsible for this patient hold the conversation.
+    An admin may read the thread for oversight but not post into it -- an
+    instruction has to come from the doctor who is accountable for it.
+    """
+    nurse = get_current_nurse()
+    if nurse and nurse.id == assignment.nurse_id:
+        doctor_user_id = assignment.doctor.user_id if assignment.doctor else None
+        return "nurse", [uid for uid in (doctor_user_id,) if uid], None
+
+    doctor = get_current_doctor()
+    if doctor and doctor.id == assignment.doctor_id:
+        nurse_user_id = assignment.nurse.user_id if assignment.nurse else None
+        return "doctor", [uid for uid in (nurse_user_id,) if uid], None
+
+    if _is_admin():
+        return None, [], error("Admins can read this thread but not post to it", status=403)
+
+    return None, [], error("You are not part of this patient's care team", status=403)
+
+
+@nursing_bp.get("/assignments/<int:assignment_id>/messages")
+@clinical_only
+def list_messages(assignment_id):
+    assignment, failure = _load_assignment(assignment_id)
+    if failure:
+        return failure
+    return success([m.to_dict() for m in assignment.messages])
+
+
+@nursing_bp.post("/assignments/<int:assignment_id>/messages")
+@clinical_only
+def send_message(assignment_id):
+    """Posts to the thread and pushes it to the other side immediately."""
+    assignment, failure = _load_assignment(assignment_id)
+    if failure:
+        return failure
+
+    sender_role, recipients, failure = _messaging_identity(assignment)
+    if failure:
+        return failure
+
+    payload = request.get_json(silent=True) or {}
+    body = _text(payload, "body", MAX_MESSAGE_CHARS)
+    if not body:
+        return error("Write something before sending", status=422)
+
+    message = CareMessage(
+        assignment_id=assignment.id,
+        sender_id=int(get_jwt_identity()),
+        sender_role=sender_role,
+        body=body,
+    )
+    db.session.add(message)
+    db.session.flush()  # populates created_at/id for the socket payload
+
+    patient_name = assignment.patient.name if assignment.patient else "a patient"
+    # The bell is the fallback for someone not currently on the record; the
+    # socket push below is what makes it feel live for someone who is.
+    notify(
+        recipients,
+        title=f"Message about {patient_name}",
+        body=body[:255],
+        category="nursing",
+        link=(
+            f"/nurse/patients/{assignment.id}"
+            if sender_role == "doctor"
+            else f"/dashboard/nursing/{assignment.id}"
+        ),
+        exclude_user_id=get_jwt_identity(),
+    )
+    audit(
+        MESSAGE_SENT,
+        entity="nursing_assignment",
+        entity_id=assignment.id,
+        detail=f"{sender_role} messaged about {patient_name}",
+    )
+
+    db.session.commit()
+
+    data = message.to_dict()
+    emit_care_message(assignment.id, data)
+    nursing_changed("message_sent", assignment.id)
+
+    return success(data, message="Message sent", status=201)
+
+
+@nursing_bp.post("/assignments/<int:assignment_id>/messages/read")
+@clinical_only
+def mark_messages_read(assignment_id):
+    """Marks the other side's messages as read. Only ever touches messages the
+    caller did not write -- you cannot mark your own as read."""
+    assignment, failure = _load_assignment(assignment_id)
+    if failure:
+        return failure
+
+    user_id = int(get_jwt_identity())
+    updated = (
+        CareMessage.query.filter(
+            CareMessage.assignment_id == assignment.id,
+            CareMessage.sender_id != user_id,
+            CareMessage.read_at.is_(None),
+        ).update({"read_at": datetime.utcnow()}, synchronize_session=False)
+    )
+    db.session.commit()
+    if updated:
+        nursing_changed("messages_read", assignment.id)
+
+    return success({"updated": updated}, message="Marked read")
 
 
 # --------------------------------------------------------------------------
@@ -1090,7 +1384,7 @@ TIMELINE_STATUS_SEVERITY = {"missed": "critical", "skipped": "warning", "delayed
 
 
 @nursing_bp.get("/assignments/<int:assignment_id>/timeline")
-@jwt_required()
+@clinical_only
 def get_timeline(assignment_id):
     """Every nursing activity on this patient, newest first.
 
@@ -1164,6 +1458,19 @@ def get_timeline(assignment_id):
             }
         )
 
+    for message in assignment.messages:
+        events.append(
+            {
+                "type": "message",
+                "at": to_utc_iso(message.created_at),
+                "title": f"Message from the {message.sender_role}",
+                "detail": message.body,
+                "actor": message.sender.name if message.sender else None,
+                "severity": "info",
+                "ref_id": message.id,
+            }
+        )
+
     for alert in assignment.alerts:
         events.append(
             {
@@ -1233,9 +1540,11 @@ def _vitals_line(observation):
 
 
 @nursing_bp.get("/summary")
-@jwt_required()
+@clinical_only
 def nursing_summary():
     """Counts for whichever nursing dashboard the caller is looking at."""
+    viewer_id = get_jwt_identity()
+    doctor = get_current_doctor()
     base = scope_assignments(NursingAssignment.query)
     active = base.filter(NursingAssignment.status == "active").all()
 
@@ -1296,7 +1605,17 @@ def nursing_summary():
             "missed_today": missed_today,
             "open_alerts": open_alerts,
             "critical_alerts": critical_alerts,
-            "assignments": [a.to_dict() for a in active[:10]],
+            "unread_messages": sum(a.unread_messages_for(viewer_id) for a in active),
+            "unreviewed_updates": sum(
+                a.unreviewed_count() for a in active if doctor and a.doctor_id == doctor.id
+            ),
+            "assignments": [
+                a.to_dict(
+                    viewer_id=viewer_id,
+                    for_doctor=bool(doctor and doctor.id == a.doctor_id),
+                )
+                for a in active[:10]
+            ],
             "generated_at": to_utc_iso(now),
         }
     )

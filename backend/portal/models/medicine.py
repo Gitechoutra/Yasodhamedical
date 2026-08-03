@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from portal.extensions import db
 
 
@@ -9,7 +11,7 @@ class Medicine(db.Model):
     category = db.Column(db.String(100), nullable=True)
     default_dose = db.Column(db.String(255), nullable=True)
     default_frequency = db.Column(db.String(255), nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
 
     def to_dict(self):
         return {

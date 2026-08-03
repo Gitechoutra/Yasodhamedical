@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from portal.extensions import db
 from portal.helpers.datetime_helper import to_utc_iso
@@ -27,9 +27,11 @@ class Patient(db.Model):
     # again within 15 days (follow-up), 'paid' otherwise.
     op_status = db.Column(db.Enum("free", "paid", name="op_status"), nullable=True)
     last_registered_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
     updated_at = db.Column(
-        db.TIMESTAMP, server_default=db.func.now(), onupdate=db.func.now()
+        db.TIMESTAMP, server_default=db.func.now(),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
     )
 
     consultations = db.relationship("Consultation", back_populates="patient")

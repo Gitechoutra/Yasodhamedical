@@ -38,3 +38,19 @@ export function onNursingChanged(handler) {
   s.on("nursing_changed", handler);
   return () => s.off("nursing_changed", handler);
 }
+
+/**
+ * Joins the room for one patient's care thread, so messages arrive without
+ * waiting for a poll. Returns an unsubscribe that also leaves the room —
+ * without it a doctor moving between patients would keep receiving messages
+ * for every record they had opened this session.
+ */
+export function onCareMessage(assignmentId, handler) {
+  const s = getSocket();
+  s.emit("join_assignment", { assignment_id: assignmentId });
+  s.on("care_message", handler);
+  return () => {
+    s.off("care_message", handler);
+    s.emit("leave_assignment", { assignment_id: assignmentId });
+  };
+}

@@ -4,6 +4,8 @@ import {
   HiOutlineUsers,
   HiOutlineDocumentChartBar,
   HiOutlineArrowPath,
+  HiOutlineUserPlus,
+  HiOutlineExclamationTriangle,
 } from "react-icons/hi2";
 import StatCard from "../components/StatCard";
 import { useAuth } from "../context/AuthContext";
@@ -39,7 +41,9 @@ export default function Dashboard() {
             Welcome back, {user?.name} 👋
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Here&apos;s what&apos;s happening today
+            {summary?.scope === "front_desk"
+              ? "Registrations and today's queue"
+              : "Here's what's happening today"}
           </p>
         </div>
 
@@ -70,7 +74,46 @@ export default function Dashboard() {
           ))}
         </div>
       ) : (
-        summary && (
+        summary &&
+        // Reception gets the front desk's own numbers. The clinical cards are
+        // deliberately absent rather than zeroed: the pages behind them 403
+        // for this role, so a card linking to one would be a dead end.
+        (summary.scope === "front_desk" ? (
+          <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              label="Registered Patients"
+              value={summary.total_patients}
+              hint="Everyone on file"
+              icon={HiOutlineUsers}
+              to="/dashboard/patients"
+            />
+            <StatCard
+              label="Registered Today"
+              value={summary.todays_registrations}
+              hint="New patients today"
+              icon={HiOutlineUserPlus}
+              to="/dashboard/patients"
+            />
+            <StatCard
+              label="Today's Queue"
+              value={summary.todays_appointments}
+              hint="Waiting & in consultation"
+              icon={HiOutlineCalendarDays}
+              to="/dashboard/appointments?filter=today"
+            />
+            <StatCard
+              label="Awaiting a Doctor"
+              value={summary.unassigned_patients}
+              hint={
+                summary.unassigned_patients
+                  ? "Route these to a doctor"
+                  : "Everyone is routed"
+              }
+              icon={HiOutlineExclamationTriangle}
+              to="/dashboard/patients"
+            />
+          </div>
+        ) : (
           <>
             <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
               <StatCard
@@ -149,7 +192,7 @@ export default function Dashboard() {
               )}
             </div>
           </>
-        )
+        ))
       )}
     </div>
   );

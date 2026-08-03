@@ -5,6 +5,7 @@ import ActivityTimeline from "./ActivityTimeline";
 import AlertsPanel from "./AlertsPanel";
 import CarePlanPanel from "./CarePlanPanel";
 import MedicationPanel from "./MedicationPanel";
+import MessageThread from "./MessageThread";
 import NotesPanel from "./NotesPanel";
 import ObservationsPanel from "./ObservationsPanel";
 import { CareTypeBadge, ComplianceBar, formatWhen } from "./NursingBadges";
@@ -16,8 +17,18 @@ const TABS = [
   { key: "medications", label: "Medications" },
   { key: "observations", label: "Observations" },
   { key: "notes", label: "Notes & handover" },
+  { key: "messages", label: "Messages" },
   { key: "alerts", label: "Alerts" },
   { key: "timeline", label: "Timeline" },
+];
+
+// Every kind of update the nurse sends the doctor, and which panel owns it.
+const QUICK_ACTIONS = [
+  { tab: "medications", label: "Medication / IV" },
+  { tab: "observations", label: "Vitals & recovery" },
+  { tab: "notes", label: "Note / handover" },
+  { tab: "messages", label: "Message doctor" },
+  { tab: "alerts", label: "Emergency", urgent: true },
 ];
 
 function daysLeft(endsAt) {
@@ -179,6 +190,31 @@ export default function PatientRecord({ assignmentId, backTo, onBack, headerExtr
           </p>
         )}
 
+        {/* One place for a nurse to start any update, so they don't have to
+            know which tab a dose vs. a vital sign lives under. Each chip just
+            opens the panel that already owns that record — no parallel path,
+            so the doctor still receives one structured, auditable entry. */}
+        {canRecord && assignment.status === "active" && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Send update
+            </span>
+            {QUICK_ACTIONS.map((a) => (
+              <button
+                key={a.tab}
+                onClick={() => setTab(a.tab)}
+                className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                  a.urgent
+                    ? "bg-red-50 text-red-700 hover:bg-red-100"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                }`}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {openAlerts.length > 0 && tab !== "alerts" && (
           <button
             onClick={() => setTab("alerts")}
@@ -208,6 +244,11 @@ export default function PatientRecord({ assignmentId, backTo, onBack, headerExtr
                 {openAlerts.length}
               </span>
             )}
+            {t.key === "messages" && assignment.unread_messages > 0 && (
+              <span className="ml-1.5 rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                {assignment.unread_messages}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -231,6 +272,14 @@ export default function PatientRecord({ assignmentId, backTo, onBack, headerExtr
         )}
         {tab === "notes" && (
           <NotesPanel assignment={assignment} canRecord={canRecord} onChanged={handleChanged} />
+        )}
+        {tab === "messages" && (
+          <MessageThread
+            assignmentId={assignment.id}
+            canMessage={Boolean(assignment.can_message)}
+            // Whichever half of the pair the viewer isn't.
+            counterpart={canRecord ? assignment.doctor : assignment.nurse}
+          />
         )}
         {tab === "alerts" && (
           <AlertsPanel

@@ -7,7 +7,10 @@ a single dose, and it is append-only: a nurse adds an entry, nobody rewrites
 one, so the log stands as an audit trail.
 """
 
+from datetime import datetime
+
 from portal.extensions import db
+from portal.models.types import PRECISE_DATETIME, PRECISE_TIMESTAMP
 from portal.helpers.datetime_helper import to_utc_iso
 
 ROUTES = ("oral", "injection", "iv", "topical", "inhalation", "other")
@@ -47,7 +50,9 @@ class MedicationOrder(db.Model):
     # never counted as behind schedule.
     times_per_day = db.Column(db.Integer, nullable=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(
+        PRECISE_TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow
+    )
 
     assignment = db.relationship("NursingAssignment", back_populates="medication_orders")
     medicine = db.relationship("Medicine")
@@ -105,13 +110,15 @@ class MedicationAdministration(db.Model):
 
     # When it was due vs. when it actually happened — the gap between the two
     # is what makes "delayed" meaningful.
-    scheduled_at = db.Column(db.DateTime, nullable=True)
-    administered_at = db.Column(db.DateTime, nullable=True)
+    scheduled_at = db.Column(PRECISE_DATETIME, nullable=True)
+    administered_at = db.Column(PRECISE_DATETIME, nullable=True)
     status = db.Column(
         db.Enum(*ADMIN_STATUSES, name="medication_admin_status"), nullable=False
     )
     notes = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(
+        PRECISE_TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow
+    )
 
     assignment = db.relationship("NursingAssignment", back_populates="administrations")
     order = db.relationship("MedicationOrder", back_populates="administrations")

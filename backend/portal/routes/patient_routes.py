@@ -2,12 +2,13 @@ import os
 from datetime import date, datetime
 
 from flask import Blueprint, request, send_from_directory
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import get_jwt, jwt_required
 
 from portal.extensions import db
+from portal.helpers.audit import PATIENT_CREATED, PATIENT_REASSIGNED, PATIENT_UPDATED, audit
 from portal.helpers.auth_helper import get_current_doctor
 from portal.helpers.broadcast import dashboard_changed
-from portal.helpers.decorators import role_required
+from portal.helpers.decorators import FRONT_DESK_ROLES, role_required
 from portal.helpers.patient_access import can_access_patient, scope_patients
 from portal.helpers.response import error, success
 from portal.helpers.uploads import ImageUploadError, delete_image, save_image, upload_dir
@@ -107,14 +108,95 @@ def create_patient():
         assigned_doctor_id=assigned_doctor_id,
     )
     db.session.add(patient)
+    db.session.flush()  # assigns patient.id so the audit row can reference it
+    audit(
+        PATIENT_CREATED,
+        entity="patient",
+        entity_id=patient.id,
+        detail=f"Registered {patient.name}",
+    )
     db.session.commit()
     dashboard_changed("patient_created")
 
     return success(patient.to_dict(), message="Patient created", status=201)
 
 
+# What the front desk collects at registration, and may therefore correct
+# afterwards. Everything clinical -- diagnoses, prescriptions, consultation
+# summaries -- lives on other tables that reception cannot reach at all.
+EDITABLE_FIELDS = ("name", "gender", "phone", "email", "blood_group", "allergies", "medical_history")
+
+GENDERS = ("male", "female", "other")
+
+
+@patient_bp.patch("/<int:patient_id>")
+@jwt_required()
+def update_patient(patient_id):
+    """Corrects a patient's registration details.
+
+    Open to the front desk (who typed them in the first place) and to the
+    treating doctor. Deliberately excludes `assigned_doctor_id`: rerouting a
+    patient is a separate, front-desk-only action below, so a doctor cannot
+    quietly hand their patient away -- or claim someone else's -- through the
+    edit form.
+    """
+    patient = Patient.query.get(patient_id)
+    if not patient:
+        return error("Patient not found", status=404)
+
+    doctor = get_current_doctor()
+    if doctor and not can_access_patient(patient, doctor):
+        return error("Patient not found", status=404)
+    # A nurse works from the record the doctor set; they don't edit demographics.
+    if get_jwt().get("role") == "nurse":
+        return error("Nurses cannot edit patient registration details", status=403)
+
+    payload = request.get_json(silent=True) or {}
+
+    if "name" in payload and not (payload.get("name") or "").strip():
+        return error("Patient name cannot be empty", status=422)
+
+    if "gender" in payload:
+        gender = (payload.get("gender") or "").strip().lower()
+        if gender and gender not in GENDERS:
+            return error(f"gender must be one of: {', '.join(GENDERS)}", status=422)
+
+    if "dob" in payload:
+        dob, dob_error = _parse_dob(payload.get("dob"))
+        if dob_error:
+            return error(dob_error, status=422)
+        patient.dob = dob
+
+    changed = []
+    for field in EDITABLE_FIELDS:
+        if field not in payload:
+            continue
+        value = (payload.get(field) or "").strip() or None
+        if field == "gender" and value:
+            value = value.lower()
+        if getattr(patient, field) != value:
+            changed.append(field)
+        setattr(patient, field, value)
+    if "dob" in payload:
+        changed.append("dob")
+
+    if not changed:
+        return success(patient.to_dict(), message="No changes")
+
+    audit(
+        PATIENT_UPDATED,
+        entity="patient",
+        entity_id=patient.id,
+        detail=f"Updated {', '.join(changed)} for {patient.name}",
+    )
+    db.session.commit()
+    dashboard_changed("patient_updated")
+
+    return success(patient.to_dict(), message="Patient updated")
+
+
 @patient_bp.patch("/<int:patient_id>/assignment")
-@role_required("admin", "receptionist")
+@role_required(*FRONT_DESK_ROLES)
 def reassign_patient(patient_id):
     """Moves a patient to a different doctor. Front-desk work: a doctor
     can't hand their own patient away, or claim someone else's."""
@@ -132,6 +214,12 @@ def reassign_patient(patient_id):
         return error("Assigned doctor not found", status=404)
 
     patient.assigned_doctor_id = doctor.id
+    audit(
+        PATIENT_REASSIGNED,
+        entity="patient",
+        entity_id=patient.id,
+        detail=f"{patient.name} routed to {doctor.user.name if doctor.user else 'doctor ' + str(doctor.id)}",
+    )
     db.session.commit()
     dashboard_changed("patient_reassigned")
 

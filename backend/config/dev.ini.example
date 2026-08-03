@@ -17,73 +17,67 @@
 # '=' is part of the value. A key left blank falls back to the built-in
 # default, except where blank is itself the documented answer.
 
-[flask]
+[server]
 # FLASK_ENV / APP_ENV -- development | testing | production
-env = development
+environment = development
+
+# DATABASE_URL -- required. Percent-encode any of @ : / ? # in the password,
+# since this is a URL and those would be read as delimiters. Keep
+# ?charset=utf8mb4 or non-ASCII transcript text is mangled going into MySQL.
+sqlalchemy_database_uri = mysql+pymysql://root:PASSWORD@127.0.0.1:3306/hospital?charset=utf8mb4
+# TEST_DATABASE_URL -- used only by TestingConfig, never by a running server.
+# Blank derives it by appending _test to the database named above.
+sqlalchemy_test_database_uri =
+# SQLALCHEMY_TRACK_MODIFICATIONS -- leave false. Nothing here listens for the
+# SQLAlchemy signals it powers, and it costs memory and time on every write.
+sqlalchemy_track_modifications = False
+# SQL_ECHO -- log every statement. Noisy; useful when chasing a query.
+sqlalchemy_echo = False
+# Only ProductionConfig applies size/overflow/timeout -- the dev server is
+# single-user and does not need a tuned pool.
+# DB_POOL_SIZE / DB_MAX_OVERFLOW / DB_POOL_TIMEOUT / DB_POOL_RECYCLE
+sqlalchemy_pool_size = 10
+sqlalchemy_max_overflow = 20
+sqlalchemy_pool_timeout = 30
+# Below MySQL's wait_timeout, so a pooled connection is never a dead one.
+sqlalchemy_pool_recycle = 280
 
 # SECRET_KEY -- long random string, generate with:
 #   python -c "import secrets; print(secrets.token_urlsafe(48))"
-secret_key =
+app_secret_key =
+# PORTAL_BASE_URL -- where the React app is reachable. Encoded in the QR code
+# printed on consultation reports so a scan opens the record.
+frontend_base_url = http://localhost:5173
+# CORS_ORIGINS -- comma-separated list of origins allowed to call /api/*.
+cors_origins = http://localhost:5173
 
 [jwt]
 # JWT_SECRET_KEY -- a second, different random string
 secret_key =
-# JWT_ACCESS_HOURS
-access_token_expires_hours = 8
+# JWT_ACCESS_MINUTES -- 480 = an 8-hour shift
+access_token_expires_minutes = 480
 # JWT_REFRESH_DAYS
 refresh_token_expires_days = 30
 
-[database]
-# DATABASE_URL -- a full SQLAlchemy URL. Set this and the parts below are
-# ignored; leave it blank to build the URL from host/port/name/user/password.
-url =
-# DB_HOST
-host = 127.0.0.1
-# DB_PORT
-port = 3306
-# DB_NAME
-name = hospital
-# DB_USER
-user = root
-# DB_PASSWORD
-password =
-# TEST_DB_NAME -- used only by TestingConfig, never by a running server.
-test_name = hospital_test
-# SQL_ECHO -- log every statement. Noisy; useful when chasing a query.
-echo = false
-# Pooling. Only ProductionConfig applies size/overflow/timeout -- the dev
-# server is single-user and does not need a tuned pool.
-# DB_POOL_SIZE / DB_MAX_OVERFLOW / DB_POOL_TIMEOUT / DB_POOL_RECYCLE
-pool_size = 10
-max_overflow = 20
-pool_timeout = 30
-# Below MySQL's wait_timeout, so a recycled connection is never a dead one.
-pool_recycle = 280
+[upload_folder]
+# UPLOAD_FOLDER -- avatars and patient photos. A relative path resolves
+# against backend/, not the working directory. Point this at a mounted volume
+# in production so uploaded images survive a redeploy.
+upload_folder = uploads
 
-[ai]
+[gemini]
 # GEMINI_API_KEY
-gemini_api_key =
+api_key =
 # GEMINI_MODEL
-gemini_model = gemini-flash-latest
-# WHISPER_MODEL
-whisper_model = small
+model = gemini-flash-latest
+
+[whisper]
+# WHISPER_MODEL -- tiny | base | small | medium | large
+model = small
 # WHISPER_LANGUAGE -- leave empty so Whisper auto-detects the spoken language
 # per segment (handles English/Hindi/Telugu/Tamil code-switching); it always
-# translates to English. Empty is the intended value here, not a blank to fill.
-whisper_language =
-
-[server]
-# CORS_ORIGINS -- comma-separated list of allowed browser origins.
-cors_origins = http://localhost:5173
-# PORTAL_BASE_URL -- where the frontend is reachable. Encoded in the QR code
-# printed on consultation reports so a scan opens the record.
-portal_base_url = http://localhost:5173
-
-[uploads]
-# UPLOAD_FOLDER -- where avatars and patient photos are written. Blank means
-# backend/uploads. Point this at a mounted volume in production so uploaded
-# images survive a redeploy.
-folder =
+# translates to English. Empty is the intended value, not a blank to fill.
+language =
 
 # Printed on the consultation report letterhead and footer.
 [hospital]

@@ -18,6 +18,7 @@ from portal.models.medication_order import MedicationAdministration, MedicationO
 from portal.models.patient_observation import PatientObservation
 from portal.models.nursing_note import NursingNote
 from portal.models.clinical_alert import ClinicalAlert
+from portal.models.care_message import CareMessage
 
 __all__ = [
     "Role",
@@ -41,4 +42,5 @@ __all__ = [
     "PatientObservation",
     "NursingNote",
     "ClinicalAlert",
+    "CareMessage",
 ]

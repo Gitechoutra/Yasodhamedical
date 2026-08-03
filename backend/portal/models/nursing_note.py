@@ -5,7 +5,10 @@ named, so the timeline reads in one sequence instead of splitting the story
 across two tables.
 """
 
+from datetime import datetime
+
 from portal.extensions import db
+from portal.models.types import PRECISE_DATETIME, PRECISE_TIMESTAMP
 from portal.helpers.datetime_helper import to_utc_iso
 from portal.models.nurse import SHIFTS
 
@@ -30,7 +33,9 @@ class NursingNote(db.Model):
     # Who the shift was handed to. Null on a plain note, and also on a handover
     # where the next nurse wasn't known yet.
     handover_to_nurse_id = db.Column(db.Integer, db.ForeignKey("nurses.id"), nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(
+        PRECISE_TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow
+    )
 
     assignment = db.relationship("NursingAssignment", back_populates="notes")
     nurse = db.relationship("Nurse", foreign_keys=[nurse_id])

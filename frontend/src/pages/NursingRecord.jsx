@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Modal from "../components/Modal";
 import PatientRecord from "../components/nursing/PatientRecord";
 import {
   isoToLocalInput,
   localInputToIso,
+  markAssignmentSeen,
   updateAssignment,
 } from "../services/nursingService";
 
@@ -113,6 +114,17 @@ export default function NursingRecord() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [managing, setManaging] = useState(null);
+  const markedRef = useRef(null);
+
+  // Opening the record is what counts as reviewing it, so the "new updates"
+  // badge clears here rather than on the notification bell. Once per record,
+  // not per refresh: anything the nurse logs while this page is open should
+  // still stand out as new until the doctor comes back to it.
+  useEffect(() => {
+    if (markedRef.current === id) return;
+    markedRef.current = id;
+    markAssignmentSeen(id).catch(() => {});
+  }, [id]);
 
   return (
     <>

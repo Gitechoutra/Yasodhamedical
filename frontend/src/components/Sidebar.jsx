@@ -18,15 +18,25 @@ import Logo from "./Logo";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
-// `hideFrom` keeps a nav item out of a role's sidebar. Doctors don't manage
-// org structure — staff, departments and user accounts are admin screens —
-// so those three are hidden from the doctor module entirely. The routes
-// themselves are blocked in AppRouter, not just hidden here.
+// `hideFrom` keeps a nav item out of a role's sidebar.
+//
+// Doctors don't manage org structure — staff, departments and user accounts
+// are admin screens. Reception doesn't do patient care at all: consultations,
+// prescriptions, reports, medicines and the nursing record are hidden, and
+// the API returns 403 for every one of them, so a stale bookmark fails
+// server-side too rather than relying on this list.
+//
+// The routes are also blocked in AppRouter — keep the three in step.
 const NAV_ITEMS = [
   { to: "/dashboard", label: "Dashboard", icon: HiOutlineSquares2X2, end: true },
   { to: "/dashboard/patients", label: "Patients", icon: HiOutlineUsers },
   { to: "/dashboard/appointments", label: "Appointments", icon: HiOutlineCalendarDays },
-  { to: "/dashboard/consultations", label: "Consultations", icon: HiOutlineChatBubbleLeftRight },
+  {
+    to: "/dashboard/consultations",
+    label: "Consultations",
+    icon: HiOutlineChatBubbleLeftRight,
+    hideFrom: ["receptionist"],
+  },
   // Where a doctor watches the patients they've handed to a nurse. Hidden
   // from reception: assigning and reviewing nursing care is clinical work.
   {
@@ -35,9 +45,24 @@ const NAV_ITEMS = [
     icon: HiOutlineHeart,
     hideFrom: ["receptionist"],
   },
-  { to: "/dashboard/prescriptions", label: "Prescriptions", icon: HiOutlineClipboardDocumentList },
-  { to: "/dashboard/reports", label: "Reports", icon: HiOutlineDocumentChartBar },
-  { to: "/dashboard/medicines", label: "Medicines", icon: HiOutlineBeaker },
+  {
+    to: "/dashboard/prescriptions",
+    label: "Prescriptions",
+    icon: HiOutlineClipboardDocumentList,
+    hideFrom: ["receptionist"],
+  },
+  {
+    to: "/dashboard/reports",
+    label: "Reports",
+    icon: HiOutlineDocumentChartBar,
+    hideFrom: ["receptionist"],
+  },
+  {
+    to: "/dashboard/medicines",
+    label: "Medicines",
+    icon: HiOutlineBeaker,
+    hideFrom: ["receptionist"],
+  },
   { to: "/dashboard/doctors", label: "Doctors", icon: HiOutlineUserGroup, hideFrom: ["doctor"] },
   {
     to: "/dashboard/departments",

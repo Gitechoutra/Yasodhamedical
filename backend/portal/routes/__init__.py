@@ -1,3 +1,4 @@
+from portal.routes.audit_routes import audit_bp
 from portal.routes.auth_routes import auth_bp
 from portal.routes.dashboard_routes import dashboard_bp
 from portal.routes.patient_routes import patient_bp
@@ -21,3 +22,4 @@ def register_routes(app):
     app.register_blueprint(report_bp, url_prefix="/api/reports")
     app.register_blueprint(notification_bp, url_prefix="/api/notifications")
     app.register_blueprint(nursing_bp, url_prefix="/api/nursing")
+    app.register_blueprint(audit_bp, url_prefix="/api/audit")

@@ -80,9 +80,10 @@ class InitApp:
 
             register_routes(app)
 
-            # Registers Socket.IO event handlers (join_consultation, etc.)
-            # on the shared `socketio` instance.
+            # Registers Socket.IO event handlers (join_consultation,
+            # join_assignment, etc.) on the shared `socketio` instance.
             from portal.websocket import consultation_socket  # noqa: F401
+            from portal.websocket import nursing_socket  # noqa: F401
 
         except Exception as exc:
             app.logger.exception("Failed to initialize app components: %s", exc)

@@ -22,7 +22,7 @@ export default function NurseLayout() {
   }, []);
 
   if (!isAuthenticated) {
-    return <Navigate to="/nurse/login" replace />;
+    return <Navigate to="/login" replace />;
   }
   if (user?.role !== "nurse") {
     return <Navigate to="/dashboard" replace />;

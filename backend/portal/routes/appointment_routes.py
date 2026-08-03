@@ -5,8 +5,9 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from portal.extensions import db
 from portal.helpers.auth_helper import get_current_doctor
+from portal.helpers.audit import APPOINTMENT_CREATED, audit
 from portal.helpers.broadcast import dashboard_changed
-from portal.helpers.decorators import role_required
+from portal.helpers.decorators import FRONT_DESK_ROLES, role_required
 from portal.helpers.notify import department_doctor_user_ids, notify
 from portal.helpers.patient_access import can_access_patient, patient_scope
 from portal.helpers.response import error, success
@@ -114,7 +115,7 @@ def list_appointments():
 
 
 @appointment_bp.post("")
-@role_required("admin", "receptionist")
+@role_required(*FRONT_DESK_ROLES)
 def create_appointment():
     # Intentionally NOT open to doctors: registering a patient for an OP visit
     # is front-desk work, not something a doctor should self-serve — keeps the
@@ -130,7 +131,10 @@ def create_appointment():
     if not patient:
         return error("Patient not found", status=404)
 
-<<<<<<< HEAD
+    department = Department.query.get(department_id)
+    if not department:
+        return error("Department not found", status=404)
+
     # OP billing rule: first-ever OP for this patient is always paid. A
     # returning patient's new OP is free if it's within 15 days of their
     # last one (follow-up), otherwise it's a fresh paid registration.
@@ -141,11 +145,6 @@ def create_appointment():
         days_since_last_visit = (now - patient.last_registered_at).days
         patient.op_status = "free" if days_since_last_visit <= 15 else "paid"
     patient.last_registered_at = now
-=======
-    department = Department.query.get(department_id)
-    if not department:
-        return error("Department not found", status=404)
->>>>>>> 553ef01768a8ed935bd963ab73f95e52a4cae980
 
     appointment = Appointment(
         patient_id=patient_id,
@@ -166,6 +165,13 @@ def create_appointment():
         exclude_user_id=get_jwt_identity(),
     )
 
+    db.session.flush()  # assigns appointment.id for the audit row
+    audit(
+        APPOINTMENT_CREATED,
+        entity="appointment",
+        entity_id=appointment.id,
+        detail=f"{patient.name} queued for {department.name} ({patient.op_status or 'unbilled'})",
+    )
     db.session.commit()
     dashboard_changed("appointment_created")
 

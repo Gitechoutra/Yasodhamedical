@@ -5,11 +5,13 @@ import {
   HiOutlineCalendarDays,
   HiOutlineCamera,
   HiOutlineHeart,
+  HiOutlinePencilSquare,
 } from "react-icons/hi2";
 import Avatar from "../components/Avatar";
 import Modal from "../components/Modal";
 import OpStatusBadge from "../components/OpStatusBadge";
 import AssignNurseModal from "../components/nursing/AssignNurseModal";
+import EditPatientModal from "../components/EditPatientModal";
 import { useAuth } from "../context/AuthContext";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDoctors } from "../services/doctorService";
@@ -273,12 +275,16 @@ export default function Patients() {
   // Handing a patient to a nurse is the treating doctor's call — the server
   // rejects it from anyone else.
   const canAssignNurse = user?.role === "doctor";
+  // Reception typed these details in; the treating doctor may correct them
+  // too. The server enforces the same pair.
+  const canEditPatient = user?.role !== "nurse";
 
   const [patients, setPatients] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [nursePatient, setNursePatient] = useState(null);
+  const [editPatient, setEditPatient] = useState(null);
 
   const load = useCallback((silent = false) => {
     if (!silent) setLoading(true);
@@ -337,9 +343,7 @@ export default function Patients() {
                 <th className="px-6 py-3 font-medium">Blood Group</th>
                 <th className="px-6 py-3 font-medium">OP Status</th>
                 {mustAssign && <th className="px-6 py-3 font-medium">Assigned Doctor</th>}
-                {(canScheduleAppointments || canAssignNurse) && (
-                  <th className="px-6 py-3 font-medium"></th>
-                )}
+                <th className="px-6 py-3 font-medium"></th>
               </tr>
             </thead>
             <tbody>
@@ -372,8 +376,8 @@ export default function Patients() {
                       />
                     </td>
                   )}
-                  {(canScheduleAppointments || canAssignNurse) && (
-                    <td className="px-6 py-3 text-right">
+                  <td className="px-6 py-3 text-right">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       {canScheduleAppointments && (
                         <button
                           onClick={() => navigate(`/dashboard/appointments?patient_id=${p.id}`)}
@@ -392,8 +396,17 @@ export default function Patients() {
                           Assign Nurse
                         </button>
                       )}
-                    </td>
-                  )}
+                      {canEditPatient && (
+                        <button
+                          onClick={() => setEditPatient(p)}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-200"
+                        >
+                          <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                          Edit
+                        </button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -409,6 +422,17 @@ export default function Patients() {
           onCreated={() => {
             setShowAddModal(false);
             load();
+          }}
+        />
+      )}
+
+      {editPatient && (
+        <EditPatientModal
+          patient={editPatient}
+          onClose={() => setEditPatient(null)}
+          onSaved={() => {
+            setEditPatient(null);
+            load(true);
           }}
         />
       )}

@@ -30,3 +30,11 @@ export async function removePatientPhoto(patientId) {
   const res = await api.delete(`/patients/${patientId}/photo`);
   return res.data.data;
 }
+
+// Corrects registration details. Open to the front desk and the treating
+// doctor; the server rejects nurses and ignores any attempt to change the
+// assigned doctor through this route.
+export async function updatePatient(patientId, payload) {
+  const res = await api.patch(`/patients/${patientId}`, payload);
+  return res.data.data;
+}

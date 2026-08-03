@@ -10,6 +10,7 @@ observation, note and alert hangs off one of these rows.
 from datetime import datetime
 
 from portal.extensions import db
+from portal.models.types import PRECISE_DATETIME, PRECISE_TIMESTAMP
 from portal.helpers.datetime_helper import to_utc_iso
 
 CARE_TYPES = ("observation", "post_surgery", "post_procedure", "recovery")
@@ -53,9 +54,17 @@ class NursingAssignment(db.Model):
         default="active",
     )
     completed_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    # When the treating doctor last opened this record. Everything the nurse
+    # logged after it counts as unreviewed, which is what puts the "3 new"
+    # badge on the doctor's monitor. Stored rather than derived from the
+    # notification table: a doctor who clears their bell without opening the
+    # record has not reviewed anything.
+    doctor_seen_at = db.Column(PRECISE_DATETIME, nullable=True)
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
     updated_at = db.Column(
-        db.TIMESTAMP, server_default=db.func.now(), onupdate=db.func.now()
+        db.TIMESTAMP, server_default=db.func.now(),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
     )
 
     patient = db.relationship("Patient")
@@ -93,6 +102,14 @@ class NursingAssignment(db.Model):
         cascade="all, delete-orphan",
         order_by="ClinicalAlert.created_at.desc()",
     )
+    # Oldest first: a conversation reads top-to-bottom, unlike the record
+    # panels above, which lead with the most recent entry.
+    messages = db.relationship(
+        "CareMessage",
+        back_populates="assignment",
+        cascade="all, delete-orphan",
+        order_by="CareMessage.created_at",
+    )
 
     __table_args__ = (
         # Both list views ask the same shape of question: "my active
@@ -112,6 +129,80 @@ class NursingAssignment(db.Model):
     @property
     def open_alert_count(self):
         return sum(1 for a in self.alerts if a.status == "open")
+
+    def nursing_activity(self):
+        """Every entry the nurse has made, as (timestamp, kind, summary).
+
+        The single definition of "a nursing update" — the unreviewed count, the
+        cross-patient feed and the per-record timeline all read from here, so
+        none of them can drift from the others about what counts.
+        """
+        events = []
+        for record in self.administrations:
+            events.append(
+                (
+                    record.administered_at or record.created_at,
+                    "medication",
+                    f"{record.medicine_name} — {record.status}",
+                )
+            )
+        for observation in self.observations:
+            events.append(
+                (
+                    observation.recorded_at or observation.created_at,
+                    "observation",
+                    "Abnormal observation" if observation.is_abnormal else "Observation recorded",
+                )
+            )
+        for note in self.notes:
+            events.append(
+                (
+                    note.created_at,
+                    note.note_type,
+                    "Shift handover" if note.note_type == "handover" else "Nursing note",
+                )
+            )
+        for alert in self.alerts:
+            events.append((alert.created_at, "alert", alert.message))
+        for message in self.messages:
+            # Only the nurse's side: the doctor's own messages are not an
+            # update *to* the doctor.
+            if message.sender_role == "nurse":
+                events.append((message.created_at, "message", message.body))
+        return [e for e in events if e[0] is not None]
+
+    def unreviewed_count(self):
+        """How much the nurse has logged since the doctor last opened this.
+
+        A strict `>` is only meaningful because both sides carry microseconds
+        (see models/types.py). On second-resolution columns an entry written in
+        the same second as the review would be indistinguishable from one
+        written just before it, and the badge would either stick or drop
+        genuine updates.
+        """
+        if self.doctor_seen_at is None:
+            return len(self.nursing_activity())
+        return sum(
+            1 for at, _kind, _summary in self.nursing_activity() if at > self.doctor_seen_at
+        )
+
+    def last_activity_at(self):
+        stamps = [at for at, _kind, _summary in self.nursing_activity()]
+        return max(stamps) if stamps else None
+
+    def unread_messages_for(self, user_id):
+        """Messages on this thread the given user hasn't opened.
+
+        Takes a user id rather than reading the request, so the model stays
+        usable from a shell or a background job.
+        """
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            return 0
+        return sum(
+            1 for m in self.messages if m.read_at is None and m.sender_id != user_id
+        )
 
     def compliance(self):
         """Medication compliance over the whole assignment.
@@ -134,7 +225,14 @@ class NursingAssignment(db.Model):
             "rate": round(given / total * 100) if total else None,
         }
 
-    def to_dict(self, include_detail=False):
+    def to_dict(self, include_detail=False, viewer_id=None, for_doctor=False):
+        """`viewer_id` adds that user's unread message count -- the badge is
+        per-person, so it can't be baked into a shared payload.
+
+        `for_doctor` adds the unreviewed-activity count. Only meaningful for
+        the treating doctor: `doctor_seen_at` tracks one person, so showing
+        the number to a nurse would be showing them someone else's badge.
+        """
         data = {
             "id": self.id,
             "patient_id": self.patient_id,
@@ -154,6 +252,10 @@ class NursingAssignment(db.Model):
             "created_at": to_utc_iso(self.created_at),
             "is_overdue": self.is_overdue,
             "open_alerts": self.open_alert_count,
+            "unread_messages": self.unread_messages_for(viewer_id) if viewer_id else 0,
+            "unreviewed_updates": self.unreviewed_count() if for_doctor else 0,
+            "doctor_seen_at": to_utc_iso(self.doctor_seen_at),
+            "last_activity_at": to_utc_iso(self.last_activity_at()),
             "compliance": self.compliance(),
         }
 
@@ -166,6 +268,7 @@ class NursingAssignment(db.Model):
             data["observations"] = [o.to_dict() for o in self.observations]
             data["notes"] = [n.to_dict() for n in self.notes]
             data["alerts"] = [a.to_dict() for a in self.alerts]
+            data["messages"] = [m.to_dict() for m in self.messages]
             # The doctor's own record of the visit — the nurse reads it, never
             # edits it, so it is served straight from the consultation.
             data["consultation"] = (

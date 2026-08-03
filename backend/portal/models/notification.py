@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from portal.extensions import db
 from portal.helpers.datetime_helper import to_utc_iso
 
@@ -27,7 +29,7 @@ class Notification(db.Model):
     # In-app route to open when the row is clicked, e.g. "/dashboard/appointments".
     link = db.Column(db.String(255), nullable=True)
     is_read = db.Column(db.Boolean, nullable=False, default=False)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
 
     user = db.relationship("User")
 

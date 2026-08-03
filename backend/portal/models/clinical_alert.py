@@ -6,7 +6,10 @@ who acknowledged it and when. The notification is the doorbell; this is the
 thing being reported.
 """
 
+from datetime import datetime
+
 from portal.extensions import db
+from portal.models.types import PRECISE_DATETIME, PRECISE_TIMESTAMP
 from portal.helpers.datetime_helper import to_utc_iso
 
 CATEGORIES = (
@@ -55,7 +58,9 @@ class ClinicalAlert(db.Model):
     acknowledged_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     # What the doctor said back — the other half of the audit trail.
     doctor_response = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(
+        PRECISE_TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow
+    )
 
     assignment = db.relationship("NursingAssignment", back_populates="alerts")
     nurse = db.relationship("Nurse")

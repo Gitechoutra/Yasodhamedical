@@ -19,8 +19,8 @@ export default function Login() {
     setErrorMsg("");
     try {
       const user = await login(email, password);
-      // Nurses have their own module. Signing in here still works rather than
-      // being rejected — a bookmarked login shouldn't be a dead end.
+      // The one sign-in for every role. A nurse's screens live under /nurse,
+      // so they are routed there; everyone else lands on /dashboard.
       navigate(user?.role === "nurse" ? "/nurse" : redirectTo, { replace: true });
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Unable to sign in. Please try again.");
@@ -39,7 +39,7 @@ export default function Login() {
           Welcome back
         </h1>
         <p className="mt-1 text-center text-sm text-slate-500">
-          Sign in to access your consultation dashboard
+          Sign in to your dashboard
         </p>
 
         <form onSubmit={handleSubmit} className="mt-7 space-y-4">
@@ -55,7 +55,7 @@ export default function Login() {
                 autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="doctor@yasodhahospitals.com"
+                placeholder="you@yasodhahospitals.com"
                 className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
               />
             </div>

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from portal.extensions import db
 from portal.helpers.datetime_helper import to_utc_iso
 
@@ -22,7 +24,7 @@ class Consultation(db.Model):
     prescription_verified_by = db.Column(
         db.Integer, db.ForeignKey("users.id"), nullable=True
     )
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
 
     verified_by = db.relationship("User", foreign_keys=[prescription_verified_by])
     doctor = db.relationship("Doctor", back_populates="consultations")

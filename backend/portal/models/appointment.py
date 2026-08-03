@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from portal.extensions import db
 from portal.helpers.datetime_helper import to_utc_iso
 
@@ -17,7 +19,7 @@ class Appointment(db.Model):
         default="waiting",
     )
     reason = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
 
     patient = db.relationship("Patient")
     department = db.relationship("Department")
@@ -29,13 +31,10 @@ class Appointment(db.Model):
         return {
             "id": self.id,
             "patient_id": self.patient_id,
-<<<<<<< HEAD
-            "patient": self.patient.name if self.patient else None,
-            "patient_op_status": self.patient.op_status if self.patient else None,
-=======
             # Flat name kept for existing callers; `patient_detail` carries
             # what the queue cards render (photo, age, code).
             "patient": patient.name if patient else None,
+            "patient_op_status": patient.op_status if patient else None,
             "patient_detail": (
                 {
                     "id": patient.id,
@@ -48,7 +47,6 @@ class Appointment(db.Model):
                 if patient
                 else None
             ),
->>>>>>> 553ef01768a8ed935bd963ab73f95e52a4cae980
             "department_id": self.department_id,
             "department": self.department.name if self.department else None,
             "doctor": self.doctor.user.name if self.doctor and self.doctor.user else None,

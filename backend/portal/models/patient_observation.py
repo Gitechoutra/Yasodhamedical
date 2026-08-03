@@ -8,6 +8,7 @@ it all agree on the same reading.
 from datetime import datetime
 
 from portal.extensions import db
+from portal.models.types import PRECISE_DATETIME, PRECISE_TIMESTAMP
 from portal.helpers.datetime_helper import to_utc_iso
 
 # (field, low, high, label). A value outside [low, high] is flagged; None on
@@ -36,7 +37,7 @@ class PatientObservation(db.Model):
         nullable=False,
     )
     nurse_id = db.Column(db.Integer, db.ForeignKey("nurses.id"), nullable=False)
-    recorded_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    recorded_at = db.Column(PRECISE_DATETIME, nullable=False, default=datetime.utcnow)
 
     temperature_c = db.Column(db.Numeric(4, 1), nullable=True)
     pulse_bpm = db.Column(db.Integer, nullable=True)
@@ -54,7 +55,9 @@ class PatientObservation(db.Model):
     # Stored, not derived on read: the ranges above may be retuned later, and
     # an old observation must keep the judgement that was made at the time.
     is_abnormal = db.Column(db.Boolean, nullable=False, default=False)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(
+        PRECISE_TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow
+    )
 
     assignment = db.relationship("NursingAssignment", back_populates="observations")
     nurse = db.relationship("Nurse")

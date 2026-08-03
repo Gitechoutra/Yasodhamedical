@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import json
 
 from portal.extensions import db
@@ -19,7 +21,7 @@ class ConsultationSummary(db.Model):
     # Gemini's best-effort reconstruction of who said what, since capture no
     # longer requires the doctor to manually tag speakers while recording.
     labeled_transcript = db.Column(db.Text, nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
 
     consultation = db.relationship("Consultation", back_populates="summary", uselist=False)
 

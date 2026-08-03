@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from portal.extensions import db
 
 SHIFTS = ("morning", "evening", "night")
@@ -18,7 +20,7 @@ class Nurse(db.Model):
     # The shift they normally work. Handover notes record the actual shift, so
     # this is only a default for the picker, never the source of truth.
     shift = db.Column(db.Enum(*SHIFTS, name="nurse_shift"), nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
 
     user = db.relationship("User", back_populates="nurse_profile")
     department = db.relationship("Department")

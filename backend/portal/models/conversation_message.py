@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from portal.extensions import db
 from portal.helpers.datetime_helper import to_utc_iso
 
@@ -14,7 +16,7 @@ class ConversationMessage(db.Model):
         db.Enum("doctor", "patient", "unknown", name="message_speaker"), nullable=False
     )
     message = db.Column(db.Text, nullable=False)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
 
     consultation = db.relationship("Consultation", back_populates="messages")
 

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from portal.extensions import db
@@ -16,9 +18,11 @@ class User(db.Model):
     avatar_path = db.Column(db.String(255), nullable=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     last_login_at = db.Column(db.DateTime, nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
     updated_at = db.Column(
-        db.TIMESTAMP, server_default=db.func.now(), onupdate=db.func.now()
+        db.TIMESTAMP, server_default=db.func.now(),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
     )
 
     role = db.relationship("Role", back_populates="users")

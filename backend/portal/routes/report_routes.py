@@ -1,11 +1,12 @@
 import os
 
 from flask import Blueprint, request, send_file
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask_jwt_extended import get_jwt_identity
 
 from portal.extensions import db
 from portal.helpers.auth_helper import get_current_doctor
 from portal.helpers.broadcast import dashboard_changed
+from portal.helpers.decorators import clinical_only
 from portal.helpers.notify import notify
 from portal.helpers.response import error, success
 from portal.models.consultation import Consultation
@@ -26,7 +27,7 @@ def _can_access(consultation):
 
 
 @report_bp.get("")
-@jwt_required()
+@clinical_only
 def list_reports():
     query = Report.query.join(Report.consultation)
 
@@ -39,7 +40,7 @@ def list_reports():
 
 
 @report_bp.post("")
-@jwt_required()
+@clinical_only
 def generate_report():
     payload = request.get_json(silent=True) or {}
     consultation_id = payload.get("consultation_id")
@@ -98,7 +99,7 @@ def generate_report():
 
 
 @report_bp.get("/<int:report_id>/download")
-@jwt_required()
+@clinical_only
 def download_report(report_id):
     report = Report.query.get(report_id)
     if not report:

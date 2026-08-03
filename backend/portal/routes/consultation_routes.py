@@ -2,12 +2,14 @@ import json
 from datetime import datetime, time, timedelta
 
 from flask import Blueprint, request
-from flask_jwt_extended import get_jwt_identity, jwt_required
+from flask_jwt_extended import get_jwt_identity
 
 from portal.ai import gemini_client, whisper_client
 from portal.extensions import db, socketio
 from portal.helpers.auth_helper import get_current_doctor
+from portal.helpers.audit import CONSULTATION_ENDED, CONSULTATION_STARTED, PRESCRIPTION_UNVERIFIED, PRESCRIPTION_VERIFIED, audit
 from portal.helpers.broadcast import dashboard_changed
+from portal.helpers.decorators import clinical_only
 from portal.helpers.notify import notify, role_user_ids
 from portal.helpers.patient_access import can_access_patient
 from portal.helpers.queue_helper import claim_appointment_for, complete_appointment_for
@@ -32,7 +34,7 @@ LIST_LIMIT = 100
 
 
 @consultation_bp.get("")
-@jwt_required()
+@clinical_only
 def list_consultations():
     """Consultation history — completed consultations only.
 
@@ -97,7 +99,7 @@ def list_consultations():
 
 
 @consultation_bp.post("")
-@jwt_required()
+@clinical_only
 def start_consultation():
     payload = request.get_json(silent=True) or {}
     patient_id = payload.get("patient_id")
@@ -125,6 +127,12 @@ def start_consultation():
     # it moves with the consultation instead of being stranded on "waiting".
     claim_appointment_for(consultation, doctor)
 
+    audit(
+        CONSULTATION_STARTED,
+        entity="consultation",
+        entity_id=consultation.id,
+        detail=f"Consultation started with {patient.name}",
+    )
     db.session.commit()
     dashboard_changed("consultation_started")
 
@@ -139,7 +147,7 @@ def _is_owning_doctor(consultation):
 
 
 @consultation_bp.get("/<int:consultation_id>")
-@jwt_required()
+@clinical_only
 def get_consultation(consultation_id):
     consultation = Consultation.query.get(consultation_id)
     if not consultation:
@@ -154,7 +162,7 @@ def get_consultation(consultation_id):
 
 
 @consultation_bp.post("/<int:consultation_id>/transcribe")
-@jwt_required()
+@clinical_only
 def transcribe_turn(consultation_id):
     consultation = Consultation.query.get(consultation_id)
     if not consultation:
@@ -197,7 +205,7 @@ MAX_PRESCRIPTION_ITEMS = 30
 
 
 @consultation_bp.put("/<int:consultation_id>/prescriptions")
-@jwt_required()
+@clinical_only
 def replace_prescriptions(consultation_id):
     """Replaces the prescription with the doctor's edited version.
 
@@ -269,7 +277,7 @@ def replace_prescriptions(consultation_id):
 
 
 @consultation_bp.post("/<int:consultation_id>/prescriptions/verify")
-@jwt_required()
+@clinical_only
 def verify_prescription(consultation_id):
     """Records the treating doctor's sign-off on the prescription."""
     consultation = Consultation.query.get(consultation_id)
@@ -282,6 +290,12 @@ def verify_prescription(consultation_id):
 
     consultation.prescription_verified_at = datetime.utcnow()
     consultation.prescription_verified_by = int(get_jwt_identity())
+    audit(
+        PRESCRIPTION_VERIFIED,
+        entity="consultation",
+        entity_id=consultation.id,
+        detail=f"Prescription signed off for {consultation.patient.name if consultation.patient else 'patient'}",
+    )
     db.session.commit()
     # Flips the Rx badge on any open Consultations list.
     dashboard_changed("prescription_verified")
@@ -292,7 +306,7 @@ def verify_prescription(consultation_id):
 
 
 @consultation_bp.delete("/<int:consultation_id>/prescriptions/verify")
-@jwt_required()
+@clinical_only
 def unverify_prescription(consultation_id):
     """Withdraws a sign-off, e.g. it was clicked by mistake."""
     consultation = Consultation.query.get(consultation_id)
@@ -303,6 +317,12 @@ def unverify_prescription(consultation_id):
 
     consultation.prescription_verified_at = None
     consultation.prescription_verified_by = None
+    audit(
+        PRESCRIPTION_UNVERIFIED,
+        entity="consultation",
+        entity_id=consultation.id,
+        detail="Prescription sign-off withdrawn",
+    )
     db.session.commit()
     dashboard_changed("prescription_unverified")
 
@@ -312,7 +332,7 @@ def unverify_prescription(consultation_id):
 
 
 @consultation_bp.post("/<int:consultation_id>/end")
-@jwt_required()
+@clinical_only
 def end_consultation(consultation_id):
     consultation = Consultation.query.get(consultation_id)
     if not consultation:
@@ -380,6 +400,13 @@ def end_consultation(consultation_id):
         category="consultation",
         link=f"/dashboard/consultations/{consultation.id}",
         exclude_user_id=get_jwt_identity(),
+    )
+
+    audit(
+        CONSULTATION_ENDED,
+        entity="consultation",
+        entity_id=consultation.id,
+        detail=f"Consultation completed with {patient_name}; summary generated",
     )
 
     try:

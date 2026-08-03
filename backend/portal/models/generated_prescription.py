@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from portal.extensions import db
 
 
@@ -14,7 +16,7 @@ class GeneratedPrescription(db.Model):
     dose = db.Column(db.String(255), nullable=True)
     frequency = db.Column(db.String(255), nullable=True)
     duration = db.Column(db.String(255), nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
 
     consultation = db.relationship("Consultation", back_populates="prescriptions")
     medicine = db.relationship("Medicine")

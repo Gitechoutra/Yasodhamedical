@@ -28,16 +28,16 @@ export default function ProfileMenu() {
   }
 
   // Nurses live under /nurse, everyone else under /dashboard. The same menu
-  // serves both rather than each module growing its own copy.
+  // serves both rather than each module growing its own copy. Signing out
+  // always returns to the one login page — there is no separate nurse portal.
   const isNurse = user?.role === "nurse";
   const home = isNurse ? "/nurse" : "/dashboard";
-  const loginPath = isNurse ? "/nurse/login" : "/login";
 
   async function handleLogout() {
     setLoggingOut(true);
     try {
       await logout();
-      navigate(loginPath, { replace: true });
+      navigate("/login", { replace: true });
     } finally {
       setLoggingOut(false);
     }

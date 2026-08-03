@@ -1,5 +1,6 @@
 import { HiOutlineArrowRightCircle, HiOutlineClock, HiOutlinePlay } from "react-icons/hi2";
 import Avatar from "./Avatar";
+import OpStatusBadge from "./OpStatusBadge";
 
 const STATUS_META = {
   in_progress: { label: "Ongoing consultation", className: "bg-emerald-100 text-emerald-700" },
@@ -71,6 +72,13 @@ export default function AppointmentCard({ appointment, isNext, onStart, onResume
               <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-semibold text-brand-700">
                 Next up
               </span>
+            )}
+            {/* Whether this OP was billed or came in free as a follow-up.
+                Rendered only when set: the field is null for every patient
+                registered before OP billing existed, and a bare dash in the
+                badge row reads as a broken value rather than "not applicable". */}
+            {appointment.patient_op_status && (
+              <OpStatusBadge status={appointment.patient_op_status} />
             )}
           </div>
           <p className="mt-0.5 text-xs text-slate-400">{patient.code || `PAT${appointment.patient_id}`}</p>

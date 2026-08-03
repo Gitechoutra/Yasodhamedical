@@ -4,6 +4,7 @@ import {
   HiOutlineArrowPath,
   HiOutlineBellAlert,
   HiOutlineExclamationTriangle,
+  HiOutlineInboxArrowDown,
 } from "react-icons/hi2";
 import Avatar from "../components/Avatar";
 import {
@@ -101,7 +102,19 @@ export default function NursingMonitor() {
         </Link>
       )}
 
-      <div className="mt-6 flex flex-wrap gap-2">
+      <div className="mt-6 flex flex-wrap items-center gap-2">
+        <Link
+          to="/dashboard/nursing/updates"
+          className="mr-1 inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
+        >
+          <HiOutlineInboxArrowDown className="h-4 w-4" />
+          Nursing updates
+          {summary?.unreviewed_updates > 0 && (
+            <span className="ml-1 rounded-full bg-white/25 px-1.5 text-[10px] font-bold">
+              {summary.unreviewed_updates}
+            </span>
+          )}
+        </Link>
         {FILTERS.map((f) => (
           <button
             key={f.key}
@@ -148,6 +161,7 @@ export default function NursingMonitor() {
                 <th className="px-6 py-3 font-medium">Period</th>
                 <th className="px-6 py-3 font-medium">Medication</th>
                 <th className="px-6 py-3 font-medium">Alerts</th>
+                <th className="px-6 py-3 font-medium">New</th>
               </tr>
             </thead>
             <tbody>
@@ -203,6 +217,20 @@ export default function NursingMonitor() {
                         </span>
                       ) : (
                         <span className="text-xs text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-3">
+                      {/* Nursing activity logged since this doctor last opened
+                          the record — cleared by opening it, not by the bell. */}
+                      {a.unreviewed_updates > 0 ? (
+                        <Link
+                          to={`/dashboard/nursing/${a.id}`}
+                          className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2.5 py-1 text-xs font-semibold text-brand-700 transition hover:bg-brand-200"
+                        >
+                          {a.unreviewed_updates} new
+                        </Link>
+                      ) : (
+                        <span className="text-xs text-slate-400">reviewed</span>
                       )}
                     </td>
                   </tr>

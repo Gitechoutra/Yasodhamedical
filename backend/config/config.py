@@ -22,7 +22,6 @@ running. The environment-variable name for each key is documented there.
 import configparser
 import os
 from datetime import timedelta
-from urllib.parse import quote_plus
 
 import truststore
 from dotenv import load_dotenv
@@ -52,33 +51,30 @@ INI_PATH = os.path.join(CONFIG_DIR, INI_NAME)
 
 # (environment variable, ini section, ini key, default)
 SETTINGS = (
-    ("SECRET_KEY", "flask", "secret_key", ""),
-    ("JWT_SECRET_KEY", "jwt", "secret_key", ""),
-    ("JWT_ACCESS_HOURS", "jwt", "access_token_expires_hours", "8"),
-    ("JWT_REFRESH_DAYS", "jwt", "refresh_token_expires_days", "30"),
-    # A full URL wins over the assembled host/port/name triple below -- it is
-    # what a container platform or managed database hands you.
-    ("DATABASE_URL", "database", "url", ""),
-    ("DB_HOST", "database", "host", "127.0.0.1"),
-    ("DB_PORT", "database", "port", "3306"),
-    ("DB_NAME", "database", "name", "hospital"),
-    ("DB_USER", "database", "user", "root"),
-    ("DB_PASSWORD", "database", "password", ""),
-    ("TEST_DB_NAME", "database", "test_name", "hospital_test"),
-    ("DB_POOL_SIZE", "database", "pool_size", "10"),
-    ("DB_MAX_OVERFLOW", "database", "max_overflow", "20"),
-    ("DB_POOL_TIMEOUT", "database", "pool_timeout", "30"),
-    ("DB_POOL_RECYCLE", "database", "pool_recycle", "280"),
-    ("SQL_ECHO", "database", "echo", "false"),
-    ("GEMINI_API_KEY", "ai", "gemini_api_key", ""),
-    ("GEMINI_MODEL", "ai", "gemini_model", "gemini-flash-latest"),
-    ("WHISPER_MODEL", "ai", "whisper_model", "small"),
-    ("WHISPER_LANGUAGE", "ai", "whisper_language", ""),
+    # -- [server] ----------------------------------------------------------
+    ("SECRET_KEY", "server", "app_secret_key", ""),
+    ("DATABASE_URL", "server", "sqlalchemy_database_uri", ""),
+    ("TEST_DATABASE_URL", "server", "sqlalchemy_test_database_uri", ""),
+    ("SQLALCHEMY_TRACK_MODIFICATIONS", "server", "sqlalchemy_track_modifications", "false"),
+    ("SQL_ECHO", "server", "sqlalchemy_echo", "false"),
+    ("DB_POOL_SIZE", "server", "sqlalchemy_pool_size", "10"),
+    ("DB_MAX_OVERFLOW", "server", "sqlalchemy_max_overflow", "20"),
+    ("DB_POOL_TIMEOUT", "server", "sqlalchemy_pool_timeout", "30"),
+    ("DB_POOL_RECYCLE", "server", "sqlalchemy_pool_recycle", "280"),
+    ("PORTAL_BASE_URL", "server", "frontend_base_url", "http://localhost:5173"),
     ("CORS_ORIGINS", "server", "cors_origins", "http://localhost:5173"),
-    # Where the frontend is reachable. Encoded in the QR code printed on
-    # consultation reports so a scan opens the record.
-    ("PORTAL_BASE_URL", "server", "portal_base_url", "http://localhost:5173"),
-    ("UPLOAD_FOLDER", "uploads", "folder", os.path.join(BASE_DIR, "uploads")),
+    # -- [jwt] -------------------------------------------------------------
+    ("JWT_SECRET_KEY", "jwt", "secret_key", ""),
+    ("JWT_ACCESS_MINUTES", "jwt", "access_token_expires_minutes", "480"),
+    ("JWT_REFRESH_DAYS", "jwt", "refresh_token_expires_days", "30"),
+    # -- [upload_folder] ---------------------------------------------------
+    ("UPLOAD_FOLDER", "upload_folder", "upload_folder", "uploads"),
+    # -- [gemini] / [whisper] ----------------------------------------------
+    ("GEMINI_API_KEY", "gemini", "api_key", ""),
+    ("GEMINI_MODEL", "gemini", "model", "gemini-flash-latest"),
+    ("WHISPER_MODEL", "whisper", "model", "small"),
+    ("WHISPER_LANGUAGE", "whisper", "language", ""),
+    # -- [hospital] --------------------------------------------------------
     ("HOSPITAL_NAME", "hospital", "name", "Yasodha Hospitals"),
     ("HOSPITAL_TAGLINE", "hospital", "tagline", "Compassionate care, every day"),
     ("HOSPITAL_ADDRESS", "hospital", "address", ""),
@@ -87,8 +83,10 @@ SETTINGS = (
     ("HOSPITAL_WEBSITE", "hospital", "website", ""),
 )
 
-# Secrets a running app must not fall back to a placeholder for.
-REQUIRED = ("SECRET_KEY", "JWT_SECRET_KEY")
+# Config a running app must not start without. The database URL is in here
+# because there is no host/port fallback that could assemble a working one --
+# without it the app would boot fine and then fail on the first query.
+REQUIRED = ("SECRET_KEY", "JWT_SECRET_KEY", "DATABASE_URL")
 
 TRUTHY = {"1", "true", "yes", "on"}
 
@@ -114,7 +112,7 @@ _ini = _read_ini(INI_PATH)
 # An explicit APP_ENV/FLASK_ENV always wins; otherwise the chosen ini says
 # which environment this is. Kept out of SETTINGS because it is what picked
 # the ini file in the first place.
-APP_ENV = _ENV_OVERRIDE or _ini.get("flask", "env", fallback="development").strip()
+APP_ENV = _ENV_OVERRIDE or _ini.get("server", "environment", fallback="development").strip()
 IS_PRODUCTION = APP_ENV.startswith("prod")
 
 
@@ -169,24 +167,40 @@ def _as_bool(key):
     return _VALUES[key].strip().lower() in TRUTHY
 
 
-def _database_uri(db_name=None):
-    """Assembles the SQLAlchemy URL, or returns DATABASE_URL when one is set.
+def _test_database_uri():
+    """The database TestingConfig points at.
 
-    `db_name` overrides the configured database, which is how TestingConfig
-    points at a throwaway copy. A caller-supplied name also means DATABASE_URL
-    is bypassed -- it already names a database, and rewriting one out of an
-    arbitrary URL is not something to guess at.
-
-    quote_plus so a password containing @ : / # survives the URL.
+    Uses `sqlalchemy_test_database_uri` when one is written down. Otherwise it
+    derives one by suffixing `_test` onto the database named in the main URL,
+    so a test run can never be pointed at live patient records by forgetting
+    to set a second URL.
     """
-    if _VALUES["DATABASE_URL"] and db_name is None:
-        return _VALUES["DATABASE_URL"]
-    name = db_name or _VALUES["DB_NAME"]
-    return (
-        f"mysql+pymysql://{quote_plus(_VALUES['DB_USER'])}"
-        f":{quote_plus(_VALUES['DB_PASSWORD'])}"
-        f"@{_VALUES['DB_HOST']}:{_VALUES['DB_PORT']}/{name}?charset=utf8mb4"
-    )
+    explicit = _VALUES["TEST_DATABASE_URL"]
+    if explicit:
+        return explicit
+
+    base, sep, query = _VALUES["DATABASE_URL"].partition("?")
+    head, slash, name = base.rpartition("/")
+    if not name:
+        # Nothing that looks like a database name to suffix -- better to hand
+        # back something obviously unusable than to silently return the live
+        # URL and let a test suite drop real tables.
+        return ""
+    return f"{head}{slash}{name}_test{sep}{query}"
+
+
+def _upload_folder():
+    """Resolves UPLOAD_FOLDER to an absolute path.
+
+    A relative value resolves against backend/, never the working directory:
+    `python app.py` and `flask db upgrade` are run from different places, and
+    uploads landing in two directories depending on how you started the server
+    is the kind of bug you only notice when a photo 404s.
+    """
+    folder = _VALUES["UPLOAD_FOLDER"]
+    if not os.path.isabs(folder):
+        folder = os.path.join(BASE_DIR, folder)
+    return os.path.abspath(folder)
 
 
 class BaseConfig:
@@ -199,14 +213,8 @@ class BaseConfig:
     SECRET_KEY = _VALUES["SECRET_KEY"]
 
     # -- Database ----------------------------------------------------------
-    DB_HOST = _VALUES["DB_HOST"]
-    DB_PORT = _VALUES["DB_PORT"]
-    DB_NAME = _VALUES["DB_NAME"]
-    DB_USER = _VALUES["DB_USER"]
-    DB_PASSWORD = _VALUES["DB_PASSWORD"]
-
-    SQLALCHEMY_DATABASE_URI = _database_uri()
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_DATABASE_URI = _VALUES["DATABASE_URL"]
+    SQLALCHEMY_TRACK_MODIFICATIONS = _as_bool("SQLALCHEMY_TRACK_MODIFICATIONS")
     SQLALCHEMY_ECHO = _as_bool("SQL_ECHO")
     # Pooling has to live inside ENGINE_OPTIONS: Flask-SQLAlchemy 3.x dropped
     # the standalone SQLALCHEMY_POOL_SIZE / _MAX_OVERFLOW / _POOL_TIMEOUT keys
@@ -219,7 +227,7 @@ class BaseConfig:
 
     # -- JWT ---------------------------------------------------------------
     JWT_SECRET_KEY = _VALUES["JWT_SECRET_KEY"]
-    JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=_as_int("JWT_ACCESS_HOURS"))
+    JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=_as_int("JWT_ACCESS_MINUTES"))
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=_as_int("JWT_REFRESH_DAYS"))
     JWT_ALGORITHM = "HS256"
 
@@ -235,7 +243,7 @@ class BaseConfig:
     # -- File storage ------------------------------------------------------
     # Avatars and patient photos. Absolute, so a deployment can point it at a
     # mounted volume instead of leaving uploads next to the code.
-    UPLOAD_FOLDER = os.path.abspath(_VALUES["UPLOAD_FOLDER"])
+    UPLOAD_FOLDER = _upload_folder()
     # Backstop for the whole request body. Individual images are capped at
     # 2 MB by helpers/uploads.py, which returns a clean 413 with a message;
     # this only catches something far larger before it is buffered.
@@ -263,7 +271,7 @@ class TestingConfig(BaseConfig):
 
     TESTING = True
     DEBUG = True
-    SQLALCHEMY_DATABASE_URI = _database_uri(_VALUES["TEST_DB_NAME"])
+    SQLALCHEMY_DATABASE_URI = _test_database_uri()
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=5)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(minutes=10)
 

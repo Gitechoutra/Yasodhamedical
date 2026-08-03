@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from portal.extensions import db
 
 
@@ -11,7 +13,7 @@ class Doctor(db.Model):
     department_id = db.Column(db.Integer, db.ForeignKey("departments.id"), nullable=True)
     specialization = db.Column(db.String(150), nullable=True)
     registration_no = db.Column(db.String(50), nullable=True)
-    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now())
+    created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
 
     user = db.relationship("User", back_populates="doctor_profile")
     department = db.relationship("Department", back_populates="doctors")
