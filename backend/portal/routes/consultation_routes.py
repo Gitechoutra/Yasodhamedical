@@ -4,7 +4,7 @@ from datetime import datetime, time, timedelta
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity
 
-from portal.ai import gemini_client, whisper_client
+from portal.ai import gemini_client
 from portal.extensions import db, socketio
 from portal.helpers.auth_helper import get_current_doctor
 from portal.helpers.audit import CONSULTATION_ENDED, CONSULTATION_STARTED, PRESCRIPTION_UNVERIFIED, PRESCRIPTION_VERIFIED, audit
@@ -184,7 +184,7 @@ def transcribe_turn(consultation_id):
         return error("audio file is required", status=422)
 
     try:
-        text = whisper_client.transcribe(audio_file.read())
+        text = gemini_client.transcribe_audio(audio_file.read())
     except Exception as exc:  # noqa: BLE001 - surface transcription failure to the client
         return error(f"Transcription failed: {exc}", status=502)
 

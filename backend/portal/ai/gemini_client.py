@@ -1,8 +1,12 @@
 import json
 import os
+import subprocess
+import tempfile
 
 from google import genai
 from google.genai import types
+
+from portal.ai import ffmpeg_setup  # noqa: F401  (puts ffmpeg on PATH)
 
 _client = None
 
@@ -83,6 +87,64 @@ def _get_client():
             raise RuntimeError("GEMINI_API_KEY is not set in the environment")
         _client = genai.Client(api_key=api_key)
     return _client
+
+
+TRANSCRIBE_INSTRUCTION = """Transcribe this audio recording of a doctor-patient consultation, \
+word for word. Speakers may switch between English and Indian languages (Hindi, Telugu, Tamil, \
+or others) within the same sentence — translate everything into clear English. Output ONLY the \
+transcribed text: no speaker labels, no timestamps, no commentary, no markdown.
+
+CRITICAL: This is a clinical recording — never invent, guess, or fabricate any dialogue, \
+symptoms, or diagnosis that isn't clearly and actually spoken in the audio. If the recording is \
+silent, contains no intelligible speech, or is just background/mic noise, output exactly this \
+literal token and nothing else: [NO_SPEECH]"""
+
+NO_SPEECH_TOKEN = "[NO_SPEECH]"
+
+
+def _webm_to_wav(audio_bytes):
+    # Gemini's documented audio formats don't include webm/opus (what
+    # MediaRecorder produces in the browser); converting to WAV first avoids
+    # depending on undocumented format leniency.
+    with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as src:
+        src.write(audio_bytes)
+        src_path = src.name
+    dst_path = src_path + ".wav"
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", src_path, "-ar", "16000", "-ac", "1", dst_path],
+            check=True,
+            capture_output=True,
+        )
+        with open(dst_path, "rb") as f:
+            return f.read()
+    finally:
+        os.remove(src_path)
+        if os.path.exists(dst_path):
+            os.remove(dst_path)
+
+
+def transcribe_audio(audio_bytes):
+    """Transcribes+translates a recorded consultation clip via Gemini's native
+    audio understanding, instead of a local CPU-bound Whisper pass. A
+    multi-minute recording that took ~2 minutes on local "small" Whisper comes
+    back in a few seconds from Gemini's hosted inference — the doctor isn't
+    waiting on this laptop's CPU anymore.
+    """
+    wav_bytes = _webm_to_wav(audio_bytes)
+    model_name = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+    client = _get_client()
+    response = client.models.generate_content(
+        model=model_name,
+        contents=[
+            TRANSCRIBE_INSTRUCTION,
+            types.Part.from_bytes(data=wav_bytes, mime_type="audio/wav"),
+        ],
+    )
+    text = (response.text or "").strip()
+    if NO_SPEECH_TOKEN in text:
+        return ""
+    return text
 
 
 def _build_prompt(patient, messages, formulary):
