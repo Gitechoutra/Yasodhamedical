@@ -65,10 +65,12 @@ function NoteModal({ assignmentId, noteType, nurses, onClose, onSaved }) {
                 onChange={update("handover_to_nurse_id")}
               >
                 <option value="">Nobody yet</option>
+                {/* Name only, matching the assign-nurse picker. The shift
+                    being handed over is recorded on the note itself, above —
+                    it does not belong on the person's name. */}
                 {nurses.map((n) => (
                   <option key={n.id} value={n.id}>
                     {n.name}
-                    {n.shift ? ` — ${n.shift} shift` : ""}
                   </option>
                 ))}
               </select>

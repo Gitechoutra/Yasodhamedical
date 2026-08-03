@@ -33,7 +33,7 @@ export default function AssignNurseModal({
   const [form, setForm] = useState({
     nurse_id: "",
     care_type: "observation",
-    observation_days: 3,
+    observation_days: 1,
     treatment_plan: defaultPlan,
     care_instructions: "",
     import_prescription: true,
@@ -84,12 +84,13 @@ export default function AssignNurseModal({
             <option value="">
               {loadingNurses ? "Loading nurses…" : "Choose who will monitor this patient"}
             </option>
+            {/* Name only. The list previously carried the nurse's department
+                and shift, which read as a second job title and made it look
+                like doctors were mixed in — the endpoint only ever returns
+                nurses. Picking a nurse needs a name, nothing else. */}
             {nurses.map((n) => (
               <option key={n.id} value={n.id}>
                 {n.name}
-                {n.department ? ` — ${n.department}` : ""}
-                {n.shift ? ` (${n.shift})` : ""}
-                {` · ${n.active_assignments} patient${n.active_assignments === 1 ? "" : "s"}`}
               </option>
             ))}
           </select>
@@ -121,6 +122,10 @@ export default function AssignNurseModal({
               value={form.observation_days}
               onChange={update("observation_days")}
             />
+            <p className="mt-1 text-[11px] text-slate-400">
+              A plan, not a cut-off — the patient stays on the nurse&apos;s list
+              until someone discharges them.
+            </p>
           </div>
         </div>
 

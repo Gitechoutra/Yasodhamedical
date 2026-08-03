@@ -4,6 +4,7 @@ import Avatar from "../Avatar";
 import ActivityTimeline from "./ActivityTimeline";
 import AlertsPanel from "./AlertsPanel";
 import CarePlanPanel from "./CarePlanPanel";
+import DischargeModal from "./DischargeModal";
 import MedicationPanel from "./MedicationPanel";
 import MessageThread from "./MessageThread";
 import NotesPanel from "./NotesPanel";
@@ -51,6 +52,7 @@ export default function PatientRecord({ assignmentId, backTo, onBack, headerExtr
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
   const [tab, setTab] = useState("plan");
+  const [discharging, setDischarging] = useState(false);
   // Bumped on every change so the timeline (which fetches separately) refetches.
   const [version, setVersion] = useState(0);
 
@@ -162,20 +164,30 @@ export default function PatientRecord({ assignmentId, backTo, onBack, headerExtr
             <p className="text-xs text-slate-400">
               {formatWhen(assignment.starts_at)} → {formatWhen(assignment.ends_at)}
             </p>
-            {assignment.status === "active" && remaining !== null && (
-              <p
-                className={`text-sm font-semibold ${
-                  assignment.is_overdue ? "text-red-600" : "text-slate-700"
-                }`}
-              >
-                {assignment.is_overdue
-                  ? "Observation period has ended"
-                  : remaining <= 1
-                    ? "Ends today"
-                    : `${remaining} days remaining`}
+            {assignment.status === "active" && (
+              <p className="text-sm font-semibold text-slate-700">
+                {remaining === null || remaining <= 0
+                  ? "Under care"
+                  : remaining === 1
+                    ? "1 day planned"
+                    : `${remaining} days planned`}
               </p>
             )}
             <ComplianceBar compliance={assignment.compliance} />
+
+            {/* Either half of the pair can end care — the nurse is with the
+                patient, the doctor signs off recovery. Nothing else closes an
+                assignment, so without this a patient would stay on the list
+                forever. */}
+            {assignment.status === "active" && (canRecord || canManagePlan) && (
+              <button
+                onClick={() => setDischarging(true)}
+                className="w-full rounded-xl border border-emerald-200 bg-emerald-50 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100"
+              >
+                Mark completed & discharge
+              </button>
+            )}
+
             {headerExtra?.(assignment, handleChanged)}
           </div>
         </div>
@@ -226,6 +238,18 @@ export default function PatientRecord({ assignmentId, backTo, onBack, headerExtr
           </button>
         )}
       </div>
+
+      {discharging && (
+        <DischargeModal
+          assignment={assignment}
+          canCancel={canManagePlan}
+          onClose={() => setDischarging(false)}
+          onDone={() => {
+            setDischarging(false);
+            handleChanged();
+          }}
+        />
+      )}
 
       <div className="mt-6 flex flex-wrap gap-2">
         {TABS.map((t) => (

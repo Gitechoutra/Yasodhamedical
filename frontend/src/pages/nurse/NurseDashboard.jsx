@@ -45,14 +45,15 @@ export function AssignmentCard({ assignment, to }) {
       </div>
 
       <div className="mt-2 flex items-center justify-between text-xs">
-        <span className={assignment.is_overdue ? "font-semibold text-red-600" : "text-slate-500"}>
-          {assignment.is_overdue
-            ? "Period ended — needs a decision"
-            : remaining === null
-              ? `Since ${formatWhen(assignment.starts_at)}`
-              : remaining <= 1
-                ? "Ends today"
-                : `${remaining} days left`}
+        <span className="text-slate-500">
+          {/* An elapsed window is not a status — the patient is under care
+              until someone discharges them, so this only ever reports how
+              long they have been, never that anything has lapsed. */}
+          {remaining === null || remaining <= 0
+            ? `Since ${formatWhen(assignment.starts_at)}`
+            : remaining === 1
+              ? "1 day planned"
+              : `${remaining} days planned`}
         </span>
         {assignment.open_alerts > 0 && (
           <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 font-semibold text-red-700">
@@ -136,11 +137,7 @@ export default function NurseDashboard() {
               <StatCard
                 label="Patients in your care"
                 value={summary.active_assignments}
-                hint={
-                  summary.overdue_assignments
-                    ? `${summary.overdue_assignments} past their end date`
-                    : "Active assignments"
-                }
+                hint="Active assignments"
                 icon={HiOutlineUsers}
                 to="/nurse/patients"
               />

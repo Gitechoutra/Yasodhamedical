@@ -132,3 +132,13 @@ export async function markAssignmentSeen(assignmentId) {
   const res = await api.post(`/nursing/assignments/${assignmentId}/seen`);
   return res.data.data;
 }
+
+/**
+ * Ends nursing care for a patient. Open to the assigned nurse and the treating
+ * doctor; `cancelled` is doctor-only. Nothing else closes an assignment — the
+ * observation window passing does not.
+ */
+export async function dischargeAssignment(assignmentId, payload = {}) {
+  const res = await api.post(`/nursing/assignments/${assignmentId}/discharge`, payload);
+  return res.data.data;
+}

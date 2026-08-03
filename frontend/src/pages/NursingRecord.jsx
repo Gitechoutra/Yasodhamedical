@@ -95,16 +95,6 @@ function ManagePlanModal({ assignment, onClose, onSaved }) {
           {saving ? "Saving…" : "Save changes"}
         </button>
 
-        {assignment.status === "active" && (
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => save({ status: "completed" })}
-            className="w-full rounded-xl border border-emerald-200 py-2.5 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-60"
-          >
-            End nursing care (patient recovered)
-          </button>
-        )}
       </form>
     </Modal>
   );

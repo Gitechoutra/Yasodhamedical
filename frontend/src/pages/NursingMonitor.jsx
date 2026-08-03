@@ -190,20 +190,14 @@ export default function NursingMonitor() {
                     </td>
                     <td className="px-6 py-3 text-xs">
                       <p className="text-slate-500">{formatWhen(a.starts_at)}</p>
-                      <p
-                        className={
-                          a.is_overdue ? "font-semibold text-red-600" : "text-slate-400"
-                        }
-                      >
+                      <p className="text-slate-400">
                         {a.status !== "active"
                           ? a.status
-                          : a.is_overdue
-                            ? "Period ended"
-                            : remaining === null
-                              ? "Open-ended"
-                              : remaining <= 1
-                                ? "Ends today"
-                                : `${remaining} days left`}
+                          : remaining === null || remaining <= 0
+                            ? "Under care"
+                            : remaining === 1
+                              ? "1 day planned"
+                              : `${remaining} days planned`}
                       </p>
                     </td>
                     <td className="px-6 py-3">

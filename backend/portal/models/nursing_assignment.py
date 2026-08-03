@@ -43,9 +43,10 @@ class NursingAssignment(db.Model):
     care_instructions = db.Column(db.Text, nullable=True)
 
     starts_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
-    # When observation is expected to end — typically 2-3 days out. The doctor
-    # can extend it; the assignment stays active until explicitly closed, so an
-    # overrun never silently drops a patient off the nurse's list.
+    # The date the doctor expects to stop watching. Purely an expectation:
+    # nothing closes an assignment when it passes, and passing it is not
+    # flagged. Care ends only when the nurse or the treating doctor says so,
+    # because a patient still unwell on day four is still the nurse's patient.
     ends_at = db.Column(db.DateTime, nullable=True)
 
     status = db.Column(
@@ -117,14 +118,6 @@ class NursingAssignment(db.Model):
         db.Index("idx_nursing_assignments_nurse_status", "nurse_id", "status"),
         db.Index("idx_nursing_assignments_doctor_status", "doctor_id", "status"),
     )
-
-    @property
-    def is_overdue(self):
-        """Still active past the date the doctor set for it — needs a decision:
-        discharge the patient or extend the watch."""
-        return bool(
-            self.status == "active" and self.ends_at and self.ends_at < datetime.utcnow()
-        )
 
     @property
     def open_alert_count(self):
@@ -250,7 +243,6 @@ class NursingAssignment(db.Model):
             "ends_at": to_utc_iso(self.ends_at),
             "completed_at": to_utc_iso(self.completed_at),
             "created_at": to_utc_iso(self.created_at),
-            "is_overdue": self.is_overdue,
             "open_alerts": self.open_alert_count,
             "unread_messages": self.unread_messages_for(viewer_id) if viewer_id else 0,
             "unreviewed_updates": self.unreviewed_count() if for_doctor else 0,

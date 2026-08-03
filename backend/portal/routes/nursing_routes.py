@@ -77,9 +77,11 @@ from portal.websocket.nursing_socket import emit_care_message
 
 nursing_bp = Blueprint("nursing", __name__)
 
-# Default length of an observation window when the doctor doesn't set an end
-# date. Most post-procedure watches run two to three days.
-DEFAULT_OBSERVATION_DAYS = 3
+# How long the doctor is asked to plan for when they don't set an end date.
+# Only a starting suggestion -- the field is editable, and passing the date
+# does not end anything. Care runs until a nurse or the treating doctor
+# closes it explicitly.
+DEFAULT_OBSERVATION_DAYS = 1
 MAX_OBSERVATION_DAYS = 90
 
 MAX_TEXT = 5000
@@ -171,8 +173,21 @@ def _load_assignment(assignment_id):
 @nursing_bp.get("/nurses")
 @role_required("admin", "doctor")
 def list_nurses():
-    """The picker a doctor chooses from when handing a patient over."""
-    query = Nurse.query.join(Nurse.user).order_by(Nurse.department_id)
+    """The picker a doctor chooses from when handing a patient over.
+
+    Joined through to the role and filtered to `nurse`, and to active accounts.
+    A `Nurse` row already implies a nurse, so this is belt-and-braces -- but it
+    means a profile created against the wrong user (a bad import, a manual DB
+    edit, a future admin screen with a loose form) can never put a doctor or a
+    receptionist in front of someone assigning patient care. A deactivated
+    account is excluded for the same reason: it cannot take a handover.
+    """
+    query = (
+        Nurse.query.join(Nurse.user)
+        .join(Role, User.role_id == Role.id)
+        .filter(Role.name == "nurse", User.is_active.is_(True))
+        .order_by(User.name)
+    )
 
     department_id = request.args.get("department_id", type=int)
     if department_id:
@@ -639,6 +654,98 @@ def update_assignment(assignment_id):
     data["can_message"] = True
     data["today"] = _todays_medication_progress(assignment)
     return success(data, message="Assignment updated")
+
+
+@nursing_bp.post("/assignments/<int:assignment_id>/discharge")
+@clinical_only
+def discharge_assignment(assignment_id):
+    """Ends nursing care for a patient.
+
+    Open to both halves of the pair, because either can be the one who knows
+    it is finished: the nurse is with the patient, the doctor signs off the
+    recovery. Nothing else ends an assignment -- an observation window passing
+    does not, which is the whole point of it being an expectation rather than
+    a deadline.
+
+    `cancelled` stays doctor-only. Completing says care finished; cancelling
+    says the hand-off should not have happened, and undoing the doctor's
+    decision is the doctor's call.
+    """
+    assignment, failure = _load_assignment(assignment_id)
+    if failure:
+        return failure
+
+    nurse = get_current_nurse()
+    is_assigned_nurse = bool(nurse and nurse.id == assignment.nurse_id)
+    is_doctor = _is_treating_doctor(assignment)
+
+    if not (is_assigned_nurse or is_doctor):
+        return error("Only the assigned nurse or the treating doctor can close this", status=403)
+
+    if assignment.status != "active":
+        return error(f"This assignment is already {assignment.status}", status=409)
+
+    payload = request.get_json(silent=True) or {}
+    status = payload.get("status") or "completed"
+    if status not in ("completed", "cancelled"):
+        return error("status must be 'completed' or 'cancelled'", status=422)
+    if status == "cancelled" and not is_doctor:
+        return error("Only the treating doctor can cancel an assignment", status=403)
+
+    summary = _text(payload, "summary")
+
+    assignment.status = status
+    assignment.completed_at = datetime.utcnow()
+
+    # A closing note keeps the reason on the record rather than only in an
+    # audit row, so the next person reading the timeline sees why it ended.
+    if summary and nurse:
+        db.session.add(
+            NursingNote(
+                assignment_id=assignment.id,
+                nurse_id=nurse.id,
+                note_type="note",
+                content=f"Care {status}: {summary}",
+            )
+        )
+
+    patient_name = assignment.patient.name if assignment.patient else "the patient"
+    actor = "nurse" if is_assigned_nurse else "doctor"
+
+    # Tell the other side. notify() drops whoever performed the action.
+    recipients = []
+    if assignment.doctor:
+        recipients.append(assignment.doctor.user_id)
+    if assignment.nurse:
+        recipients.append(assignment.nurse.user_id)
+    notify(
+        recipients,
+        title=f"Nursing care {status}",
+        body=f"{patient_name} was marked {status} by the {actor}."
+        + (f" {summary}" if summary else ""),
+        category="nursing",
+        link=(
+            f"/dashboard/nursing/{assignment.id}"
+            if is_assigned_nurse
+            else f"/nurse/patients/{assignment.id}"
+        ),
+        exclude_user_id=get_jwt_identity(),
+    )
+    audit(
+        NURSING_CLOSED,
+        entity="nursing_assignment",
+        entity_id=assignment.id,
+        detail=f"{patient_name} marked {status} by the {actor}",
+    )
+
+    db.session.commit()
+    nursing_changed("assignment_closed", assignment.id)
+    dashboard_changed("nursing_assignment_closed")
+
+    return success(
+        assignment.to_dict(viewer_id=get_jwt_identity(), for_doctor=is_doctor),
+        message=f"Nursing care {status}",
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1599,7 +1706,6 @@ def nursing_summary():
     return success(
         {
             "active_assignments": len(active),
-            "overdue_assignments": sum(1 for a in active if a.is_overdue),
             "doses_logged_today": doses_today,
             "doses_due_today": doses_due,
             "missed_today": missed_today,
