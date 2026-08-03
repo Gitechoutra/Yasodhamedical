@@ -201,6 +201,8 @@ export default function Appointments() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Appointments</h1>
+          {/* flex-wrap: the counts line plus both filter chips overflow a
+              narrow viewport if they are forced onto one row. */}
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <p className="text-sm text-slate-500">
               {user?.department ? `${user.department} queue` : "All departments"} ·{" "}
