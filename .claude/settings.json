@@ -1,7 +1,24 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm cache *)"
+      "Bash(npm cache *)",
+      "Bash(./venv/Scripts/python.exe -c ' *)",
+      "Bash(./venv/Scripts/python.exe -m flask db current)",
+      "Bash(./venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/15a2830e-da66-47e0-892e-bec278d4d562/scratchpad/test_config.py\")",
+      "Bash(timeout 90 ./venv/Scripts/python.exe -c ' *)",
+      "Bash(timeout 120 ./venv/Scripts/python.exe -c ' *)",
+      "Bash(taskkill //F //FI \"WINDOWTITLE eq *\" //IM python.exe)",
+      "Bash(./venv/Scripts/python.exe __TRACKED_VAR__/test_config.py)",
+      "Bash(node -e ' *)",
+      "Bash(node --input-type=module -e ' *)",
+      "Bash(node \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/15a2830e-da66-47e0-892e-bec278d4d562/scratchpad/render_probe.mjs\" /src/pages/Landing.jsx)",
+      "Bash(cp \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/15a2830e-da66-47e0-892e-bec278d4d562/scratchpad/render_probe.mjs\" ./.render_probe.mjs)",
+      "Bash(node ./.render_probe.mjs /src/pages/Landing.jsx)",
+      "Bash(MSYS_NO_PATHCONV=1 node ./.render_probe.mjs \"/src/pages/Landing.jsx\")",
+      "Bash(cp \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/15a2830e-da66-47e0-892e-bec278d4d562/scratchpad/auth_probe.mjs\" ./.auth_probe.mjs)",
+      "Bash(MSYS_NO_PATHCONV=1 node ./.auth_probe.mjs)",
+      "Bash(grep -vE \"^\\\\s*$\")",
+      "Bash(curl -s \"http://localhost:5173/src/config.js\")"
     ]
   }
 }

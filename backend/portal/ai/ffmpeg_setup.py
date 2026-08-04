@@ -3,8 +3,10 @@ import shutil
 
 import imageio_ffmpeg
 
-# Whatever shells out to the literal command "ffmpeg" (openai-whisper, or our
-# own subprocess calls) needs it on PATH under that exact name. imageio-ffmpeg
+# gemini_client shells out to the literal command "ffmpeg" to convert the
+# browser's webm recording to wav, so it needs to be on PATH under that exact
+# name -- an absolute path would do for our own calls, but keeping the name
+# resolvable also covers anything else that expects it. imageio-ffmpeg
 # ships a static binary so we don't need a system-wide FFmpeg install, but its
 # file is named e.g. "ffmpeg-win-x86_64-v7.1.exe" — on Windows, the process
 # launcher matches PATH entries by exact filename (no PATHEXT guessing like
