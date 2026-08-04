@@ -135,6 +135,22 @@ def create_appointment():
     if not department:
         return error("Department not found", status=404)
 
+    # An OP can only ever be queued to the patient's assigned doctor's own
+    # department — start_appointment later requires both a department match
+    # AND can_access_patient (assigned_doctor_id == doctor.id), so an OP
+    # created against any other department could never be started by anyone.
+    if not patient.assigned_doctor_id:
+        return error("Assign a doctor to this patient before creating an OP", status=422)
+    assigned_department_id = patient.assigned_doctor.department_id
+    if not assigned_department_id:
+        return error("This patient's assigned doctor has no department set", status=422)
+    if assigned_department_id != department.id:
+        return error(
+            f"This patient is assigned to Dr. {patient.assigned_doctor.user.name if patient.assigned_doctor.user else 'their doctor'} "
+            f"in {patient.assigned_doctor.department.name} — the OP must be created in that department",
+            status=422,
+        )
+
     # OP billing rule: first-ever OP for this patient is always paid. A
     # returning patient's new OP is free if it's within 15 days of their
     # last one (follow-up), otherwise it's a fresh paid registration.

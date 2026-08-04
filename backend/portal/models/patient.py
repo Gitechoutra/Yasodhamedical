@@ -70,6 +70,7 @@ class Patient(db.Model):
                     "id": self.assigned_doctor.id,
                     "name": self.assigned_doctor.user.name if self.assigned_doctor.user else None,
                     "specialization": self.assigned_doctor.specialization,
+                    "department_id": self.assigned_doctor.department_id,
                     "department": (
                         self.assigned_doctor.department.name
                         if self.assigned_doctor.department

@@ -7,12 +7,10 @@ import Modal from "../components/Modal";
 import { useAuth } from "../context/AuthContext";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchAppointments, createAppointment, startAppointment } from "../services/appointmentService";
-import { fetchDepartments } from "../services/departmentService";
 import { fetchPatients } from "../services/patientService";
 
-function CreateOpModal({ patients, departments, preselectedPatientId, onClose, onCreated }) {
+function CreateOpModal({ patients, preselectedPatientId, onClose, onCreated }) {
   const [patientId, setPatientId] = useState(preselectedPatientId || "");
-  const [departmentId, setDepartmentId] = useState("");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -20,8 +18,17 @@ function CreateOpModal({ patients, departments, preselectedPatientId, onClose, o
   const inputClass =
     "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
 
+  const patient = patients.find((p) => String(p.id) === String(patientId));
+  // The OP always goes to the assigned doctor's own department — a
+  // receptionist picking a different one would create an OP nobody could
+  // ever start (start_appointment requires both a department match and
+  // that the doctor is this exact patient's assigned_doctor).
+  const assignedDoctor = patient?.assigned_doctor;
+  const departmentId = assignedDoctor?.department_id;
+
   async function handleSubmit(e) {
     e.preventDefault();
+    if (!departmentId) return;
     setSaving(true);
     setErrorMsg("");
     try {
@@ -59,20 +66,21 @@ function CreateOpModal({ patients, departments, preselectedPatientId, onClose, o
         </div>
 
         <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600">Department *</label>
-          <select
-            required
-            className={inputClass}
-            value={departmentId}
-            onChange={(e) => setDepartmentId(e.target.value)}
-          >
-            <option value="">Select a department</option>
-            {departments.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
+          <label className="mb-1 block text-xs font-semibold text-slate-600">Department</label>
+          {!patientId ? (
+            <p className={`${inputClass} bg-slate-50 text-slate-400`}>Select a patient first</p>
+          ) : assignedDoctor?.department_id ? (
+            <p className={`${inputClass} bg-slate-50 text-slate-700`}>
+              {assignedDoctor.department} — Dr. {assignedDoctor.name}
+              {assignedDoctor.specialization ? ` (${assignedDoctor.specialization})` : ""}
+            </p>
+          ) : (
+            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              {assignedDoctor
+                ? "This patient's assigned doctor has no department set — contact admin."
+                : "No doctor assigned to this patient yet — assign one from the Patients page first."}
+            </p>
+          )}
         </div>
 
         <div>
@@ -92,7 +100,7 @@ function CreateOpModal({ patients, departments, preselectedPatientId, onClose, o
 
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || !departmentId}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
           {saving ? "Creating…" : "Create OP"}
@@ -113,7 +121,6 @@ export default function Appointments() {
 
   const [appointments, setAppointments] = useState([]);
   const [patients, setPatients] = useState([]);
-  const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(
     canScheduleAppointments && Boolean(searchParams.get("patient_id"))
@@ -141,13 +148,12 @@ export default function Appointments() {
       if (todayOnly) listParams.filter = "today";
       if (ongoingOnly) listParams.status = "in_progress";
       const requests = canScheduleAppointments
-        ? [fetchAppointments(listParams), fetchPatients(), fetchDepartments()]
+        ? [fetchAppointments(listParams), fetchPatients()]
         : [fetchAppointments(listParams)];
       return Promise.all(requests)
-        .then(([a, p, d]) => {
+        .then(([a, p]) => {
           setAppointments(a);
           if (p) setPatients(p);
-          if (d) setDepartments(d);
           setErrorMsg("");
         })
         .catch(() => setErrorMsg("Could not load the appointment queue."))
@@ -266,7 +272,6 @@ export default function Appointments() {
       {showModal && canScheduleAppointments && (
         <CreateOpModal
           patients={patients}
-          departments={departments}
           preselectedPatientId={searchParams.get("patient_id")}
           onClose={closeModal}
           onCreated={() => {
