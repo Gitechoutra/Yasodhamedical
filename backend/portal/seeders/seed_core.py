@@ -2,11 +2,12 @@ from portal.extensions import db
 from portal.models.department import Department
 from portal.models.doctor import Doctor
 from portal.models.medicine import Medicine
+from portal.models.branch import Branch
+from portal.models.medicine_brand import MedicineBrand, StockBatch
 from portal.models.nurse import Nurse
-from portal.models.role import Role
+from portal.models.pharmacist import Pharmacist
+from portal.models.role import DEFAULT_ROLES, Role
 from portal.models.user import User
-
-ROLE_NAMES = ["admin", "doctor", "nurse", "receptionist"]
 
 DEPARTMENTS = ["Orthopedics", "Gynecology", "Gastroenterology", "General Medicine"]
 
@@ -80,10 +81,138 @@ NURSES = [
 ]
 
 
+# (name, code, city). Cross-branch search is meaningless with one branch, so
+# the seed ships three.
+BRANCHES = [
+    ("Yasodha Hospitals — Kakinada", "KKD", "Kakinada"),
+    ("Yasodha Hospitals — Rajahmundry", "RJY", "Rajahmundry"),
+    ("Yasodha Hospitals — Vizag", "VZG", "Visakhapatnam"),
+]
+
+# (name, email, password, branch code, license no)
+PHARMACISTS = [
+    ("Ravi Teja", "ravi.pharmacy@yasodhahospitals.com", "Pharma@123", "KKD", "AP-PH-4471"),
+    ("Sneha Reddy", "sneha.pharmacy@yasodhahospitals.com", "Pharma@123", "RJY", "AP-PH-5528"),
+]
+
+# (brand, generic, used_for, category, manufacturer, form, strength, {branch: qty})
+# Spread across branches on purpose: some brands are missing from Kakinada so
+# the cross-branch lookup has something real to find.
+BRAND_CATALOGUE = [
+    ("Dolo 650", "Paracetamol", "Fever, mild to moderate pain, headache, body ache",
+     "Analgesic/Antipyretic", "Micro Labs", "tablet", "650mg", {"KKD": 240, "RJY": 180, "VZG": 90}),
+    ("Crocin Advance", "Paracetamol", "Fever and headache relief",
+     "Analgesic/Antipyretic", "GSK", "tablet", "500mg", {"KKD": 60, "VZG": 120}),
+    ("Augmentin 625 Duo", "Amoxicillin + Clavulanic Acid",
+     "Bacterial infections of the chest, throat, skin and urinary tract",
+     "Antibiotic", "GSK", "tablet", "625mg", {"KKD": 45, "RJY": 80}),
+    ("Azithral 500", "Azithromycin", "Respiratory, skin and ENT bacterial infections",
+     "Antibiotic", "Alembic", "tablet", "500mg", {"RJY": 65, "VZG": 40}),
+    ("Pan 40", "Pantoprazole", "Acidity, gastric reflux, stomach ulcers",
+     "Antacid", "Alkem", "tablet", "40mg", {"KKD": 150, "RJY": 95}),
+    ("Zerodol SP", "Aceclofenac + Paracetamol + Serratiopeptidase",
+     "Pain and swelling in arthritis, injury and post-surgery",
+     "NSAID", "Ipca", "tablet", "100mg", {"KKD": 18, "VZG": 70}),
+    ("Cetzine", "Cetirizine", "Allergy, running nose, sneezing, skin rash",
+     "Antihistamine", "GSK", "tablet", "10mg", {"KKD": 200, "RJY": 140}),
+    ("Normal Saline 0.9%", "Sodium Chloride", "IV fluid for dehydration and electrolyte balance",
+     "IV Fluid", "Baxter", "iv_fluid", "500ml", {"KKD": 35, "RJY": 50, "VZG": 25}),
+    ("Ondem 4", "Ondansetron", "Nausea and vomiting, including post-operative",
+     "Antiemetic", "Alkem", "injection", "4mg", {"RJY": 30}),
+    ("Ascoril LS", "Levosalbutamol + Ambroxol + Guaifenesin",
+     "Wet cough with chest congestion", "Antitussive", "Glenmark", "syrup", "100ml",
+     {"VZG": 55}),
+]
+
+
+def seed_branches():
+    branches = {}
+    for name, code, city in BRANCHES:
+        branch = Branch.query.filter_by(code=code).first()
+        if not branch:
+            branch = Branch(name=name, code=code, city=city)
+            db.session.add(branch)
+            db.session.commit()
+        branches[code] = branch
+    return branches
+
+
+def seed_pharmacists(branches):
+    role = Role.query.filter_by(name="pharmacist").first()
+    for name, email, password, branch_code, license_no in PHARMACISTS:
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            user = User(name=name, email=email, role_id=role.id)
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+        if not Pharmacist.query.filter_by(user_id=user.id).first():
+            db.session.add(
+                Pharmacist(
+                    user_id=user.id,
+                    branch_id=branches[branch_code].id,
+                    license_no=license_no,
+                )
+            )
+            db.session.commit()
+
+
+def seed_pharmacy_catalogue(branches):
+    from datetime import date, timedelta
+
+    for (brand_name, generic, used_for, category, maker, form, strength, stock) in BRAND_CATALOGUE:
+        brand = MedicineBrand.query.filter_by(brand_name=brand_name, strength=strength).first()
+        if not brand:
+            brand = MedicineBrand(
+                brand_name=brand_name,
+                generic_name=generic,
+                used_for=used_for,
+                category=category,
+                manufacturer=maker,
+                form=form,
+                strength=strength,
+                # Link to the clinical formulary where the generic matches, so
+                # a prescription can be filled with this brand.
+                medicine_id=(
+                    Medicine.query.filter(Medicine.name.ilike(f"%{generic.split()[0]}%")).first().id
+                    if Medicine.query.filter(Medicine.name.ilike(f"%{generic.split()[0]}%")).first()
+                    else None
+                ),
+            )
+            db.session.add(brand)
+            db.session.commit()
+
+        for branch_code, quantity in stock.items():
+            branch = branches[branch_code]
+            exists = StockBatch.query.filter_by(branch_id=branch.id, brand_id=brand.id).first()
+            if not exists:
+                db.session.add(
+                    StockBatch(
+                        branch_id=branch.id,
+                        brand_id=brand.id,
+                        batch_no=f"B{brand.id:03d}{branch.code}",
+                        expiry_date=date.today() + timedelta(days=420),
+                        quantity=quantity,
+                        mrp=round(12 + brand.id * 7.5, 2),
+                        cost_price=round((12 + brand.id * 7.5) * 0.72, 2),
+                    )
+                )
+        db.session.commit()
+
+
 def seed_roles():
-    for name in ROLE_NAMES:
-        if not Role.query.filter_by(name=name).first():
-            db.session.add(Role(name=name, description=f"{name.capitalize()} role"))
+    """Reconciles the roles table against models/role.DEFAULT_ROLES.
+
+    Migration 9a51dd64f4ba already guarantees these exist, so this is a
+    belt-and-braces pass for a database that predates it — and it refreshes
+    descriptions, so editing the wording in one place is enough.
+    """
+    for name, description in DEFAULT_ROLES:
+        role = Role.query.filter_by(name=name).first()
+        if role:
+            role.description = description
+        else:
+            db.session.add(Role(name=name, description=description))
     db.session.commit()
 
 
@@ -189,6 +318,9 @@ def run():
     seed_doctors(departments)
     seed_nurses(departments)
     seed_formulary()
+    branches = seed_branches()
+    seed_pharmacists(branches)
+    seed_pharmacy_catalogue(branches)
     print("Seed complete.")
     print("  Admin        -> admin@yasodhahospitals.com / Admin@123")
     print("  Receptionist -> reception@yasodhahospitals.com / Reception@123")
@@ -196,4 +328,7 @@ def run():
         print(f"  Doctor -> {email} / {password}  ({dept_name})")
     for _name, email, password, dept_name, _emp, shift in NURSES:
         print(f"  Nurse  -> {email} / {password}  ({dept_name}, {shift} shift)")
-    print(f"  Seeded {len(FORMULARY)} formulary medicines")
+    for _name, email, password, branch_code, _lic in PHARMACISTS:
+        print(f"  Pharmacy -> {email} / {password}  ({branch_code})")
+    print(f"  Seeded {len(FORMULARY)} formulary medicines, "
+          f"{len(BRANCHES)} branches, {len(BRAND_CATALOGUE)} pharmacy brands")

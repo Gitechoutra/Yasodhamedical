@@ -31,7 +31,8 @@ export default function ProfileMenu() {
   // serves both rather than each module growing its own copy. Signing out
   // always returns to the one login page — there is no separate nurse portal.
   const isNurse = user?.role === "nurse";
-  const home = isNurse ? "/nurse" : "/dashboard";
+  const home =
+    isNurse ? "/nurse" : user?.role === "pharmacist" ? "/pharmacy" : "/dashboard";
 
   async function handleLogout() {
     setLoggingOut(true);

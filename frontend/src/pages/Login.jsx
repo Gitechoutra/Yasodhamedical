@@ -19,9 +19,15 @@ export default function Login() {
     setErrorMsg("");
     try {
       const user = await login(email, password);
-      // The one sign-in for every role. A nurse's screens live under /nurse,
-      // so they are routed there; everyone else lands on /dashboard.
-      navigate(user?.role === "nurse" ? "/nurse" : redirectTo, { replace: true });
+      // The one sign-in for every role. Nurses and pharmacists have their own
+      // module trees; everyone else lands on /dashboard.
+      const home =
+        user?.role === "nurse"
+          ? "/nurse"
+          : user?.role === "pharmacist"
+            ? "/pharmacy"
+            : redirectTo;
+      navigate(home, { replace: true });
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Unable to sign in. Please try again.");
     }
@@ -95,7 +101,13 @@ export default function Login() {
         </form>
 
         <p className="mt-6 text-center text-sm text-slate-500">
-          <Link to="/" className="font-semibold text-brand-600 hover:text-brand-700">
+          New here?{" "}
+          <Link to="/signup" className="font-semibold text-brand-600 hover:text-brand-700">
+            Request a staff account
+          </Link>
+        </p>
+        <p className="mt-2 text-center text-sm text-slate-500">
+          <Link to="/" className="font-semibold text-slate-500 hover:text-slate-700">
             ← Back to home
           </Link>
         </p>

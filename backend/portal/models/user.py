@@ -32,6 +32,9 @@ class User(db.Model):
     nurse_profile = db.relationship(
         "Nurse", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
+    pharmacist_profile = db.relationship(
+        "Pharmacist", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
 
     def set_password(self, raw_password):
         self.password_hash = generate_password_hash(raw_password)
@@ -72,6 +75,16 @@ class User(db.Model):
                 self.nurse_profile.employee_no if self.nurse_profile else None
             ),
             "shift": self.nurse_profile.shift if self.nurse_profile else None,
+            # Pharmacy-only: which counter this user works. Every stock query
+            # is scoped by it, so the frontend needs it on the session user.
+            "branch_id": (
+                self.pharmacist_profile.branch_id if self.pharmacist_profile else None
+            ),
+            "branch": (
+                self.pharmacist_profile.branch.name
+                if self.pharmacist_profile and self.pharmacist_profile.branch
+                else None
+            ),
         }
 
     def __repr__(self):

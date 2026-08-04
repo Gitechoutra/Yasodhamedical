@@ -45,16 +45,20 @@ def audit(action, entity=None, entity_id=None, detail=None, user_id=None):
     `detail` is a short human-readable summary -- what a reader needs to
     understand the entry without joining back to five other tables.
     """
+    # RuntimeError matters as much as the type errors: flask_jwt_extended
+    # raises it when there is no verified token in the request at all, which
+    # is the normal case for the public registration route and for anything
+    # run from a seeder or a shell. An audit row with no actor is still worth
+    # having -- losing the whole write because nobody was logged in is not.
     if user_id is None:
         try:
             user_id = int(get_jwt_identity())
-        except (TypeError, ValueError):
+        except (RuntimeError, TypeError, ValueError):
             user_id = None
 
     try:
         role = get_jwt().get("role")
-    except RuntimeError:
-        # Called outside a request (a seeder, a shell). Still worth recording.
+    except (RuntimeError, TypeError, ValueError):
         role = None
 
     entry = AuditLog(

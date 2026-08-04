@@ -21,6 +21,9 @@ export default function DashboardLayout() {
   if (user?.role === "nurse") {
     return <Navigate to="/nurse" replace />;
   }
+  if (user?.role === "pharmacist") {
+    return <Navigate to="/pharmacy" replace />;
+  }
 
   return (
     <div className="flex h-screen bg-slate-50">
