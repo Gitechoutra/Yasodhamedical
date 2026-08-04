@@ -3,7 +3,7 @@ from portal.routes.auth_routes import auth_bp
 from portal.routes.dashboard_routes import dashboard_bp
 from portal.routes.patient_routes import patient_bp
 from portal.routes.pharmacy_routes import pharmacy_bp
-from portal.routes.registration_routes import registration_bp
+from portal.routes.staff_routes import staff_bp
 from portal.routes.consultation_routes import consultation_bp
 from portal.routes.department_routes import department_bp
 from portal.routes.appointment_routes import appointment_bp
@@ -26,5 +26,4 @@ def register_routes(app):
     app.register_blueprint(nursing_bp, url_prefix="/api/nursing")
     app.register_blueprint(audit_bp, url_prefix="/api/audit")
     app.register_blueprint(pharmacy_bp, url_prefix="/api/pharmacy")
-    # Mounted under /auth so the public signup sits beside /auth/login.
-    app.register_blueprint(registration_bp, url_prefix="/api/auth")
+    app.register_blueprint(staff_bp, url_prefix="/api/staff")

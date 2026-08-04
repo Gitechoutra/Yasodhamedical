@@ -11,7 +11,6 @@ import {
   HiOutlineUserGroup,
   HiOutlineBuildingOffice2,
   HiOutlineIdentification,
-  HiOutlineUserPlus,
   HiOutlineCog6Tooth,
   HiOutlineArrowRightOnRectangle,
 } from "react-icons/hi2";
@@ -71,18 +70,12 @@ const NAV_ITEMS = [
     icon: HiOutlineBuildingOffice2,
     hideFrom: ["doctor"],
   },
+  // Creating one of these issues a working login, so it is admin-only — the
+  // route is blocked in AppRouter and the API 403s every other role.
   {
-    to: "/dashboard/users",
-    label: "Users",
+    to: "/dashboard/staff",
+    label: "Staff",
     icon: HiOutlineIdentification,
-    hideFrom: ["doctor"],
-  },
-  // Approving one of these creates a working account with patient access, so
-  // it sits with the other admin-only org screens.
-  {
-    to: "/dashboard/registrations",
-    label: "Registrations",
-    icon: HiOutlineUserPlus,
     hideFrom: ["doctor", "receptionist"],
   },
   { to: "/dashboard/settings", label: "Settings", icon: HiOutlineCog6Tooth },

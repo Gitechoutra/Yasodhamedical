@@ -100,13 +100,12 @@ export default function Login() {
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-slate-500">
-          New here?{" "}
-          <Link to="/signup" className="font-semibold text-brand-600 hover:text-brand-700">
-            Request a staff account
-          </Link>
+        {/* No public sign-up: staff accounts are created by an administrator
+            through Staff Management. */}
+        <p className="mt-6 text-center text-xs text-slate-400">
+          Staff accounts are issued by your hospital administrator.
         </p>
-        <p className="mt-2 text-center text-sm text-slate-500">
+        <p className="mt-3 text-center text-sm text-slate-500">
           <Link to="/" className="font-semibold text-slate-500 hover:text-slate-700">
             ← Back to home
           </Link>

@@ -35,6 +35,11 @@ class User(db.Model):
     pharmacist_profile = db.relationship(
         "Pharmacist", back_populates="user", uselist=False, cascade="all, delete-orphan"
     )
+    # HR details for Staff Management. Separate from the operational profiles
+    # above, which the clinical code joins against — see models/staff_profile.
+    staff_profile = db.relationship(
+        "StaffProfile", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
 
     def set_password(self, raw_password):
         self.password_hash = generate_password_hash(raw_password)

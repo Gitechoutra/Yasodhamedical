@@ -3,14 +3,13 @@ import Landing from "../pages/Landing";
 import PrivacyPolicy from "../pages/legal/PrivacyPolicy";
 import Terms from "../pages/legal/Terms";
 import Login from "../pages/Login";
-import Signup from "../pages/Signup";
-import Registrations from "../pages/Registrations";
 import Dashboard from "../pages/Dashboard";
 import Patients from "../pages/Patients";
 import Appointments from "../pages/Appointments";
 import Consultations from "../pages/Consultations";
 import ConsultationRoom from "../pages/ConsultationRoom";
 import Doctors from "../pages/Doctors";
+import StaffManagement from "../pages/StaffManagement";
 import Departments from "../pages/Departments";
 import DepartmentDetail from "../pages/DepartmentDetail";
 import NursingMonitor from "../pages/NursingMonitor";
@@ -154,7 +153,6 @@ export default function AppRouter() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<Signup />} />
         <Route path="/privacy" element={<PrivacyPolicy />} />
         <Route path="/terms" element={<Terms />} />
 
@@ -222,8 +220,7 @@ export default function AppRouter() {
               <Route path="doctors" element={<Doctors />} />
               <Route path="departments" element={<Departments />} />
               <Route path="departments/:id" element={<DepartmentDetail />} />
-              <Route path="users" element={<ComingSoon title="Users" />} />
-              <Route path="registrations" element={<Registrations />} />
+              <Route path="staff" element={<StaffManagement />} />
             </Route>
           </Route>
         </Route>

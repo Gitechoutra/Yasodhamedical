@@ -39,9 +39,33 @@ DEFAULT_ROLES = (
         "Manages the medicine catalogue and their branch's stock, and looks "
         "up availability across other branches.",
     ),
+    (
+        "lab_technician",
+        "Runs diagnostic tests for a lab department. No access to "
+        "consultations, prescriptions or the nursing record.",
+    ),
+    (
+        "accountant",
+        "Handles billing and financial records. No access to clinical data.",
+    ),
+    (
+        "other_staff",
+        "General hospital staff with an account but no clinical or financial "
+        "access — a placeholder for roles the hospital adds later.",
+    ),
 )
 
 ROLE_NAMES = tuple(name for name, _description in DEFAULT_ROLES)
+
+# Roles an administrator may create through Staff Management. `admin` is
+# absent: granting administrator is how every other grant is made, so it stays
+# a deliberate database-level action rather than a form field.
+STAFF_ROLES = tuple(name for name in ROLE_NAMES if name != "admin")
+
+# Roles that own a dedicated profile table because clinical or pharmacy code
+# joins against it — creating one of these must create that row too, or the
+# account is half-formed (see registration_request for what that costs).
+ROLES_WITH_PROFILE = ("doctor", "nurse", "pharmacist")
 
 
 class Role(db.Model):

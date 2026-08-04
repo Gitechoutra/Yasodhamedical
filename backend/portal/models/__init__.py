@@ -5,6 +5,7 @@ from portal.models.department import Department
 from portal.models.doctor import Doctor
 from portal.models.nurse import Nurse
 from portal.models.pharmacist import Pharmacist
+from portal.models.staff_profile import StaffProfile
 from portal.models.patient import Patient
 from portal.models.medicine import Medicine
 from portal.models.medicine_brand import MedicineBrand, StockBatch
@@ -32,6 +33,7 @@ __all__ = [
     "Doctor",
     "Nurse",
     "Pharmacist",
+    "StaffProfile",
     "Patient",
     "Medicine",
     "MedicineBrand",
