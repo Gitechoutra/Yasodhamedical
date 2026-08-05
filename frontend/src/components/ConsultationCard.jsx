@@ -65,6 +65,13 @@ export default function ConsultationCard({ consultation, onDownloadReport, downl
             <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
               Completed
             </span>
+            {/* Only when the case really has several — a lone "Session 1" tag
+                on an ordinary one-visit consultation is just noise. */}
+            {consultation.case?.session_count > 1 && consultation.session_number && (
+              <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700">
+                Session {consultation.session_number} of {consultation.case.session_count}
+              </span>
+            )}
             {prescriptions.length > 0 && (
               <span
                 title={
@@ -208,13 +215,21 @@ export default function ConsultationCard({ consultation, onDownloadReport, downl
             </Section>
           </div>
 
-          <div className="mt-5 flex items-center gap-4">
+          <div className="mt-5 flex flex-wrap items-center gap-4">
             <Link
               to={`/dashboard/consultations/${consultation.id}`}
               className="text-xs font-semibold text-brand-600 transition hover:text-brand-700"
             >
               Open full consultation & transcript →
             </Link>
+            {consultation.case_id && (
+              <Link
+                to={`/dashboard/cases/${consultation.case_id}`}
+                className="text-xs font-semibold text-brand-600 transition hover:text-brand-700"
+              >
+                View the whole course of treatment →
+              </Link>
+            )}
             {report?.generated_at && (
               <span className="text-xs text-slate-400">
                 Report generated {new Date(report.generated_at).toLocaleString()}

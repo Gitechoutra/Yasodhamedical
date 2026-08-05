@@ -9,10 +9,13 @@ from portal.models.staff_profile import StaffProfile
 from portal.models.patient import Patient
 from portal.models.medicine import Medicine
 from portal.models.medicine_brand import MedicineBrand, StockBatch
+from portal.models.patient_case import PatientCase
+from portal.models.case_prescription import CasePrescription
 from portal.models.consultation import Consultation
 from portal.models.conversation_message import ConversationMessage
 from portal.models.consultation_summary import ConsultationSummary
 from portal.models.generated_prescription import GeneratedPrescription
+from portal.models.clinical_precedent import ClinicalPrecedent
 from portal.models.appointment import Appointment
 from portal.models.report import Report
 from portal.models.notification import Notification
@@ -38,10 +41,13 @@ __all__ = [
     "Medicine",
     "MedicineBrand",
     "StockBatch",
+    "PatientCase",
+    "CasePrescription",
     "Consultation",
     "ConversationMessage",
     "ConsultationSummary",
     "GeneratedPrescription",
+    "ClinicalPrecedent",
     "Appointment",
     "Report",
     "Notification",

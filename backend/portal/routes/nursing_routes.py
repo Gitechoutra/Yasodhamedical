@@ -37,6 +37,7 @@ from portal.helpers.audit import (
 from portal.helpers.broadcast import dashboard_changed, nursing_changed
 from portal.helpers.datetime_helper import to_utc_iso
 from portal.helpers.decorators import clinical_only, role_required
+from portal.helpers.formulary import prescribable_for, resolve_medicine
 from portal.helpers.notify import notify
 from portal.helpers.nursing_access import (
     can_record_on,
@@ -60,7 +61,6 @@ from portal.models.medication_order import (
     MedicationAdministration,
     MedicationOrder,
 )
-from portal.models.medicine import Medicine
 from portal.models.nurse import Nurse
 from portal.models.nurse import SHIFTS as NURSE_SHIFTS
 from portal.models.nursing_assignment import (
@@ -460,7 +460,11 @@ def _add_orders_from_payload(assignment, items):
     if not isinstance(items, list):
         return 0, "medications must be a list"
 
-    formulary = {m.name.lower(): m for m in Medicine.query.all()}
+    # Resolved against the same inventory the doctor prescribed from, so a
+    # medication order carried over from a prescription is recognised rather
+    # than flagged off-formulary. Out-of-stock included: the order records
+    # what the doctor asked for, and sourcing it is the pharmacy's problem.
+    prescribable = prescribable_for(assignment.doctor, include_out_of_stock=True)
     added = 0
     for index, item in enumerate(items):
         if not isinstance(item, dict):
@@ -483,11 +487,11 @@ def _add_orders_from_payload(assignment, items):
             if not 1 <= times_per_day <= 24:
                 return 0, f"Medication {index + 1}: times_per_day must be between 1 and 24"
 
-        matched = formulary.get(name.lower())
+        _brand, medicine_id = resolve_medicine(name, prescribable)
         db.session.add(
             MedicationOrder(
                 assignment_id=assignment.id,
-                medicine_id=matched.id if matched else None,
+                medicine_id=medicine_id,
                 medicine_name=name[:150],
                 route=route,
                 dose=(item.get("dose") or "").strip()[:255] or None,

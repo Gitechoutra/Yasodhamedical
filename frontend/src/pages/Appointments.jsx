@@ -184,9 +184,17 @@ export default function Appointments() {
       const consultation = await startAppointment(appointmentId);
       navigate(`/dashboard/consultations/${consultation.id}`);
     } catch (err) {
-      // 409 when someone else already picked the patient up, 403 when it's
-      // another department's queue — both are worth showing rather than
-      // leaving the button silently stuck.
+      // 409 when someone else already picked the patient up or the patient
+      // was already seen today, 403 when it's another department's queue —
+      // all worth showing rather than leaving the button silently stuck.
+      //
+      // A same-day 409 carries the consultation to carry on with, so the
+      // doctor lands in the right room instead of having to hunt for it.
+      const existingId = err.response?.data?.errors?.consultation_id;
+      if (existingId) {
+        navigate(`/dashboard/consultations/${existingId}`);
+        return;
+      }
       setErrorMsg(err.response?.data?.message || "Could not start that consultation.");
       load();
     } finally {

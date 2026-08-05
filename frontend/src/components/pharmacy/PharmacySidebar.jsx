@@ -40,7 +40,8 @@ const NAV = [
     label: "Medicines",
     icon: HiOutlineArchiveBox,
     children: [
-      { to: "/pharmacy/medicines/inventory", label: "Inventory", ready: true },
+      { to: "/pharmacy/medicines/departments", label: "Departments", ready: true },
+      { to: "/pharmacy/medicines/inventory", label: "All Medicines", ready: true },
       { to: "/pharmacy/medicines/add", label: "Add Medicine", ready: true },
       { to: "/pharmacy/medicines/categories", label: "Categories", ready: true },
       { to: "/pharmacy/medicines/search", label: "Search", ready: true },

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { HiOutlineArrowDownTray } from "react-icons/hi2";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchReports, downloadReport } from "../services/reportService";
@@ -25,8 +26,9 @@ export default function Reports() {
   async function handleDownload(report) {
     setDownloadingId(report.id);
     try {
-      const filename = `${(report.patient || "patient").replace(/\s+/g, "_")}_consultation_report.pdf`;
-      await downloadReport(report.id, filename);
+      const name = (report.patient || "patient").replace(/\s+/g, "_");
+      const suffix = report.kind === "case" ? "full_medical_report" : "consultation_report";
+      await downloadReport(report.id, `${name}_${suffix}.pdf`);
     } finally {
       setDownloadingId(null);
     }
@@ -54,15 +56,17 @@ export default function Reports() {
             ))}
           </div>
         ) : reports.length === 0 ? (
-          <p className="py-12 text-center text-sm text-slate-400">
-            No reports generated yet. Reports appear here once a doctor clicks "Generate PDF"
-            on a completed consultation.
+          <p className="mx-auto max-w-xl py-12 text-center text-sm text-slate-400">
+            No reports generated yet. A single-session report appears here once a doctor
+            prints or downloads a completed consultation; the full-treatment report appears
+            when a case is closed and its final prescription is verified.
           </p>
         ) : (
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
                 <th className="px-6 py-3 font-medium">Patient</th>
+                <th className="px-6 py-3 font-medium">Type</th>
                 <th className="px-6 py-3 font-medium">Doctor</th>
                 <th className="px-6 py-3 font-medium">Generated</th>
                 <th className="px-6 py-3 font-medium"></th>
@@ -71,7 +75,33 @@ export default function Reports() {
             <tbody>
               {reports.map((r) => (
                 <tr key={r.id} className="border-b border-slate-50 last:border-0">
-                  <td className="px-6 py-3 font-medium text-slate-800">{r.patient}</td>
+                  <td className="px-6 py-3 font-medium text-slate-800">
+                    <Link
+                      to={
+                        r.kind === "case"
+                          ? `/dashboard/cases/${r.case_id}`
+                          : `/dashboard/consultations/${r.consultation_id}`
+                      }
+                      className="transition hover:text-brand-700"
+                    >
+                      {r.patient}
+                    </Link>
+                  </td>
+                  {/* A single visit's report and the consolidated report for a
+                      whole course of treatment are very different documents,
+                      and both land in this one list. */}
+                  <td className="px-6 py-3">
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                        r.kind === "case"
+                          ? "bg-brand-50 text-brand-700"
+                          : "bg-slate-100 text-slate-600"
+                      }`}
+                    >
+                      {r.kind === "case" ? "Full treatment" : "Single session"}
+                    </span>
+                    <span className="ml-2 text-xs text-slate-400">{r.label}</span>
+                  </td>
                   <td className="px-6 py-3 text-slate-500">{r.doctor}</td>
                   <td className="px-6 py-3 text-slate-500">
                     {new Date(r.generated_at).toLocaleString()}

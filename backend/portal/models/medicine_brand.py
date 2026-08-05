@@ -10,7 +10,7 @@ generic it dispenses, so a prescription for "Paracetamol 650mg" can be filled
 with whichever brand the counter stocks.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 
 from portal.extensions import db
 from portal.helpers.datetime_helper import to_utc_iso
@@ -44,6 +44,27 @@ FORM_LABELS = {
 
 DEFAULT_REORDER_LEVEL = 20
 
+# Which departments stock a medicine. A plain link table rather than a column
+# on the brand, because the real relationship is many-to-many: Paracetamol is
+# used by every department while Oxytocin is used by one, and a single
+# department_id would force the shared ones to be duplicated per department or
+# hidden from most of the hospital.
+medicine_departments = db.Table(
+    "medicine_departments",
+    db.Column(
+        "brand_id",
+        db.Integer,
+        db.ForeignKey("medicine_brands.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    db.Column(
+        "department_id",
+        db.Integer,
+        db.ForeignKey("departments.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
 
 class MedicineBrand(db.Model):
     """One purchasable product: a brand name, its generic, and what it treats."""
@@ -64,12 +85,36 @@ class MedicineBrand(db.Model):
     # Held on the brand rather than per branch: one sensible threshold per
     # product is enough until branches genuinely need different ones.
     reorder_level = db.Column(db.Integer, nullable=False, default=DEFAULT_REORDER_LEVEL)
+    # How the patient should take it, e.g. "Swallow whole after food; do not
+    # crush." Distinct from `used_for`, which is what it treats — this is what
+    # gets printed on the label and suggested alongside a prescription.
+    usage_instructions = db.Column(db.Text, nullable=True)
+    # The catalogue list price per unit. A batch's `mrp` is what one delivery
+    # was priced at and is what a sale should charge; this is the standing
+    # price shown while managing the medicine, before any stock exists.
+    unit_price = db.Column(db.Numeric(10, 2), nullable=True)
+    # True for stock every department draws on (analgesics, IV fluids), so
+    # general items do not have to be tagged to a dozen departments one by one
+    # and stay correct when a new department is opened.
+    for_all_departments = db.Column(db.Boolean, nullable=False, default=False)
     # The clinical formulary row this brand dispenses, when there is one.
     medicine_id = db.Column(db.Integer, db.ForeignKey("medicines.id"), nullable=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
+    updated_at = db.Column(
+        db.TIMESTAMP,
+        server_default=db.func.now(),
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
 
     medicine = db.relationship("Medicine")
+    departments = db.relationship(
+        "Department",
+        secondary=medicine_departments,
+        lazy="selectin",
+        order_by="Department.name",
+    )
     batches = db.relationship(
         "StockBatch", back_populates="brand", cascade="all, delete-orphan"
     )
@@ -99,22 +144,73 @@ class MedicineBrand(db.Model):
             if b.branch_id == branch_id and (b.expiry_date is None or b.expiry_date >= today)
         )
 
-    def to_dict(self, branch_id=None):
+    @property
+    def total_quantity(self):
+        """Sellable units across the whole hospital.
+
+        What "available to prescribe" means: a doctor writes for the hospital,
+        not for one counter, and a medicine held at another branch can be
+        transferred. Per-branch numbers are the pharmacist's view.
+        """
+        today = datetime.utcnow().date()
+        return sum(
+            b.quantity
+            for b in self.batches
+            if b.expiry_date is None or b.expiry_date >= today
+        )
+
+    @property
+    def nearest_expiry(self):
+        """The soonest expiry among batches still holding stock — the date that
+        actually constrains dispensing."""
+        dates = [b.expiry_date for b in self.batches if b.quantity > 0 and b.expiry_date]
+        return min(dates) if dates else None
+
+    def availability(self, branch_id=None):
+        """One word for the state of this medicine, in the order that matters.
+
+        Discontinued outranks everything: an inactive brand is not "in stock"
+        regardless of what is still sitting on the shelf, because it must not
+        be dispensed or prescribed.
+        """
+        if not self.is_active:
+            return "discontinued"
+        quantity = self.quantity_in(branch_id) if branch_id is not None else self.total_quantity
+        if quantity <= 0:
+            return "out_of_stock"
+        if quantity < self.reorder_level:
+            return "low_stock"
+        return "available"
+
+    def to_dict(self, branch_id=None, include_batches=False):
+        nearest = self.nearest_expiry
         data = {
             "id": self.id,
             "brand_name": self.brand_name,
             "display_name": self.display_name,
             "generic_name": self.generic_name,
             "used_for": self.used_for,
+            "usage_instructions": self.usage_instructions,
             "category": self.category,
             "manufacturer": self.manufacturer,
             "form": self.form,
             "form_label": self.form_label,
             "strength": self.strength,
+            "unit_price": float(self.unit_price) if self.unit_price is not None else None,
             "reorder_level": self.reorder_level,
             "is_active": self.is_active,
+            "for_all_departments": self.for_all_departments,
+            "departments": [
+                {"id": d.id, "name": d.name} for d in self.departments
+            ],
+            "department_ids": [d.id for d in self.departments],
             "medicine_id": self.medicine_id,
             "formulary_name": self.medicine.name if self.medicine else None,
+            # Hospital-wide, so a doctor's department view and the pharmacy's
+            # counter view can both be shown without a second request.
+            "total_quantity": self.total_quantity,
+            "nearest_expiry": nearest.isoformat() if nearest else None,
+            "availability": self.availability(branch_id),
             "created_at": to_utc_iso(self.created_at),
         }
         if branch_id is not None:
@@ -122,7 +218,21 @@ class MedicineBrand(db.Model):
             data["quantity"] = quantity
             data["in_stock"] = quantity > 0
             data["low_stock"] = 0 < quantity < self.reorder_level
+        if include_batches:
+            data["batches"] = [
+                b.to_dict()
+                for b in sorted(
+                    (x for x in self.batches if branch_id is None or x.branch_id == branch_id),
+                    # Nearest expiry first: that is the batch to dispense next.
+                    key=lambda x: (x.expiry_date or date.max),
+                )
+            ]
         return data
+
+    def serves_department(self, department_id):
+        if self.for_all_departments:
+            return True
+        return any(d.id == department_id for d in self.departments)
 
     def __repr__(self):
         return f"<MedicineBrand {self.display_name}>"

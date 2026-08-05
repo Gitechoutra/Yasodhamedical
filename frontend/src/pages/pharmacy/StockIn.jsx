@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { HiOutlineArchiveBox, HiOutlineCheckCircle } from "react-icons/hi2";
-import { addStock, fetchBrands } from "../../services/pharmacyService";
+import { addStock, fetchBrandOptions } from "../../services/pharmacyService";
 
 const input =
   "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100";
@@ -30,7 +30,7 @@ export default function StockIn() {
   const [saved, setSaved] = useState(null);
 
   useEffect(() => {
-    fetchBrands()
+    fetchBrandOptions()
       .then(setBrands)
       .catch(() => setErrorMsg("Could not load the medicine list."));
   }, []);
@@ -52,7 +52,7 @@ export default function StockIn() {
       setForm(EMPTY);
       // The quantity on every row just changed; refresh so the picker shows
       // the new figure rather than the one from page load.
-      fetchBrands().then(setBrands).catch(() => {});
+      fetchBrandOptions().then(setBrands).catch(() => {});
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Could not receive this stock.");
     } finally {

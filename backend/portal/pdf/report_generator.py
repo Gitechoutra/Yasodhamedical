@@ -109,6 +109,80 @@ def _hospital_lines(hospital):
     return list(filter(None, [hospital.get("address"), contact, hospital.get("website")]))
 
 
+PRESCRIPTION_TABLE_STYLE = TableStyle(
+    [
+        ("BACKGROUND", (0, 0), (-1, 0), SLATE_100),
+        ("TEXTCOLOR", (0, 0), (-1, 0), SLATE_500),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.5, SLATE_100),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TEXTCOLOR", (0, 1), (-1, -1), SLATE_700),
+    ]
+)
+
+
+def prescription_table(prescriptions, extra_column=None):
+    """The medicine table, shared by the single-session and case reports.
+
+    `extra_column` is (heading, value_fn) for the consolidated report's
+    provenance column — where in the course of treatment each medicine came
+    from, which a single-session report has no use for.
+    """
+    header = ["#", "Medicine", "Dosage", "Frequency", "Duration", "Qty"]
+    widths = [7 * mm, 45 * mm, 25 * mm, 45 * mm, 26 * mm, 22 * mm]
+    if extra_column:
+        header.append(extra_column[0])
+        # Taken out of the widest free-text columns so the table still fits
+        # the page rather than overflowing the right margin.
+        widths = [7 * mm, 38 * mm, 22 * mm, 36 * mm, 22 * mm, 18 * mm, 27 * mm]
+
+    rows = [header]
+    for index, p in enumerate(prescriptions, start=1):
+        # The label line goes under the medicine name rather than in its own
+        # column: it is a sentence, and a sixth narrow column would wrap it
+        # into an unreadable stack.
+        name = p.medicine_name
+        instructions = getattr(p, "instructions", None) or (
+            p.brand.usage_instructions if getattr(p, "brand", None) else None
+        )
+        if instructions:
+            name = f"{name}<br/><font size=7.5 color='#64748b'>{instructions}</font>"
+        row = [
+            Paragraph(str(index), STYLE_TABLE_CELL),
+            Paragraph(name, STYLE_TABLE_CELL),
+            Paragraph(p.dose or "—", STYLE_TABLE_CELL),
+            Paragraph(p.frequency or "—", STYLE_TABLE_CELL),
+            Paragraph(p.duration or "—", STYLE_TABLE_CELL),
+            Paragraph(getattr(p, "quantity", None) or "—", STYLE_TABLE_CELL),
+        ]
+        if extra_column:
+            row.append(Paragraph(extra_column[1](p) or "—", STYLE_TABLE_CELL))
+        rows.append(row)
+
+    table = Table(rows, colWidths=widths, repeatRows=1)
+    table.setStyle(PRESCRIPTION_TABLE_STYLE)
+    return table
+
+
+def verification_line(verified_at, verifier_name, what="prescription"):
+    """The single most important thing a reader of a printed prescription
+    needs: whether a doctor actually stood behind it."""
+    if verified_at:
+        verifier = verifier_name or "the treating doctor"
+        verified_on = verified_at.strftime("%d %b %Y at %H:%M UTC")
+        return Paragraph(
+            f"<b>Verified</b> — {what} reviewed and approved by {verifier} on {verified_on}.",
+            ParagraphStyle("Verified", parent=STYLE_DISCLAIMER, textColor=EMERALD),
+        )
+    return Paragraph(
+        f"<b>NOT VERIFIED</b> — this {what} has not been signed off by the treating doctor.",
+        ParagraphStyle("Unverified", parent=STYLE_DISCLAIMER, textColor=AMBER),
+    )
+
+
 def generate_consultation_pdf(consultation, output_path):
     """Renders a consultation's summary into a hospital-letterhead-style PDF."""
     patient = consultation.patient
@@ -144,6 +218,17 @@ def generate_consultation_pdf(consultation, output_path):
         Paragraph(f"Ref: CONS-{consultation.id:05d}", STYLE_DOC_META),
         Paragraph(f"Generated {generated_at.strftime('%d %b %Y, %I:%M %p')}", STYLE_DOC_META),
     ]
+    # A session inside a longer course of treatment says so, so this page is
+    # never mistaken for the record of the whole treatment — that document is
+    # the case report, produced when the case closes.
+    case = consultation.case
+    if case and len(case.sessions) > 1:
+        right_block.append(
+            Paragraph(
+                f"Session {consultation.session_number} of {len(case.sessions)} · {case.code}",
+                STYLE_DOC_META,
+            )
+        )
 
     header = Table(
         [[_logo(), hospital_block, right_block]],
@@ -226,56 +311,17 @@ def generate_consultation_pdf(consultation, output_path):
     # --- Prescription --------------------------------------------------------
     story.append(Paragraph("Prescription", STYLE_SECTION))
     if prescriptions:
-        rows = [["#", "Medicine", "Dosage", "Instructions", "Duration"]]
-        for index, p in enumerate(prescriptions, start=1):
-            rows.append(
-                [
-                    Paragraph(str(index), STYLE_TABLE_CELL),
-                    Paragraph(p.medicine_name, STYLE_TABLE_CELL),
-                    Paragraph(p.dose or "—", STYLE_TABLE_CELL),
-                    Paragraph(p.frequency or "—", STYLE_TABLE_CELL),
-                    Paragraph(p.duration or "—", STYLE_TABLE_CELL),
-                ]
-            )
-        rx_table = Table(rows, colWidths=[8 * mm, 45 * mm, 27 * mm, 55 * mm, 35 * mm], repeatRows=1)
-        rx_table.setStyle(
-            TableStyle(
-                [
-                    ("BACKGROUND", (0, 0), (-1, 0), SLATE_100),
-                    ("TEXTCOLOR", (0, 0), (-1, 0), SLATE_500),
-                    ("FONTSIZE", (0, 0), (-1, -1), 9),
-                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("LINEBELOW", (0, 0), (-1, -1), 0.5, SLATE_100),
-                    ("TOPPADDING", (0, 0), (-1, -1), 6),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("TEXTCOLOR", (0, 1), (-1, -1), SLATE_700),
-                ]
-            )
-        )
-        story.append(rx_table)
+        story.append(prescription_table(prescriptions))
     else:
         story.append(Paragraph("No medicines prescribed.", STYLE_BODY))
 
-    # Whether a doctor signed off the AI suggestion is the single most
-    # important thing a reader of this PDF needs to know.
     story.append(Spacer(1, 6))
-    if consultation.prescription_verified_at:
-        verifier = consultation.verified_by.name if consultation.verified_by else "the treating doctor"
-        verified_on = consultation.prescription_verified_at.strftime("%d %b %Y at %H:%M UTC")
-        story.append(
-            Paragraph(
-                f"<b>Verified</b> — prescription reviewed and approved by {verifier} on {verified_on}.",
-                ParagraphStyle("Verified", parent=STYLE_DISCLAIMER, textColor=EMERALD),
-            )
+    story.append(
+        verification_line(
+            consultation.prescription_verified_at,
+            consultation.verified_by.name if consultation.verified_by else None,
         )
-    else:
-        story.append(
-            Paragraph(
-                "<b>NOT VERIFIED</b> — this prescription has not been signed off by the treating doctor.",
-                ParagraphStyle("Unverified", parent=STYLE_DISCLAIMER, textColor=AMBER),
-            )
-        )
+    )
 
     # --- Instructions & advice -------------------------------------------------
     if summary.follow_up_advice:

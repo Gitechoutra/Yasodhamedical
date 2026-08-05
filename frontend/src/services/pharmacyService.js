@@ -11,9 +11,26 @@ export async function fetchBranches() {
   return res.data.data;
 }
 
-/** The catalogue, each row carrying this branch's quantity. */
+/**
+ * The catalogue, filtered and paged, each row carrying this branch's quantity.
+ *
+ * Returns `{ branch, items, meta }`. Accepts { department_id, search, category,
+ * manufacturer, form, availability, status, page, page_size } — filtering and
+ * paging happen server-side so the page stays fast as the catalogue grows.
+ */
 export async function fetchBrands(params = {}) {
   const res = await api.get("/pharmacy/brands", { params });
+  return res.data.data;
+}
+
+/** Just the rows, for callers that only need a picker (e.g. Stock In). */
+export async function fetchBrandOptions(params = {}) {
+  const { items } = await fetchBrands({ page_size: 100, ...params });
+  return items;
+}
+
+export async function fetchBrand(brandId) {
+  const res = await api.get(`/pharmacy/brands/${brandId}`);
   return res.data.data;
 }
 
@@ -24,6 +41,25 @@ export async function createBrand(payload) {
 
 export async function updateBrand(brandId, payload) {
   const res = await api.patch(`/pharmacy/brands/${brandId}`, payload);
+  return res.data.data;
+}
+
+/**
+ * Removes a medicine from the catalogue.
+ *
+ * Returns `{ deleted }`. False means the server archived it instead — a
+ * medicine that has been prescribed or still holds stock is discontinued
+ * rather than erased, so patient history survives. The accompanying message
+ * explains which happened.
+ */
+export async function deleteBrand(brandId) {
+  const res = await api.delete(`/pharmacy/brands/${brandId}`);
+  return { ...res.data.data, message: res.data.message };
+}
+
+/** Every department with its medicine and stock counts. */
+export async function fetchDepartmentInventory() {
+  const res = await api.get("/pharmacy/departments");
   return res.data.data;
 }
 

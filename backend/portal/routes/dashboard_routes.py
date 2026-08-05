@@ -13,6 +13,7 @@ from portal.models.nursing_assignment import NursingAssignment
 from portal.models.patient import Patient
 from portal.models.report import Report
 from portal.routes.appointment_routes import todays_open_appointments_query
+from portal.routes.report_routes import scope_reports
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -62,7 +63,10 @@ def summary():
     appointments_query = todays_open_appointments_query()
     consultations_query = Consultation.query.filter_by(status="in_progress")
     recent_query = Consultation.query.order_by(Consultation.created_at.desc())
-    reports_query = Report.query.join(Report.consultation)
+    # Both kinds of report count here — a single session's and a whole course
+    # of treatment's — scoped by the same helper the Reports page uses, so the
+    # card and the list it links to can't disagree.
+    reports_query = scope_reports(Report.query, doctor)
     nursing_query = NursingAssignment.query.filter_by(status="active")
 
     if doctor:
@@ -79,7 +83,6 @@ def summary():
         )
         consultations_query = consultations_query.filter(Consultation.doctor_id == doctor.id)
         recent_query = recent_query.filter(Consultation.doctor_id == doctor.id)
-        reports_query = reports_query.filter(Consultation.doctor_id == doctor.id)
         nursing_query = nursing_query.filter(NursingAssignment.doctor_id == doctor.id)
 
     todays_reports_query = reports_query.filter(

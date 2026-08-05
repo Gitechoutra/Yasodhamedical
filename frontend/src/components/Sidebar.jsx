@@ -1,9 +1,11 @@
 import { NavLink } from "react-router-dom";
 import {
+  HiOutlineAcademicCap,
   HiOutlineSquares2X2,
   HiOutlineUsers,
   HiOutlineCalendarDays,
   HiOutlineChatBubbleLeftRight,
+  HiOutlineFolderOpen,
   HiOutlineClipboardDocumentList,
   HiOutlineHeart,
   HiOutlineDocumentChartBar,
@@ -37,6 +39,14 @@ const NAV_ITEMS = [
     icon: HiOutlineChatBubbleLeftRight,
     hideFrom: ["receptionist"],
   },
+  // Courses of treatment: where a doctor picks an ongoing case back up to add
+  // a session, and where a finished one gets its consolidated report.
+  {
+    to: "/dashboard/cases",
+    label: "Cases",
+    icon: HiOutlineFolderOpen,
+    hideFrom: ["receptionist"],
+  },
   // Where a doctor watches the patients they've handed to a nurse. Hidden
   // from reception: assigning and reviewing nursing care is clinical work.
   {
@@ -55,6 +65,14 @@ const NAV_ITEMS = [
     to: "/dashboard/reports",
     label: "Reports",
     icon: HiOutlineDocumentChartBar,
+    hideFrom: ["receptionist"],
+  },
+  // What the AI has learned from doctor-approved prescriptions, and what it
+  // is therefore suggesting from. Clinical, so hidden from reception.
+  {
+    to: "/dashboard/knowledge",
+    label: "Knowledge Base",
+    icon: HiOutlineAcademicCap,
     hideFrom: ["receptionist"],
   },
   {

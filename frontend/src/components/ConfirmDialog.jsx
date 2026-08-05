@@ -26,7 +26,10 @@ export default function ConfirmDialog({
 
   return (
     <Modal title={title} onClose={busy ? () => {} : onCancel}>
-      <p className="text-sm leading-relaxed text-slate-600">{message}</p>
+      {/* pre-line: a confirmation that explains a consequential action often
+          needs a paragraph break, and collapsing it into one block is what
+          makes people stop reading it. */}
+      <p className="whitespace-pre-line text-sm leading-relaxed text-slate-600">{message}</p>
 
       <div className="mt-6 flex justify-end gap-3">
         <button

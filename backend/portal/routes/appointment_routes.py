@@ -6,6 +6,12 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from portal.extensions import db
 from portal.helpers.auth_helper import get_current_doctor
 from portal.helpers.audit import APPOINTMENT_CREATED, audit
+from portal.helpers.case_helper import (
+    attach_to_case,
+    case_for_new_session,
+    open_case_for,
+    todays_session,
+)
 from portal.helpers.broadcast import dashboard_changed
 from portal.helpers.decorators import FRONT_DESK_ROLES, role_required
 from portal.helpers.notify import department_doctor_user_ids, notify
@@ -211,12 +217,48 @@ def start_appointment(appointment_id):
     if not can_access_patient(appointment.patient, doctor):
         return error("This patient is assigned to another doctor", status=403)
 
+    # A patient coming back for more of the same treatment continues their
+    # open case, so this becomes session 2 (3, …) rather than a fresh visit
+    # that loses sight of the earlier ones. Nothing already recorded is
+    # touched — the previous session keeps its own transcript, summary and
+    # prescription.
+    #
+    # Checked before anything is created: a patient queued twice while already
+    # in the room would otherwise leave the case with two open sessions, and
+    # nothing could then say which one a recording belongs to.
+    existing = open_case_for(appointment.patient_id, doctor.id)
+    running = existing.open_session if existing else None
+    if running:
+        return error(
+            f"You already have session {running.session_number} in progress with this "
+            "patient. Resume it instead of starting another.",
+            status=409,
+            errors={"consultation_id": running.id},
+        )
+
+    # A session is one visit, so a patient seen earlier today continues that
+    # session rather than getting a second one. Same rule as starting a
+    # session directly — enforced here too, or the front desk raising another
+    # OP would quietly split one visit into two half-records.
+    todays = todays_session(existing)
+    if todays:
+        return error(
+            f"This patient was already seen today in session {todays.session_number}. "
+            "Open that consultation and continue it — a new session is for a visit on "
+            "another day.",
+            status=409,
+            errors={"consultation_id": todays.id},
+        )
+
+    case = case_for_new_session(appointment.patient_id, doctor.id, appointment.reason)
+
     consultation = Consultation(
         doctor_id=doctor.id,
         patient_id=appointment.patient_id,
         status="in_progress",
         started_at=datetime.utcnow(),
     )
+    attach_to_case(consultation, case)
     db.session.add(consultation)
     db.session.flush()  # assigns consultation.id before we reference it below
 

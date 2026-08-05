@@ -1,8 +1,10 @@
 import { useState } from "react";
 import {
+  HiOutlineAcademicCap,
   HiOutlineSparkles,
   HiOutlineArrowDownTray,
   HiOutlineCheckBadge,
+  HiOutlineChevronDown,
   HiOutlineLockClosed,
   HiOutlineLockOpen,
   HiOutlinePencilSquare,
@@ -61,11 +63,15 @@ export default function SummaryPanel({
   const [savingRx, setSavingRx] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmingVerify, setConfirmingVerify] = useState(false);
+  const [showPrecedents, setShowPrecedents] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [noticeMsg, setNoticeMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
   if (!summary) return null;
+
+  // The doctor-approved cases the AI drew on for this prescription.
+  const precedents = summary.matched_precedents || [];
 
   function fail(err, fallback) {
     setErrorMsg(err.response?.data?.message || fallback);
@@ -186,6 +192,78 @@ export default function SummaryPanel({
           </div>
         )}
 
+        {/* Where the suggestion below came from. Shown above the prescription
+            rather than tucked under it: a doctor deciding whether to accept
+            these medicines should know whether they are this hospital's own
+            approved practice or the model's own proposal, before they read
+            the list. */}
+        {precedents.length > 0 && (
+          <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-4">
+            <button
+              onClick={() => setShowPrecedents((v) => !v)}
+              aria-expanded={showPrecedents}
+              className="flex w-full items-center justify-between gap-3 text-left"
+            >
+              <span className="flex items-center gap-2 text-sm font-semibold text-brand-700">
+                <HiOutlineAcademicCap className="h-5 w-5 shrink-0" />
+                Informed by {precedents.length} doctor-approved case
+                {precedents.length === 1 ? "" : "s"} with a similar presentation
+              </span>
+              <span className="flex shrink-0 items-center gap-1 text-xs font-semibold text-brand-600">
+                {showPrecedents ? "Hide" : "Review"}
+                <HiOutlineChevronDown
+                  className={`h-4 w-4 transition ${showPrecedents ? "rotate-180" : ""}`}
+                />
+              </span>
+            </button>
+
+            {showPrecedents && (
+              <div className="mt-3 space-y-3">
+                {precedents.map((p) => (
+                  <div
+                    key={p.precedent_id}
+                    className="rounded-lg border border-brand-100 bg-white p-3 text-sm"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-slate-800">
+                        {p.diagnosis || "No diagnosis recorded"}
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                        {Math.round((p.similarity || 0) * 100)}% match
+                      </span>
+                    </div>
+                    {p.symptoms && (
+                      <p className="mt-1 text-xs text-slate-500">{p.symptoms}</p>
+                    )}
+                    <ul className="mt-2 space-y-0.5 text-xs text-slate-600">
+                      {(p.medicines || []).map((m, i) => (
+                        <li key={i}>
+                          • {m.medicine_name}
+                          {m.dose ? ` — ${m.dose}` : ""}
+                          {m.frequency ? ` · ${m.frequency}` : ""}
+                          {m.duration ? ` · ${m.duration}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 text-[11px] text-slate-400">
+                      Approved by {p.doctor || "a doctor"}
+                      {p.department ? `, ${p.department}` : ""}
+                      {p.approved_at
+                        ? ` on ${new Date(p.approved_at).toLocaleDateString()}`
+                        : ""}
+                    </p>
+                  </div>
+                ))}
+                <p className="text-[11px] italic text-slate-400">
+                  Past cases are shown without patient details. They are guidance from this
+                  hospital's own approved practice, not a rule — your review decides what is
+                  prescribed.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         <Section title="Clinical Summary">{summary.summary}</Section>
         <Section title="Symptoms">{summary.symptoms}</Section>
 
@@ -237,6 +315,7 @@ export default function SummaryPanel({
                     <th className="px-4 py-2 font-medium">Dose</th>
                     <th className="px-4 py-2 font-medium">Frequency</th>
                     <th className="px-4 py-2 font-medium">Duration</th>
+                    <th className="px-4 py-2 font-medium">Qty</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -249,10 +328,31 @@ export default function SummaryPanel({
                             not in formulary
                           </span>
                         )}
+                        {/* Carried over from a case a doctor already signed
+                            off, rather than proposed by the model on its own.
+                            Worth distinguishing: the two carry very different
+                            amounts of prior human judgement. */}
+                        {p.from_precedent && (
+                          <span
+                            title="Carried over from a previous doctor-approved case with a similar presentation"
+                            className="ml-1.5 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700"
+                          >
+                            doctor-approved before
+                          </span>
+                        )}
+                        {/* What the patient is told to do — the line that
+                            ends up on the label, so it belongs with the
+                            medicine rather than in a column of its own. */}
+                        {p.instructions && (
+                          <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                            {p.instructions}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-2 text-slate-600">{p.dose || "—"}</td>
                       <td className="px-4 py-2 text-slate-600">{p.frequency || "—"}</td>
                       <td className="px-4 py-2 text-slate-600">{p.duration || "—"}</td>
+                      <td className="px-4 py-2 text-slate-600">{p.quantity || "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -369,7 +469,14 @@ export default function SummaryPanel({
       {confirmingVerify && (
         <ConfirmDialog
           title="Verify Prescription"
-          message="Are you sure you have reviewed the prescription? After verification, the prescription will be finalized and ready for printing."
+          message={
+            "Are you sure you have reviewed the prescription? After verification it is " +
+            "finalized and ready for printing.\n\nYour approval also adds this case — the " +
+            "symptoms, diagnosis and these exact medicines — to the hospital's knowledge " +
+            "base, so future patients presenting the same way are suggested this same " +
+            "treatment for a doctor to review. No patient details are stored with it, and " +
+            "withdrawing the sign-off removes it again."
+          }
           confirmLabel="Verify"
           cancelLabel="Cancel"
           busy={busyAction === "verify"}

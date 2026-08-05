@@ -8,6 +8,10 @@ import Patients from "../pages/Patients";
 import Appointments from "../pages/Appointments";
 import Consultations from "../pages/Consultations";
 import ConsultationRoom from "../pages/ConsultationRoom";
+import Cases from "../pages/Cases";
+import CaseRecord from "../pages/CaseRecord";
+import KnowledgeBase from "../pages/KnowledgeBase";
+import Prescriptions from "../pages/Prescriptions";
 import Doctors from "../pages/Doctors";
 import StaffManagement from "../pages/StaffManagement";
 import Departments from "../pages/Departments";
@@ -27,6 +31,7 @@ import PharmacyLayout from "../layouts/PharmacyLayout";
 import PharmacyDashboard from "../pages/pharmacy/PharmacyDashboard";
 import AddMedicine from "../pages/pharmacy/AddMedicine";
 import Inventory from "../pages/pharmacy/Inventory";
+import PharmacyDepartments from "../pages/pharmacy/Departments";
 import Categories from "../pages/pharmacy/Categories";
 import MedicineSearch from "../pages/pharmacy/MedicineSearch";
 import StockIn from "../pages/pharmacy/StockIn";
@@ -37,10 +42,7 @@ import NurseLayout from "../layouts/NurseLayout";
 import ProtectedRoute from "../components/ProtectedRoute";
 import RoleRoute from "../components/RoleRoute";
 
-const COMING_SOON_ROUTES = [
-  { path: "prescriptions", title: "Prescriptions" },
-  { path: "medicines", title: "Medicines" },
-];
+const COMING_SOON_ROUTES = [{ path: "medicines", title: "Medicines" }];
 
 // Org-structure screens. Hidden from the doctor sidebar (see Sidebar.jsx) and
 // unreachable by URL for doctors — keep the two lists in step.
@@ -175,6 +177,7 @@ export default function AppRouter() {
             clinical screens apply. PharmacyLayout guards the role. */}
         <Route path="/pharmacy" element={<PharmacyLayout />}>
           <Route index element={<PharmacyDashboard />} />
+          <Route path="medicines/departments" element={<PharmacyDepartments />} />
           <Route path="medicines/inventory" element={<Inventory />} />
           <Route path="medicines/add" element={<AddMedicine />} />
           <Route path="medicines/categories" element={<Categories />} />
@@ -203,6 +206,10 @@ export default function AppRouter() {
             <Route element={<RoleRoute deny={CLINICAL_DENY} />}>
               <Route path="consultations" element={<Consultations />} />
               <Route path="consultations/:id" element={<ConsultationRoom />} />
+              <Route path="cases" element={<Cases />} />
+              <Route path="cases/:id" element={<CaseRecord />} />
+              <Route path="knowledge" element={<KnowledgeBase />} />
+              <Route path="prescriptions" element={<Prescriptions />} />
               <Route path="nursing" element={<NursingMonitor />} />
               <Route path="nursing/updates" element={<NursingUpdates />} />
               <Route

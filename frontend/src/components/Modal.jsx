@@ -1,10 +1,19 @@
 import { HiOutlineXMark } from "react-icons/hi2";
 
-export default function Modal({ title, onClose, children }) {
+/**
+ * `wide` is for forms with side-by-side fields — a medicine record has enough
+ * of them that the default column would stack every pair. The body scrolls
+ * rather than the page, so a tall form never pushes its own buttons off screen.
+ */
+export default function Modal({ title, onClose, children, wide = false }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
-        <div className="mb-4 flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 py-6">
+      <div
+        className={`flex max-h-full w-full flex-col rounded-2xl bg-white p-6 shadow-2xl ${
+          wide ? "max-w-3xl" : "max-w-lg"
+        }`}
+      >
+        <div className="mb-4 flex shrink-0 items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           <button
             onClick={onClose}
@@ -13,7 +22,7 @@ export default function Modal({ title, onClose, children }) {
             <HiOutlineXMark className="h-5 w-5" />
           </button>
         </div>
-        {children}
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </div>
     </div>
   );

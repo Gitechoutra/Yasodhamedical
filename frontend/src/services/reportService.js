@@ -10,6 +10,13 @@ export async function generateReport(consultationId) {
   return res.data.data;
 }
 
+// The consolidated report for a whole course of treatment: every session in
+// order, followed by the single final prescription.
+export async function generateCaseReport(caseId) {
+  const res = await api.post("/reports", { case_id: caseId });
+  return res.data.data;
+}
+
 // The download endpoint requires the JWT auth header, so a plain <a href>
 // won't carry it — fetch the PDF as a blob (through the authenticated axios
 // instance) and trigger the browser's save dialog manually.

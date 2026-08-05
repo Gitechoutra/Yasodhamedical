@@ -75,3 +75,19 @@ def complete_appointment_for(consultation):
         return None
     appointment.status = "completed"
     return appointment
+
+
+def reopen_appointment_for(consultation):
+    """Puts the patient back in the queue as in-consultation.
+
+    The mirror of `complete_appointment_for`, for when a doctor continues a
+    consultation they had just ended because the patient is still in the room.
+    Without it the queue would show the patient as finished while a recording
+    is running, and the active-consultation count would disagree with the
+    consultations actually in progress. Returns the appointment, or None.
+    """
+    appointment = Appointment.query.filter_by(consultation_id=consultation.id).first()
+    if not appointment:
+        return None
+    appointment.status = "in_progress"
+    return appointment

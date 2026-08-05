@@ -18,12 +18,16 @@ from portal.helpers.broadcast import dashboard_changed
 from portal.helpers.decorators import role_required
 from portal.helpers.response import error, success
 from portal.models.branch import Branch
+from portal.models.case_prescription import CasePrescription
+from portal.models.department import Department
+from portal.models.generated_prescription import GeneratedPrescription
 from portal.models.medicine import Medicine
 from portal.models.medicine_brand import (
     DEFAULT_REORDER_LEVEL,
     FORMS,
     MedicineBrand,
     StockBatch,
+    medicine_departments,
 )
 from portal.models.pharmacist import Pharmacist
 
@@ -31,11 +35,44 @@ pharmacy_bp = Blueprint("pharmacy", __name__)
 
 BRAND_CREATED = "pharmacy.brand_created"
 BRAND_UPDATED = "pharmacy.brand_updated"
+BRAND_DELETED = "pharmacy.brand_deleted"
+BRAND_ARCHIVED = "pharmacy.brand_archived"
 STOCK_ADDED = "pharmacy.stock_added"
 
 SEARCH_LIMIT = 50
 # A batch inside this window is worth flagging before it becomes dead stock.
 EXPIRING_SOON_DAYS = 60
+
+DEFAULT_PAGE_SIZE = 25
+MAX_PAGE_SIZE = 100
+
+
+def _paginate(query, order_by):
+    """Applies ?page= / ?page_size= and returns (rows, meta).
+
+    The catalogue is the one list here that grows without bound — a hospital
+    formulary runs to thousands of products — so it is paged rather than
+    returned whole. Meta is returned alongside so the client can render
+    "showing 26-50 of 312" without a second count request.
+    """
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(request.args.get("page_size", DEFAULT_PAGE_SIZE))
+    except (TypeError, ValueError):
+        page_size = DEFAULT_PAGE_SIZE
+    page_size = max(1, min(page_size, MAX_PAGE_SIZE))
+
+    total = query.order_by(None).count()
+    rows = query.order_by(order_by).offset((page - 1) * page_size).limit(page_size).all()
+    return rows, {
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "pages": max(1, (total + page_size - 1) // page_size),
+    }
 
 
 def current_pharmacist():
@@ -95,26 +132,88 @@ def _clean(payload, field, limit=150):
     return str(value).strip()[:limit] or None
 
 
+def _read_departments(payload):
+    """Resolves the department ids on a request body.
+
+    Returns `(departments, error_response)`. Unknown ids are rejected rather
+    than skipped: silently dropping one would file a medicine under fewer
+    departments than the pharmacist chose, and they would only find out when
+    a doctor could not prescribe it.
+    """
+    raw = payload.get("department_ids")
+    if raw is None:
+        return None, None
+    if not isinstance(raw, list):
+        return None, error("department_ids must be a list", status=422)
+
+    ids = []
+    for value in raw:
+        try:
+            ids.append(int(value))
+        except (TypeError, ValueError):
+            return None, error("department_ids must be whole numbers", status=422)
+
+    if not ids:
+        return [], None
+
+    departments = Department.query.filter(Department.id.in_(ids)).all()
+    missing = set(ids) - {d.id for d in departments}
+    if missing:
+        return None, error(
+            f"Unknown department id(s): {', '.join(str(i) for i in sorted(missing))}",
+            status=422,
+        )
+    return departments, None
+
+
+def _read_reorder_level(payload, default=DEFAULT_REORDER_LEVEL):
+    raw = payload.get("reorder_level")
+    if raw in (None, ""):
+        return default, None
+    try:
+        level = int(raw)
+    except (TypeError, ValueError):
+        return None, error("reorder_level must be a whole number", status=422)
+    if level < 0:
+        return None, error("reorder_level cannot be negative", status=422)
+    return level, None
+
+
+def _read_unit_price(payload):
+    raw = payload.get("unit_price")
+    if raw in (None, ""):
+        return None, None
+    try:
+        price = float(raw)
+    except (TypeError, ValueError):
+        return None, error("unit_price must be a number", status=422)
+    if price < 0:
+        return None, error("unit_price cannot be negative", status=422)
+    return price, None
+
+
 @pharmacy_bp.post("/brands")
 @role_required("pharmacist", "admin")
 def create_brand():
-    """Adds a new medicine brand to the catalogue.
+    """Adds a medicine to the catalogue, filed under its departments.
 
     The catalogue is hospital-wide, not per branch: the same product exists
     whether or not this counter happens to stock it, and duplicating it per
-    branch is what makes cross-branch search impossible later.
+    branch is what makes cross-branch search impossible later. Departments are
+    a property of the medicine for the same reason — Oxytocin belongs to
+    Gynecology everywhere, not just at one counter.
     """
     payload = request.get_json(silent=True) or {}
 
     brand_name = _clean(payload, "brand_name")
     if not brand_name:
-        return error("Brand name is required", status=422)
+        return error("Medicine name is required", status=422)
 
     strength = _clean(payload, "strength", 80)
     clash = MedicineBrand.query.filter_by(brand_name=brand_name, strength=strength).first()
     if clash:
         return error(
-            f"{clash.display_name} is already in the catalogue — add stock to it instead.",
+            f"{clash.display_name} is already in the catalogue — edit it or add stock to it instead.",
             status=409,
         )
 
@@ -122,13 +221,25 @@ def create_brand():
     if form not in FORMS:
         return error(f"form must be one of: {', '.join(FORMS)}", status=422)
 
-    reorder_level = payload.get("reorder_level")
-    try:
-        reorder_level = int(reorder_level) if reorder_level not in (None, "") else DEFAULT_REORDER_LEVEL
-    except (TypeError, ValueError):
-        return error("reorder_level must be a whole number", status=422)
-    if reorder_level < 0:
-        return error("reorder_level cannot be negative", status=422)
+    reorder_level, failure = _read_reorder_level(payload)
+    if failure:
+        return failure
+    unit_price, failure = _read_unit_price(payload)
+    if failure:
+        return failure
+    departments, failure = _read_departments(payload)
+    if failure:
+        return failure
+
+    for_all = bool(payload.get("for_all_departments"))
+    if not for_all and not departments:
+        # Otherwise the medicine lands in the catalogue but appears on no
+        # department's page and no doctor can prescribe it — added, and
+        # invisible.
+        return error(
+            "Choose at least one department, or mark it as stocked for all departments",
+            status=422,
+        )
 
     # Optional link to the clinical formulary, so a prescription written
     # against the generic can be filled with this brand.
@@ -140,13 +251,17 @@ def create_brand():
         brand_name=brand_name,
         generic_name=_clean(payload, "generic_name"),
         used_for=_clean(payload, "used_for", 2000),
+        usage_instructions=_clean(payload, "usage_instructions", 2000),
         category=_clean(payload, "category", 100),
         manufacturer=_clean(payload, "manufacturer"),
         form=form,
         strength=strength,
+        unit_price=unit_price,
         reorder_level=reorder_level,
+        for_all_departments=for_all,
         medicine_id=medicine_id,
     )
+    brand.departments = departments or []
     db.session.add(brand)
     db.session.flush()
 
@@ -154,7 +269,7 @@ def create_brand():
         BRAND_CREATED,
         entity="medicine_brand",
         entity_id=brand.id,
-        detail=f"Added {brand.display_name} to the catalogue",
+        detail=f"Added {brand.display_name} ({_department_label(brand)})",
     )
     db.session.commit()
     dashboard_changed("pharmacy_brand_created")
@@ -167,37 +282,147 @@ def create_brand():
     )
 
 
+def _department_label(brand):
+    if brand.for_all_departments:
+        return "all departments"
+    names = [d.name for d in brand.departments]
+    return ", ".join(names) if names else "no department"
+
+
 @pharmacy_bp.get("/brands")
 @role_required("pharmacist", "admin")
 def list_brands():
-    """The catalogue, with this branch's quantity against each row."""
+    """The catalogue, filtered and paged, with this branch's quantity per row.
+
+    `?department_id=` is what makes the inventory department-wise: it returns
+    the medicines that department stocks, including the ones marked for all
+    departments, because shared stock is genuinely part of every department's
+    shelf rather than a separate list to check.
+    """
     branch, failure = _resolve_branch()
     if failure:
         return failure
 
     query = MedicineBrand.query
-    if request.args.get("active", "true") == "true":
+
+    status = request.args.get("status", "active")
+    if status == "active":
         query = query.filter(MedicineBrand.is_active.is_(True))
+    elif status == "discontinued":
+        query = query.filter(MedicineBrand.is_active.is_(False))
+    elif status != "all":
+        return error("status must be one of: active, discontinued, all", status=422)
+
+    department_id = request.args.get("department_id", type=int)
+    if department_id:
+        query = query.filter(
+            db.or_(
+                MedicineBrand.for_all_departments.is_(True),
+                MedicineBrand.id.in_(
+                    db.session.query(medicine_departments.c.brand_id).filter(
+                        medicine_departments.c.department_id == department_id
+                    )
+                ),
+            )
+        )
 
     category = (request.args.get("category") or "").strip()
     if category:
         query = query.filter(MedicineBrand.category == category)
 
-    brands = query.order_by(MedicineBrand.brand_name).all()
-    return success([b.to_dict(branch_id=branch.id) for b in brands])
+    manufacturer = (request.args.get("manufacturer") or "").strip()
+    if manufacturer:
+        query = query.filter(MedicineBrand.manufacturer.ilike(f"%{manufacturer}%"))
+
+    form = (request.args.get("form") or "").strip()
+    if form:
+        if form not in FORMS:
+            return error(f"form must be one of: {', '.join(FORMS)}", status=422)
+        query = query.filter(MedicineBrand.form == form)
+
+    search = (request.args.get("search") or "").strip()
+    if search:
+        like = f"%{search}%"
+        query = query.filter(
+            db.or_(
+                MedicineBrand.brand_name.ilike(like),
+                MedicineBrand.generic_name.ilike(like),
+                MedicineBrand.manufacturer.ilike(like),
+                MedicineBrand.category.ilike(like),
+                MedicineBrand.used_for.ilike(like),
+            )
+        )
+
+    brands, meta = _paginate(query, MedicineBrand.brand_name)
+    rows = [b.to_dict(branch_id=branch.id) for b in brands]
+
+    # Stock state is computed per row, so it is filtered after paging rather
+    # than in SQL. Applied to the page only, and reported honestly in meta so
+    # a short page is not mistaken for the end of the list.
+    availability = request.args.get("availability")
+    if availability:
+        if availability not in ("available", "low_stock", "out_of_stock", "discontinued"):
+            return error(
+                "availability must be one of: available, low_stock, out_of_stock, discontinued",
+                status=422,
+            )
+        rows = [r for r in rows if r["availability"] == availability]
+        meta["filtered_on_page"] = True
+
+    return success({"branch": branch.to_dict(), "items": rows, "meta": meta})
+
+
+@pharmacy_bp.get("/brands/<int:brand_id>")
+@role_required("pharmacist", "admin")
+def get_brand(brand_id):
+    """One medicine in full, including this branch's batches."""
+    brand = db.session.get(MedicineBrand, brand_id)
+    if not brand:
+        return error("Medicine not found", status=404)
+
+    branch, failure = _resolve_branch()
+    if failure:
+        return failure
+    return success(brand.to_dict(branch_id=branch.id, include_batches=True))
 
 
 @pharmacy_bp.patch("/brands/<int:brand_id>")
 @role_required("pharmacist", "admin")
 def update_brand(brand_id):
+    """Edits a medicine. Only the fields present in the body are touched."""
     brand = db.session.get(MedicineBrand, brand_id)
     if not brand:
         return error("Medicine not found", status=404)
 
     payload = request.get_json(silent=True) or {}
+
+    if "brand_name" in payload:
+        brand_name = _clean(payload, "brand_name")
+        if not brand_name:
+            return error("Medicine name is required", status=422)
+        strength = (
+            _clean(payload, "strength", 80) if "strength" in payload else brand.strength
+        )
+        clash = (
+            MedicineBrand.query.filter(
+                MedicineBrand.brand_name == brand_name,
+                MedicineBrand.strength.is_(None) if strength is None else MedicineBrand.strength == strength,
+                MedicineBrand.id != brand.id,
+            ).first()
+        )
+        if clash:
+            return error(
+                f"{clash.display_name} is already in the catalogue", status=409
+            )
+        brand.brand_name = brand_name
+
+    if "strength" in payload:
+        brand.strength = _clean(payload, "strength", 80)
+
     for field, limit in (
         ("generic_name", 150),
         ("used_for", 2000),
+        ("usage_instructions", 2000),
         ("category", 100),
         ("manufacturer", 150),
     ):
@@ -210,13 +435,32 @@ def update_brand(brand_id):
         brand.form = payload["form"]
 
     if "reorder_level" in payload:
-        try:
-            level = int(payload["reorder_level"])
-        except (TypeError, ValueError):
-            return error("reorder_level must be a whole number", status=422)
-        if level < 0:
-            return error("reorder_level cannot be negative", status=422)
+        level, failure = _read_reorder_level(payload, default=brand.reorder_level)
+        if failure:
+            return failure
         brand.reorder_level = level
+
+    if "unit_price" in payload:
+        price, failure = _read_unit_price(payload)
+        if failure:
+            return failure
+        brand.unit_price = price
+
+    if "for_all_departments" in payload:
+        brand.for_all_departments = bool(payload["for_all_departments"])
+
+    if "department_ids" in payload:
+        departments, failure = _read_departments(payload)
+        if failure:
+            return failure
+        brand.departments = departments or []
+
+    if not brand.for_all_departments and not brand.departments:
+        return error(
+            "A medicine must belong to at least one department, or be marked as "
+            "stocked for all departments",
+            status=422,
+        )
 
     if "is_active" in payload:
         brand.is_active = bool(payload["is_active"])
@@ -225,14 +469,132 @@ def update_brand(brand_id):
         BRAND_UPDATED,
         entity="medicine_brand",
         entity_id=brand.id,
-        detail=f"Updated {brand.display_name}",
+        detail=f"Updated {brand.display_name} ({_department_label(brand)})",
     )
     db.session.commit()
+    dashboard_changed("pharmacy_brand_updated")
 
     branch, _ = _resolve_branch()
     return success(
         brand.to_dict(branch_id=branch.id if branch else None), message="Medicine updated"
     )
+
+
+@pharmacy_bp.delete("/brands/<int:brand_id>")
+@role_required("pharmacist", "admin")
+def delete_brand(brand_id):
+    """Removes a medicine from the catalogue.
+
+    Deleted outright only when nothing depends on it. A medicine that has been
+    prescribed is part of a patient's record, and one holding stock is
+    physically on a shelf — either is discontinued instead, which takes it out
+    of every department view and out of what doctors can prescribe while
+    leaving the history intact.
+
+    The response says which happened, so the pharmacist is never told
+    something was deleted when it was archived.
+    """
+    brand = db.session.get(MedicineBrand, brand_id)
+    if not brand:
+        return error("Medicine not found", status=404)
+
+    label = brand.display_name
+    prescribed = (
+        db.session.query(GeneratedPrescription.id).filter_by(brand_id=brand.id).first()
+        or db.session.query(CasePrescription.id).filter_by(brand_id=brand.id).first()
+    )
+    remaining_units = sum(b.quantity for b in brand.batches)
+
+    if prescribed or remaining_units > 0:
+        if not brand.is_active:
+            return error(f"{label} is already discontinued", status=409)
+        brand.is_active = False
+        reason = (
+            "it has been prescribed to patients"
+            if prescribed
+            else f"{remaining_units} unit(s) are still in stock"
+        )
+        audit(
+            BRAND_ARCHIVED,
+            entity="medicine_brand",
+            entity_id=brand.id,
+            detail=f"Discontinued {label} instead of deleting — {reason}",
+        )
+        db.session.commit()
+        dashboard_changed("pharmacy_brand_updated")
+        return success(
+            {"deleted": False, "brand": brand.to_dict()},
+            message=(
+                f"{label} could not be deleted because {reason}. It has been marked "
+                "discontinued instead, so it no longer appears in any department or "
+                "prescription."
+            ),
+        )
+
+    audit(
+        BRAND_DELETED,
+        entity="medicine_brand",
+        entity_id=brand.id,
+        detail=f"Deleted {label} from the catalogue ({_department_label(brand)})",
+    )
+    # Empty batch rows (a zeroed shelf) go with it; the cascade on the
+    # relationship handles those.
+    db.session.delete(brand)
+    db.session.commit()
+    dashboard_changed("pharmacy_brand_deleted")
+
+    return success({"deleted": True}, message=f"{label} deleted")
+
+
+@pharmacy_bp.get("/departments")
+@role_required("pharmacist", "admin")
+def list_department_inventory():
+    """Every department with how much of its shelf is in what state.
+
+    The entry point to the department-wise inventory: the pharmacist picks a
+    department here and drills into its medicines. Counts include the
+    all-departments stock, because that is genuinely part of each department's
+    shelf rather than a separate pool.
+    """
+    branch, failure = _resolve_branch()
+    if failure:
+        return failure
+
+    shared = MedicineBrand.query.filter(
+        MedicineBrand.is_active.is_(True), MedicineBrand.for_all_departments.is_(True)
+    ).all()
+
+    rows = []
+    for department in Department.query.order_by(Department.name).all():
+        tagged = (
+            MedicineBrand.query.join(
+                medicine_departments,
+                medicine_departments.c.brand_id == MedicineBrand.id,
+            )
+            .filter(
+                medicine_departments.c.department_id == department.id,
+                MedicineBrand.is_active.is_(True),
+                MedicineBrand.for_all_departments.is_(False),
+            )
+            .all()
+        )
+        brands = tagged + shared
+        rows.append(
+            {
+                "id": department.id,
+                "name": department.name,
+                "medicine_count": len(brands),
+                "own_medicine_count": len(tagged),
+                "shared_medicine_count": len(shared),
+                "out_of_stock": sum(1 for b in brands if b.total_quantity == 0),
+                "low_stock": sum(
+                    1 for b in brands if 0 < b.total_quantity < b.reorder_level
+                ),
+                "units_in_branch": sum(b.quantity_in(branch.id) for b in brands),
+            }
+        )
+
+    return success({"branch": branch.to_dict(), "departments": rows})
 
 
 @pharmacy_bp.get("/categories")
