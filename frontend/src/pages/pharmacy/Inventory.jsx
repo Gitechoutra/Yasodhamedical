@@ -177,7 +177,7 @@ export default function Inventory() {
     <div>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
             {departmentName ? `${departmentName} medicines` : "Medicines"}
           </h1>
           <p className="mt-1 text-sm text-slate-500">
@@ -336,7 +336,7 @@ export default function Inventory() {
         </div>
       ) : (
         <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-100 bg-white shadow-sm">
-          <table className="w-full text-left text-sm">
+          <table className="w-full min-w-[52rem] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
                 <th className="px-5 py-3 font-medium">Medicine</th>

@@ -40,7 +40,7 @@ export default function AddMedicine() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="text-2xl font-bold text-slate-900">Add medicine</h1>
+      <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Add medicine</h1>
       <p className="mt-1 text-sm text-slate-500">
         Adds it to the catalogue for every branch and files it under the departments you
         choose. Receive quantity separately under Stock In.

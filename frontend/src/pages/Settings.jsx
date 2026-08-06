@@ -55,7 +55,7 @@ export default function Settings() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
+      <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Settings</h1>
       <p className="mt-1 text-sm text-slate-500">Manage your account</p>
 
       <div className="mt-6 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
@@ -70,7 +70,7 @@ export default function Settings() {
         </div>
         <div className="mt-4 flex items-center gap-4">
           <Avatar name={user?.name} imageUrl={user?.avatar_url} size="lg" />
-          <div className="grid flex-1 grid-cols-2 gap-4">
+          <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Name" value={user?.name} />
             <Field label="Email" value={user?.email} />
             <Field label="Role" value={user?.role} />

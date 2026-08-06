@@ -39,7 +39,7 @@ export default function DepartmentDetail() {
         <p className="text-sm text-slate-400">Department not found.</p>
       ) : (
         <>
-          <h1 className="text-2xl font-bold text-slate-900">{department.name}</h1>
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">{department.name}</h1>
           <p className="mt-1 text-sm text-slate-500">
             {department.doctor_count} doctor{department.doctor_count === 1 ? "" : "s"}
           </p>

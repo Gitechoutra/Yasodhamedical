@@ -1,29 +1,28 @@
 import { HiOutlineArrowRightCircle, HiOutlineClock, HiOutlinePlay } from "react-icons/hi2";
-import Avatar from "./Avatar";
 import OpStatusBadge from "./OpStatusBadge";
+import {
+  Badge,
+  RecordCard,
+  RecordCardBadges,
+  RecordCardBody,
+  RecordCardFooter,
+  RecordCardHeader,
+  RecordDetail,
+} from "./RecordCard";
 
 const STATUS_META = {
-  in_progress: { label: "In consultation", className: "bg-emerald-100 text-emerald-700" },
-  waiting: { label: "Pending consultation", className: "bg-amber-100 text-amber-700" },
-  scheduled: { label: "Scheduled", className: "bg-amber-100 text-amber-700" },
-  confirmed: { label: "Confirmed", className: "bg-amber-100 text-amber-700" },
-  completed: { label: "Completed", className: "bg-slate-100 text-slate-600" },
-  cancelled: { label: "Cancelled", className: "bg-slate-100 text-slate-600" },
+  in_progress: { label: "In consultation", tone: "emeraldSolid" },
+  waiting: { label: "Pending consultation", tone: "amber" },
+  scheduled: { label: "Scheduled", tone: "amber" },
+  confirmed: { label: "Confirmed", tone: "amber" },
+  completed: { label: "Completed", tone: "slate" },
+  cancelled: { label: "Cancelled", tone: "slate" },
 };
 
 // The patient is still to be seen, so the doctor can call them in. "waiting"
 // is what the queue actually stores; the other two are accepted so a booked
 // slot labelled scheduled or confirmed offers the button just the same.
 const STARTABLE_STATUSES = ["waiting", "scheduled", "confirmed"];
-
-function Detail({ label, value }) {
-  return (
-    <div>
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="mt-0.5 text-sm font-medium capitalize text-slate-700">{value ?? "—"}</p>
-    </div>
-  );
-}
 
 /**
  * One patient in the department queue.
@@ -39,7 +38,7 @@ export default function AppointmentCard({ appointment, isNext, onStart, onResume
   const canStart = STARTABLE_STATUSES.includes(appointment.status);
   const status = STATUS_META[appointment.status] || {
     label: appointment.status.replace("_", " "),
-    className: "bg-slate-100 text-slate-600",
+    tone: "slate",
   };
 
   const appointmentTime = appointment.created_at
@@ -50,100 +49,86 @@ export default function AppointmentCard({ appointment, isNext, onStart, onResume
     : "—";
 
   return (
-    <div
-      className={`rounded-2xl border bg-white p-5 shadow-sm transition ${
-        ongoing
-          ? "border-emerald-200 ring-1 ring-emerald-100"
-          : isNext
-            ? "border-brand-200 ring-1 ring-brand-100"
-            : "border-slate-100"
-      }`}
-    >
-      <div className="flex items-start gap-4">
-        <div className="relative">
-          <Avatar name={patient.name || appointment.patient} imageUrl={patient.photo_url} size="lg" />
-          {appointment.queue_number != null && (
-            <span
-              title={`Queue position ${appointment.queue_number}`}
-              className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full bg-slate-900 text-[11px] font-bold text-white ring-2 ring-white"
-            >
-              {appointment.queue_number}
-            </span>
-          )}
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="truncate font-semibold text-slate-900">
-              {patient.name || appointment.patient}
-            </p>
-            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${status.className}`}>
-              {status.label}
-            </span>
-            {isNext && (
-              <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-semibold text-brand-700">
-                Next up
+    <RecordCard accent={ongoing ? "emerald" : isNext ? "brand" : undefined}>
+      <RecordCardBody>
+        <RecordCardHeader
+          name={patient.name || appointment.patient}
+          imageUrl={patient.photo_url}
+          lines={[patient.code || `PAT${appointment.patient_id}`]}
+          badge={
+            appointment.queue_number != null && (
+              <span
+                title={`Queue position ${appointment.queue_number}`}
+                className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full bg-slate-900 text-[11px] font-bold text-white ring-2 ring-white"
+              >
+                {appointment.queue_number}
               </span>
-            )}
-            {/* Whether this OP was billed or came in free as a follow-up.
-                Rendered only when set: the field is null for every patient
-                registered before OP billing existed, and a bare dash in the
-                badge row reads as a broken value rather than "not applicable". */}
-            {appointment.patient_op_status && (
-              <OpStatusBadge status={appointment.patient_op_status} />
-            )}
-          </div>
-          <p className="mt-0.5 text-xs text-slate-400">{patient.code || `PAT${appointment.patient_id}`}</p>
+            )
+          }
+        />
 
-          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Detail label="Age" value={patient.age != null ? `${patient.age} yrs` : null} />
-            <Detail label="Gender" value={patient.gender} />
-            <Detail label="Appointment" value={appointmentTime} />
-            <Detail
-              label="Queue"
-              value={appointment.queue_number != null ? `#${appointment.queue_number}` : "In room"}
-            />
-          </div>
-
-          {appointment.reason && (
-            <p className="mt-3 text-sm text-slate-500">
-              <span className="font-medium text-slate-600">Reason:</span> {appointment.reason}
-            </p>
+        <RecordCardBadges>
+          <Badge tone={status.tone}>{status.label}</Badge>
+          {isNext && <Badge tone="brand">Next up</Badge>}
+          {/* Whether this OP was billed or came in free as a follow-up.
+              Rendered only when set: the field is null for every patient
+              registered before OP billing existed, and a bare dash in the
+              badge row reads as a broken value rather than "not applicable". */}
+          {appointment.patient_op_status && (
+            <OpStatusBadge status={appointment.patient_op_status} />
           )}
+        </RecordCardBadges>
+
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-2">
+          <RecordDetail label="Age" value={patient.age != null ? `${patient.age} yrs` : null} />
+          <RecordDetail label="Gender" value={patient.gender} />
+          <RecordDetail label="Appointment" value={appointmentTime} />
+          <RecordDetail
+            label="Queue"
+            value={appointment.queue_number != null ? `#${appointment.queue_number}` : "In room"}
+          />
         </div>
 
-        <div className="shrink-0">
-          {ongoing ? (
-            <button
-              onClick={() => onResume(appointment)}
-              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
-            >
-              <HiOutlineArrowRightCircle className="h-4.5 w-4.5" />
-              Resume Consultation
-            </button>
-          ) : canStart ? (
-            <button
-              onClick={() => onStart(appointment)}
-              disabled={busy}
-              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
-            >
-              {busy ? (
-                <>
-                  <HiOutlineClock className="h-4.5 w-4.5" />
-                  Starting…
-                </>
-              ) : (
-                <>
-                  <HiOutlinePlay className="h-4.5 w-4.5" />
-                  Start Consultation
-                </>
-              )}
-            </button>
-          ) : (
-            <span className="text-xs font-semibold text-slate-400">{status.label}</span>
-          )}
-        </div>
-      </div>
-    </div>
+        {appointment.reason && (
+          <p className="mt-3 text-sm text-slate-500">
+            <span className="font-medium text-slate-600">Reason:</span> {appointment.reason}
+          </p>
+        )}
+      </RecordCardBody>
+
+      <RecordCardFooter>
+        {ongoing ? (
+          <button
+            onClick={() => onResume(appointment)}
+            className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:shadow-md"
+          >
+            <HiOutlineArrowRightCircle className="h-4 w-4" />
+            Resume consultation
+          </button>
+        ) : canStart ? (
+          <button
+            onClick={() => onStart(appointment)}
+            disabled={busy}
+            className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:shadow-md disabled:opacity-60"
+          >
+            {busy ? (
+              <>
+                <HiOutlineClock className="h-4 w-4" />
+                Starting…
+              </>
+            ) : (
+              <>
+                <HiOutlinePlay className="h-4 w-4" />
+                Start consultation
+              </>
+            )}
+          </button>
+        ) : (
+          <span className="text-xs font-semibold text-slate-400">{status.label}</span>
+        )}
+
+        <span className="text-xs text-slate-400">{appointmentTime}</span>
+      </RecordCardFooter>
+    </RecordCard>
   );
 }

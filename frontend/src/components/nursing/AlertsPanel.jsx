@@ -50,7 +50,7 @@ function RaiseAlertModal({ assignmentId, doctorName, onClose, onRaised }) {
   return (
     <Modal title={`Flag ${doctorName || "the doctor"}`} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className={labelClass}>What is it?</label>
             <select className={inputClass} value={form.category} onChange={update("category")}>

@@ -108,7 +108,7 @@ export default function Profile() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-2xl font-bold text-slate-900">My Profile</h1>
+      <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">My Profile</h1>
       <p className="mt-1 text-sm text-slate-500">
         Your account details and profile picture
       </p>
@@ -178,7 +178,7 @@ export default function Profile() {
           </div>
 
           {isDoctor && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">
                   Specialization
@@ -204,7 +204,7 @@ export default function Profile() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-600">Role</label>
               {/* Read-only: promoting yourself is an admin action, and the API

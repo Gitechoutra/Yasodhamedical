@@ -1,46 +1,74 @@
+import { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Landing from "../pages/Landing";
-import PrivacyPolicy from "../pages/legal/PrivacyPolicy";
-import Terms from "../pages/legal/Terms";
 import Login from "../pages/Login";
-import Dashboard from "../pages/Dashboard";
-import Patients from "../pages/Patients";
-import Appointments from "../pages/Appointments";
-import Consultations from "../pages/Consultations";
-import ConsultationRoom from "../pages/ConsultationRoom";
-import Cases from "../pages/Cases";
-import CaseRecord from "../pages/CaseRecord";
-import KnowledgeBase from "../pages/KnowledgeBase";
-import Prescriptions from "../pages/Prescriptions";
-import Doctors from "../pages/Doctors";
-import StaffManagement from "../pages/StaffManagement";
-import Departments from "../pages/Departments";
-import DepartmentDetail from "../pages/DepartmentDetail";
-import NursingMonitor from "../pages/NursingMonitor";
-import NursingUpdates from "../pages/NursingUpdates";
-import NursingRecord from "../pages/NursingRecord";
-import Reports from "../pages/Reports";
-import Settings from "../pages/Settings";
-import Profile from "../pages/Profile";
-import NurseDashboard from "../pages/nurse/NurseDashboard";
-import NursePatients from "../pages/nurse/NursePatients";
-import NursePatientRecord from "../pages/nurse/NursePatientRecord";
-import NurseAlerts from "../pages/nurse/NurseAlerts";
-import PharmacyLayout from "../layouts/PharmacyLayout";
-import PharmacyDashboard from "../pages/pharmacy/PharmacyDashboard";
-import AddMedicine from "../pages/pharmacy/AddMedicine";
-import Inventory from "../pages/pharmacy/Inventory";
-import PharmacyDepartments from "../pages/pharmacy/Departments";
-import MedicineRequests from "../pages/pharmacy/MedicineRequests";
-import Categories from "../pages/pharmacy/Categories";
-import MedicineSearch from "../pages/pharmacy/MedicineSearch";
-import StockIn from "../pages/pharmacy/StockIn";
-import StockAlerts from "../pages/pharmacy/StockAlerts";
-import PharmacySoon from "../pages/pharmacy/PharmacySoon";
+import NotFound from "../pages/NotFound";
 import DashboardLayout from "../layouts/DashboardLayout";
 import NurseLayout from "../layouts/NurseLayout";
+import PharmacyLayout from "../layouts/PharmacyLayout";
 import ProtectedRoute from "../components/ProtectedRoute";
 import RoleRoute from "../components/RoleRoute";
+
+// Every screen but the login is loaded on demand.
+//
+// Eagerly importing all thirty of them produced one 880 kB chunk that a
+// doctor opening the dashboard downloaded in full — the pharmacy counter they
+// never visit, and framer-motion, which only the public landing page uses.
+// Splitting per screen means each session fetches its own module and nothing
+// else. The routes themselves are unchanged.
+const Landing = lazy(() => import("../pages/Landing"));
+const PrivacyPolicy = lazy(() => import("../pages/legal/PrivacyPolicy"));
+const Terms = lazy(() => import("../pages/legal/Terms"));
+
+const Dashboard = lazy(() => import("../pages/Dashboard"));
+const Patients = lazy(() => import("../pages/Patients"));
+const Appointments = lazy(() => import("../pages/Appointments"));
+const Consultations = lazy(() => import("../pages/Consultations"));
+const ConsultationRoom = lazy(() => import("../pages/ConsultationRoom"));
+const Cases = lazy(() => import("../pages/Cases"));
+const CaseRecord = lazy(() => import("../pages/CaseRecord"));
+const KnowledgeBase = lazy(() => import("../pages/KnowledgeBase"));
+const Prescriptions = lazy(() => import("../pages/Prescriptions"));
+const Doctors = lazy(() => import("../pages/Doctors"));
+const StaffManagement = lazy(() => import("../pages/StaffManagement"));
+const Departments = lazy(() => import("../pages/Departments"));
+const DepartmentDetail = lazy(() => import("../pages/DepartmentDetail"));
+const NursingMonitor = lazy(() => import("../pages/NursingMonitor"));
+const NursingUpdates = lazy(() => import("../pages/NursingUpdates"));
+const NursingRecord = lazy(() => import("../pages/NursingRecord"));
+const Reports = lazy(() => import("../pages/Reports"));
+const Settings = lazy(() => import("../pages/Settings"));
+const Profile = lazy(() => import("../pages/Profile"));
+
+const NurseDashboard = lazy(() => import("../pages/nurse/NurseDashboard"));
+const NursePatients = lazy(() => import("../pages/nurse/NursePatients"));
+const NursePatientRecord = lazy(() => import("../pages/nurse/NursePatientRecord"));
+const NurseAlerts = lazy(() => import("../pages/nurse/NurseAlerts"));
+
+const PharmacyDashboard = lazy(() => import("../pages/pharmacy/PharmacyDashboard"));
+const AddMedicine = lazy(() => import("../pages/pharmacy/AddMedicine"));
+const Inventory = lazy(() => import("../pages/pharmacy/Inventory"));
+const PharmacyDepartments = lazy(() => import("../pages/pharmacy/Departments"));
+const MedicineRequests = lazy(() => import("../pages/pharmacy/MedicineRequests"));
+const Categories = lazy(() => import("../pages/pharmacy/Categories"));
+const MedicineSearch = lazy(() => import("../pages/pharmacy/MedicineSearch"));
+const StockIn = lazy(() => import("../pages/pharmacy/StockIn"));
+const StockAlerts = lazy(() => import("../pages/pharmacy/StockAlerts"));
+const PharmacySoon = lazy(() => import("../pages/pharmacy/PharmacySoon"));
+
+/** Shown for the moment a screen's chunk is in flight. Deliberately plain —
+ *  a spinner that appears for 80ms reads as a flicker, not as progress. */
+function RouteFallback() {
+  return (
+    <div className="px-4 py-10 sm:px-6 lg:px-8">
+      <div className="h-8 w-48 animate-pulse rounded-lg bg-slate-100" />
+      <div className="mt-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-32 animate-pulse rounded-2xl bg-slate-100" />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // Org-structure screens. Hidden from the doctor sidebar (see Sidebar.jsx) and
 // unreachable by URL for doctors — keep the two lists in step.
@@ -150,84 +178,91 @@ const PHARMACY_SOON = [
 export default function AppRouter() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/privacy" element={<PrivacyPolicy />} />
-        <Route path="/terms" element={<Terms />} />
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<Terms />} />
 
-        {/* One login for everyone at /login; a nurse is routed here on the
-            way out of it. The nursing module stays its own tree because a
-            nurse's whole job is the assignments handed to them and none of the
-            doctor/admin screens apply — but it is a dashboard, not a second
-            portal, and it has no sign-in page of its own. */}
-        <Route path="/nurse" element={<NurseLayout />}>
-          <Route index element={<NurseDashboard />} />
-          <Route path="patients" element={<NursePatients />} />
-          <Route path="patients/:id" element={<NursePatientRecord />} />
-          <Route path="alerts" element={<NurseAlerts />} />
-          <Route path="profile" element={<Profile />} />
-          <Route path="settings" element={<Settings />} />
-        </Route>
-
-        {/* The pharmacy counter. Its own tree for the same reason the nursing
-            module has one: stock is scoped to a branch, and none of the
-            clinical screens apply. PharmacyLayout guards the role. */}
-        <Route path="/pharmacy" element={<PharmacyLayout />}>
-          <Route index element={<PharmacyDashboard />} />
-          <Route path="medicines/departments" element={<PharmacyDepartments />} />
-          <Route path="medicines/requests" element={<MedicineRequests />} />
-          <Route path="medicines/inventory" element={<Inventory />} />
-          <Route path="medicines/add" element={<AddMedicine />} />
-          <Route path="medicines/categories" element={<Categories />} />
-          <Route path="medicines/search" element={<MedicineSearch />} />
-          <Route path="stock/in" element={<StockIn />} />
-          <Route path="stock/low" element={<StockAlerts mode="low" />} />
-          <Route path="stock/expired" element={<StockAlerts mode="expired" />} />
-          <Route path="profile" element={<Profile />} />
-          {PHARMACY_SOON.map(({ path, title, blurb, needs }) => (
-            <Route
-              key={path}
-              path={path}
-              element={<PharmacySoon title={title} blurb={blurb} needs={needs} />}
-            />
-          ))}
-        </Route>
-
-        <Route element={<ProtectedRoute />}>
-          <Route path="/dashboard" element={<DashboardLayout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="patients" element={<Patients />} />
-            <Route path="appointments" element={<Appointments />} />
-            <Route path="settings" element={<Settings />} />
+          {/* One login for everyone at /login; a nurse is routed here on the
+              way out of it. The nursing module stays its own tree because a
+              nurse's whole job is the assignments handed to them and none of the
+              doctor/admin screens apply — but it is a dashboard, not a second
+              portal, and it has no sign-in page of its own. */}
+          <Route path="/nurse" element={<NurseLayout />}>
+            <Route index element={<NurseDashboard />} />
+            <Route path="patients" element={<NursePatients />} />
+            <Route path="patients/:id" element={<NursePatientRecord />} />
+            <Route path="alerts" element={<NurseAlerts />} />
             <Route path="profile" element={<Profile />} />
+            <Route path="settings" element={<Settings />} />
+          </Route>
 
-            <Route element={<RoleRoute deny={CLINICAL_DENY} />}>
-              <Route path="consultations" element={<Consultations />} />
-              <Route path="consultations/:id" element={<ConsultationRoom />} />
-              <Route path="cases" element={<Cases />} />
-              <Route path="cases/:id" element={<CaseRecord />} />
-              <Route path="knowledge" element={<KnowledgeBase />} />
-              <Route path="prescriptions" element={<Prescriptions />} />
-              <Route path="nursing" element={<NursingMonitor />} />
-              <Route path="nursing/updates" element={<NursingUpdates />} />
+          {/* The pharmacy counter. Its own tree for the same reason the nursing
+              module has one: stock is scoped to a branch, and none of the
+              clinical screens apply. PharmacyLayout guards the role. */}
+          <Route path="/pharmacy" element={<PharmacyLayout />}>
+            <Route index element={<PharmacyDashboard />} />
+            <Route path="medicines/departments" element={<PharmacyDepartments />} />
+            <Route path="medicines/requests" element={<MedicineRequests />} />
+            <Route path="medicines/inventory" element={<Inventory />} />
+            <Route path="medicines/add" element={<AddMedicine />} />
+            <Route path="medicines/categories" element={<Categories />} />
+            <Route path="medicines/search" element={<MedicineSearch />} />
+            <Route path="stock/in" element={<StockIn />} />
+            <Route path="stock/low" element={<StockAlerts mode="low" />} />
+            <Route path="stock/expired" element={<StockAlerts mode="expired" />} />
+            <Route path="profile" element={<Profile />} />
+            {PHARMACY_SOON.map(({ path, title, blurb, needs }) => (
               <Route
-                path="nursing/alerts"
-                element={<NurseAlerts basePath="/dashboard/nursing" title="Nursing alerts" />}
+                key={path}
+                path={path}
+                element={<PharmacySoon title={title} blurb={blurb} needs={needs} />}
               />
-              <Route path="nursing/:id" element={<NursingRecord />} />
-              <Route path="reports" element={<Reports />} />
-            </Route>
+            ))}
+          </Route>
 
-            <Route element={<RoleRoute deny={ADMIN_ONLY_DENY} />}>
-              <Route path="doctors" element={<Doctors />} />
-              <Route path="departments" element={<Departments />} />
-              <Route path="departments/:id" element={<DepartmentDetail />} />
-              <Route path="staff" element={<StaffManagement />} />
+          <Route element={<ProtectedRoute />}>
+            <Route path="/dashboard" element={<DashboardLayout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="patients" element={<Patients />} />
+              <Route path="appointments" element={<Appointments />} />
+              <Route path="settings" element={<Settings />} />
+              <Route path="profile" element={<Profile />} />
+
+              <Route element={<RoleRoute deny={CLINICAL_DENY} />}>
+                <Route path="consultations" element={<Consultations />} />
+                <Route path="consultations/:id" element={<ConsultationRoom />} />
+                <Route path="cases" element={<Cases />} />
+                <Route path="cases/:id" element={<CaseRecord />} />
+                <Route path="knowledge" element={<KnowledgeBase />} />
+                <Route path="prescriptions" element={<Prescriptions />} />
+                <Route path="nursing" element={<NursingMonitor />} />
+                <Route path="nursing/updates" element={<NursingUpdates />} />
+                <Route
+                  path="nursing/alerts"
+                  element={<NurseAlerts basePath="/dashboard/nursing" title="Nursing alerts" />}
+                />
+                <Route path="nursing/:id" element={<NursingRecord />} />
+                <Route path="reports" element={<Reports />} />
+              </Route>
+
+              <Route element={<RoleRoute deny={ADMIN_ONLY_DENY} />}>
+                <Route path="doctors" element={<Doctors />} />
+                <Route path="departments" element={<Departments />} />
+                <Route path="departments/:id" element={<DepartmentDetail />} />
+                <Route path="staff" element={<StaffManagement />} />
+              </Route>
             </Route>
           </Route>
-        </Route>
-      </Routes>
+
+          {/* Without this a mistyped or stale URL matched nothing and React
+              Router rendered an empty document — indistinguishable from a
+              crash. NotFound routes the visitor on by role. */}
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

@@ -85,7 +85,7 @@ function AddDoctorModal({ departments, onClose, onCreated }) {
             ))}
           </select>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">
               Specialization
@@ -155,9 +155,9 @@ export default function Doctors() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Doctors</h1>
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Doctors</h1>
           <p className="mt-1 text-sm text-slate-500">
             {doctors.length} doctor{doctors.length === 1 ? "" : "s"}
           </p>

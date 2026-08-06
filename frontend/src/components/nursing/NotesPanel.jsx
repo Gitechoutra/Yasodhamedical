@@ -44,7 +44,7 @@ function NoteModal({ assignmentId, noteType, nurses, onClose, onSaved }) {
   return (
     <Modal title={isHandover ? "Shift handover" : "Nursing note"} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className={labelClass}>Shift</label>
             <select className={inputClass} value={form.shift} onChange={update("shift")}>

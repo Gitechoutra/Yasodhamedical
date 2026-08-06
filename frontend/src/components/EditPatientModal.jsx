@@ -57,7 +57,7 @@ export default function EditPatientModal({ patient, onClose, onSaved }) {
           <input required className={inputClass} value={form.name} onChange={update("name")} />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className={labelClass}>Date of Birth</label>
             <input
@@ -75,7 +75,7 @@ export default function EditPatientModal({ patient, onClose, onSaved }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className={labelClass}>Gender</label>
             <select className={inputClass} value={form.gender} onChange={update("gender")}>

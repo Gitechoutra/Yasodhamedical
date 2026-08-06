@@ -38,7 +38,6 @@ export default function NursingMonitor() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
-  const [refreshedAt, setRefreshedAt] = useState(null);
 
   const load = useCallback(
     (silent = false) => {
@@ -48,7 +47,6 @@ export default function NursingMonitor() {
           setAssignments(rows);
           setSummary(stats);
           setErrorMsg("");
-          setRefreshedAt(new Date());
         })
         .catch(() => setErrorMsg("Could not load nursing records."))
         .finally(() => setLoading(false));
@@ -67,17 +65,18 @@ export default function NursingMonitor() {
     <div>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Nursing care</h1>
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Nursing care</h1>
           <p className="mt-1 text-sm text-slate-500">
             Patients you&apos;ve assigned to a nurse for observation or recovery
           </p>
         </div>
         <button
           onClick={() => load()}
-          className="flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+          title="Refresh — this page also updates on its own"
+          className="flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
         >
           <HiOutlineArrowPath className="h-3.5 w-3.5" />
-          {refreshedAt ? `Updated ${refreshedAt.toLocaleTimeString()}` : "Refresh"}
+          Refresh
         </button>
       </div>
 
