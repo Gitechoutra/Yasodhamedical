@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Navigate, Outlet } from "react-router-dom";
+import AppShell from "./AppShell";
 import Sidebar from "../components/Sidebar";
 import Topbar from "../components/Topbar";
 import { useAuth } from "../context/AuthContext";
@@ -26,14 +27,8 @@ export default function DashboardLayout() {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50">
-      <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar />
-        <main className="flex-1 overflow-y-auto px-8 py-6">
-          <Outlet />
-        </main>
-      </div>
-    </div>
+    <AppShell sidebar={<Sidebar />} header={<Topbar />}>
+      <Outlet />
+    </AppShell>
   );
 }

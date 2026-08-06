@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { HiOutlinePlus } from "react-icons/hi2";
 import Modal from "../components/Modal";
 import DoctorsTable from "../components/DoctorsTable";
@@ -131,20 +131,27 @@ export default function Doctors() {
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
 
-  function load() {
+  // Depends on the caller's role: only an admin fetches departments, which
+  // the add-doctor form needs. Wrapped so the effect below re-runs if the
+  // role resolves after mount — the cached user loads asynchronously, and an
+  // admin arriving a tick late previously got an empty department list and a
+  // form they could not submit.
+  const load = useCallback(() => {
     setLoading(true);
     const requests = canManageDoctors
       ? [fetchDoctors(), fetchDepartments()]
       : [fetchDoctors()];
-    Promise.all(requests)
+    return Promise.all(requests)
       .then(([d, deps]) => {
         setDoctors(d);
         if (deps) setDepartments(deps);
       })
       .finally(() => setLoading(false));
-  }
+  }, [canManageDoctors]);
 
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+  }, [load]);
 
   return (
     <div>

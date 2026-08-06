@@ -28,12 +28,36 @@ const VERIFIED = [
 const selectClass =
   "rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
 
-function Field({ title, children }) {
+/** One prescribed medicine, stacked rather than tabulated.
+ *
+ * The card is a third of a row wide now, so the five-column table this
+ * replaced could only ever be read by scrolling it sideways. Stacking keeps
+ * the dose line intact at every breakpoint. */
+function MedicineRow({ medicine }) {
+  const schedule = [medicine.dose, medicine.frequency, medicine.duration]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
-    <div>
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{title}</p>
-      <div className="mt-1 text-sm leading-relaxed text-slate-700">{children || "—"}</div>
-    </div>
+    <li className="rounded-xl border border-slate-100 bg-white px-3 py-2">
+      <div className="flex items-start justify-between gap-2">
+        <p className="min-w-0 break-words text-sm font-medium text-slate-800">
+          {medicine.medicine_name}
+        </p>
+        {medicine.quantity && (
+          <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+            ×{medicine.quantity}
+          </span>
+        )}
+      </div>
+      <p className="mt-0.5 text-xs text-slate-500">{schedule || "No schedule recorded"}</p>
+      {medicine.instructions && (
+        <p className="mt-0.5 text-xs text-slate-500">{medicine.instructions}</p>
+      )}
+      {medicine.notes && (
+        <p className="mt-0.5 text-xs italic text-slate-400">Note: {medicine.notes}</p>
+      )}
+    </li>
   );
 }
 
@@ -43,136 +67,107 @@ function PrescriptionCard({ record }) {
   const patient = record.patient || {};
 
   return (
-    <div className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-      <div className="flex flex-wrap items-start gap-4 p-5">
-        <Avatar name={patient.name} size="lg" />
+    // `h-full` + a column layout is what makes cards in the same row match:
+    // the grid stretches every cell, and the footer is pushed to the bottom
+    // by `mt-auto` rather than by the content happening to be the same length.
+    <div className="flex h-full flex-col rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:shadow-md">
+      <div className="flex flex-1 flex-col p-5">
+        <div className="flex items-start gap-3">
+          <Avatar name={patient.name} size="lg" />
 
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="truncate font-semibold text-slate-900">{patient.name}</p>
-            <span
-              title={
-                record.verified
-                  ? `Signed off by ${record.verified_by || "the treating doctor"}`
-                  : "The treating doctor has not signed this off yet"
-              }
-              className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                record.verified
-                  ? "bg-emerald-50 text-emerald-700"
-                  : "bg-amber-100 text-amber-700"
-              }`}
-            >
-              <HiOutlineCheckBadge className="h-3.5 w-3.5" />
-              {record.verified ? "Verified" : "Unverified"}
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-semibold text-slate-900" title={patient.name}>
+              {patient.name}
+            </p>
+            <p className="mt-0.5 truncate text-xs text-slate-400">
+              {patient.code}
+              {patient.age != null && ` · ${patient.age} yrs`}
+              {patient.gender && ` · ${patient.gender}`}
+            </p>
+            <p className="mt-0.5 truncate text-xs text-slate-400">
+              {[record.doctor, record.department].filter(Boolean).join(" · ") || "—"}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span
+            title={
+              record.verified
+                ? `Signed off by ${record.verified_by || "the treating doctor"}`
+                : "The treating doctor has not signed this off yet"
+            }
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
+              record.verified ? "bg-emerald-50 text-emerald-700" : "bg-amber-100 text-amber-700"
+            }`}
+          >
+            <HiOutlineCheckBadge className="h-3.5 w-3.5" />
+            {record.verified ? "Verified" : "Unverified"}
+          </span>
+          {record.session_number > 1 && (
+            <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700">
+              Session {record.session_number}
             </span>
-            {record.session_number > 1 && (
-              <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700">
-                Session {record.session_number}
-              </span>
+          )}
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+            {medicines.length} medicine{medicines.length === 1 ? "" : "s"}
+          </span>
+        </div>
+
+        <p className="mt-3 text-sm text-slate-500">
+          {record.consulted_at
+            ? new Date(record.consulted_at).toLocaleString()
+            : "Date not recorded"}
+        </p>
+
+        {expanded && (
+          <div className="mt-4 rounded-xl bg-slate-50/70 p-3">
+            {medicines.length === 0 ? (
+              <p className="text-sm text-slate-400">No medicines on this prescription.</p>
+            ) : (
+              <ul className="max-h-72 space-y-2 overflow-y-auto">
+                {medicines.map((m, i) => (
+                  <MedicineRow key={i} medicine={m} />
+                ))}
+              </ul>
+            )}
+
+            {record.case_id && (
+              <Link
+                to={`/dashboard/cases/${record.case_id}`}
+                className="mt-3 inline-block text-xs font-semibold text-brand-600 transition hover:text-brand-700"
+              >
+                View the whole course of treatment →
+              </Link>
             )}
           </div>
-
-          <p className="mt-0.5 text-xs text-slate-400">
-            {patient.code}
-            {patient.age != null && ` · ${patient.age} yrs`}
-            {patient.gender && ` · ${patient.gender}`}
-            {record.doctor && ` · ${record.doctor}`}
-            {record.department && ` · ${record.department}`}
-          </p>
-
-          <p className="mt-2 text-sm text-slate-500">
-            {record.consulted_at
-              ? new Date(record.consulted_at).toLocaleString()
-              : "Date not recorded"}
-            {" · "}
-            {medicines.length} medicine{medicines.length === 1 ? "" : "s"}
-          </p>
-
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <Field title="Symptoms">{record.symptoms}</Field>
-            <Field title="Diagnosis">{record.diagnosis}</Field>
-          </div>
-        </div>
-
-        <div className="flex shrink-0 flex-col items-end gap-2">
-          <Link
-            to={`/dashboard/consultations/${record.consultation_id}`}
-            className="rounded-xl border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-          >
-            Open consultation
-          </Link>
-          <button
-            onClick={() => setExpanded((v) => !v)}
-            aria-expanded={expanded}
-            className="flex items-center gap-1 text-xs font-semibold text-slate-500 transition hover:text-slate-700"
-          >
-            {expanded ? "Less" : "Medicines"}
-            <HiOutlineChevronDown
-              className={`h-4 w-4 transition ${expanded ? "rotate-180" : ""}`}
-            />
-          </button>
-        </div>
+        )}
       </div>
 
-      {expanded && (
-        <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-5">
-          {medicines.length === 0 ? (
-            <p className="text-sm text-slate-400">No medicines on this prescription.</p>
-          ) : (
-            <div className="overflow-x-auto rounded-xl border border-slate-100 bg-white">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
-                    <th className="px-4 py-2 font-medium">Medicine</th>
-                    <th className="px-4 py-2 font-medium">Dose</th>
-                    <th className="px-4 py-2 font-medium">Frequency</th>
-                    <th className="px-4 py-2 font-medium">Duration</th>
-                    <th className="px-4 py-2 font-medium">Qty</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {medicines.map((m, i) => (
-                    <tr key={i} className="border-b border-slate-50 last:border-0 align-top">
-                      <td className="px-4 py-2 font-medium text-slate-800">
-                        {m.medicine_name}
-                        {m.instructions && (
-                          <span className="mt-0.5 block text-xs font-normal text-slate-500">
-                            {m.instructions}
-                          </span>
-                        )}
-                        {m.notes && (
-                          <span className="mt-0.5 block text-xs font-normal italic text-slate-400">
-                            Note: {m.notes}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 text-slate-500">{m.dose || "—"}</td>
-                      <td className="px-4 py-2 text-slate-500">{m.frequency || "—"}</td>
-                      <td className="px-4 py-2 text-slate-500">{m.duration || "—"}</td>
-                      <td className="px-4 py-2 text-slate-500">{m.quantity || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {record.case_id && (
-            <Link
-              to={`/dashboard/cases/${record.case_id}`}
-              className="mt-4 inline-block text-xs font-semibold text-brand-600 transition hover:text-brand-700"
-            >
-              View the whole course of treatment →
-            </Link>
-          )}
-        </div>
-      )}
+      <div className="mt-auto flex items-center justify-between gap-2 border-t border-slate-100 px-5 py-3">
+        <Link
+          to={`/dashboard/consultations/${record.consultation_id}`}
+          className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+        >
+          Open consultation
+        </Link>
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="flex items-center gap-1 text-xs font-semibold text-slate-500 transition hover:text-slate-700"
+        >
+          {expanded ? "Less" : "Medicines"}
+          <HiOutlineChevronDown
+            className={`h-4 w-4 transition ${expanded ? "rotate-180" : ""}`}
+          />
+        </button>
+      </div>
     </div>
   );
 }
 
 /**
- * Every prescription written, with the symptoms and diagnosis behind it.
+ * Every prescription written, and the medicines on it.
  *
  * Read-only. A prescription is created by ending a consultation and changed
  * only by the treating doctor in the consultation room — editing one from a
@@ -239,9 +234,9 @@ export default function Prescriptions() {
         <h1 className="text-2xl font-bold text-slate-900">Prescriptions</h1>
       </div>
       <p className="mt-1 max-w-3xl text-sm text-slate-500">
-        Every prescription written, with the symptoms and diagnosis behind it. Saved
-        automatically when a consultation ends, and available for future consultations,
-        reporting and AI-assisted suggestions.
+        Every prescription written, and the medicines on it. Saved automatically when a
+        consultation ends, and available for future consultations, reporting and
+        AI-assisted suggestions.
       </p>
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
@@ -257,7 +252,7 @@ export default function Prescriptions() {
             <input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Patient, symptoms, diagnosis or medicine…"
+              placeholder="Patient, doctor or medicine…"
               className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
             />
             {searchInput && (
@@ -329,9 +324,9 @@ export default function Prescriptions() {
 
       <div className="mt-3">
         {loading ? (
-          <div className="space-y-4">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-44 animate-pulse rounded-2xl bg-slate-100" />
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="h-56 animate-pulse rounded-2xl bg-slate-100" />
             ))}
           </div>
         ) : records.length === 0 ? (
@@ -344,7 +339,10 @@ export default function Prescriptions() {
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
+          // Three across on a large desktop, two on a tablet, one on a phone.
+          // `items-stretch` (the grid default) plus `h-full` on the card is
+          // what gives a row equal-height cards without measuring anything.
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
             {records.map((r) => (
               <PrescriptionCard key={r.consultation_id} record={r} />
             ))}

@@ -1,19 +1,8 @@
 import { useEffect, useState } from "react";
 import { HiOutlineCheck, HiOutlinePlus } from "react-icons/hi2";
 import { fetchDepartments } from "../../services/departmentService";
+import { FORM_OPTIONS } from "../../constants/medicines";
 
-export const FORM_OPTIONS = [
-  ["tablet", "Tablet"],
-  ["capsule", "Capsule"],
-  ["syrup", "Syrup"],
-  ["injection", "Injection"],
-  ["iv_fluid", "IV Fluid"],
-  ["ointment", "Ointment / Cream"],
-  ["drops", "Drops"],
-  ["inhaler", "Inhaler"],
-  ["sachet", "Sachet"],
-  ["other", "Other"],
-];
 
 const input =
   "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100";

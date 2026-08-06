@@ -10,7 +10,8 @@ import {
 } from "react-icons/hi2";
 import ConfirmDialog from "../../components/ConfirmDialog";
 import Modal from "../../components/Modal";
-import MedicineForm, { FORM_OPTIONS } from "../../components/pharmacy/MedicineForm";
+import MedicineForm from "../../components/pharmacy/MedicineForm";
+import { FORM_OPTIONS } from "../../constants/medicines";
 import { fetchDepartments } from "../../services/departmentService";
 import {
   createBrand,

@@ -7,9 +7,12 @@ export default function Topbar() {
   const navigate = useNavigate();
 
   return (
-    <header className="flex items-center justify-between border-b border-slate-100 bg-white px-8 py-4">
-      <div className="flex w-full max-w-sm items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2">
-        <HiOutlineMagnifyingGlass className="h-4 w-4 text-slate-400" />
+    <header className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8 lg:py-4">
+      {/* Hidden on the smallest screens: at 375px the search box and the
+          action buttons cannot both fit, and the buttons are what a user
+          reaches for on a phone. */}
+      <div className="hidden w-full max-w-sm items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-4 py-2 sm:flex">
+        <HiOutlineMagnifyingGlass className="h-4 w-4 shrink-0 text-slate-400" />
         <input
           type="text"
           placeholder="Search patients, consultations…"
@@ -17,7 +20,7 @@ export default function Topbar() {
         />
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
         <NotificationMenu />
         <button
           onClick={() => navigate("/dashboard/settings")}

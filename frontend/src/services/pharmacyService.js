@@ -97,3 +97,31 @@ export async function fetchExpiring() {
   const res = await api.get("/pharmacy/expired");
   return res.data.data;
 }
+
+/**
+ * Medicines doctors had to write by hand because the catalogue lacks them.
+ * `status` is pending | added | dismissed | all.
+ */
+export async function fetchMedicineRequests(status = "pending") {
+  const res = await api.get("/pharmacy/medicine-requests", { params: { status } });
+  return res.data.data;
+}
+
+/** Adds a requested medicine to the catalogue and closes the request. */
+export async function addRequestedMedicine(requestId, payload) {
+  const res = await api.post(`/pharmacy/medicine-requests/${requestId}/add`, payload);
+  return res.data.data;
+}
+
+/**
+ * Rejects a doctor-added medicine and takes it back out of the catalogue.
+ *
+ * The message says which happened — removed outright, or discontinued because
+ * it has already been prescribed and those prescriptions must keep resolving.
+ */
+export async function dismissMedicineRequest(requestId, reviewNote) {
+  const res = await api.post(`/pharmacy/medicine-requests/${requestId}/dismiss`, {
+    review_note: reviewNote,
+  });
+  return { ...res.data.data, message: res.data.message };
+}

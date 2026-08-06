@@ -26,8 +26,12 @@ class CasePrescription(db.Model):
     # Same three as a session's prescription line — what the pharmacy hands
     # over, how the patient takes it, and the doctor's own note.
     quantity = db.Column(db.String(80), nullable=True)
+    route = db.Column(db.String(20), nullable=True)
     instructions = db.Column(db.Text, nullable=True)
     notes = db.Column(db.Text, nullable=True)
+    # Carried through from the session line it was merged from, so a
+    # hand-entered medicine stays identifiable on the consolidated sheet.
+    is_custom = db.Column(db.Boolean, nullable=False, default=False)
     # Which session this medicine's current instruction came from, so a reader
     # of the final prescription can tell a drug started on day one from one
     # added at the last review. Null for a row the doctor typed in by hand.
@@ -49,6 +53,8 @@ class CasePrescription(db.Model):
             "frequency": self.frequency,
             "duration": self.duration,
             "quantity": self.quantity,
+            "route": self.route,
+            "is_custom": self.is_custom,
             "instructions": self.instructions
             or (self.brand.usage_instructions if self.brand else None),
             "notes": self.notes,

@@ -45,6 +45,7 @@ const NAV = [
       { to: "/pharmacy/medicines/add", label: "Add Medicine", ready: true },
       { to: "/pharmacy/medicines/categories", label: "Categories", ready: true },
       { to: "/pharmacy/medicines/search", label: "Search", ready: true },
+      { to: "/pharmacy/medicines/requests", label: "Doctor Requests", ready: true },
     ],
   },
   {

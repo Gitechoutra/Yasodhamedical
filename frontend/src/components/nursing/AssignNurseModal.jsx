@@ -13,9 +13,16 @@ const inputClass =
   "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
 const labelClass = "mb-1 block text-xs font-semibold text-slate-600";
 
+// Matches the backend's default in models/patient.
+const DEFAULT_OBSERVATION_DAYS = 3;
+
 /**
  * The hand-off: a doctor names the nurse who will watch this patient through
- * the observation period.
+ * the post-operative observation period.
+ *
+ * Only ever reached for a surgery case — the API refuses the assignment
+ * outright for a patient nobody has marked as needing surgery, so the modal
+ * assumes it and defaults the care type accordingly.
  *
  * `consultationId` is optional but worth passing — with it the prescription is
  * carried straight into the nurse's medication schedule instead of being
@@ -26,14 +33,15 @@ export default function AssignNurseModal({
   patientName,
   consultationId = null,
   defaultPlan = "",
+  observationDays = DEFAULT_OBSERVATION_DAYS,
   onClose,
   onAssigned,
 }) {
   const [nurses, setNurses] = useState([]);
   const [form, setForm] = useState({
     nurse_id: "",
-    care_type: "observation",
-    observation_days: 1,
+    care_type: "post_surgery",
+    observation_days: observationDays || DEFAULT_OBSERVATION_DAYS,
     treatment_plan: defaultPlan,
     care_instructions: "",
     import_prescription: true,
@@ -124,7 +132,8 @@ export default function AssignNurseModal({
             />
             <p className="mt-1 text-[11px] text-slate-400">
               A plan, not a cut-off — the patient stays on the nurse&apos;s list
-              until someone discharges them.
+              until someone discharges them. Re-dated from the operation when
+              you mark the surgery completed.
             </p>
           </div>
         </div>

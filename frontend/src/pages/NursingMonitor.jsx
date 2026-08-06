@@ -7,6 +7,7 @@ import {
   HiOutlineInboxArrowDown,
 } from "react-icons/hi2";
 import Avatar from "../components/Avatar";
+import SurgeryStageBadge from "../components/SurgeryStageBadge";
 import {
   CareTypeBadge,
   ComplianceBar,
@@ -151,8 +152,8 @@ export default function NursingMonitor() {
           </p>
         </div>
       ) : (
-        <div className="mt-6 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
-          <table className="w-full text-left text-sm">
+        <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-100 bg-white shadow-sm">
+          <table className="w-full min-w-[48rem] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
                 <th className="px-6 py-3 font-medium">Patient</th>
@@ -186,7 +187,13 @@ export default function NursingMonitor() {
                     </td>
                     <td className="px-6 py-3 text-slate-600">{a.nurse}</td>
                     <td className="px-6 py-3">
-                      <CareTypeBadge careType={a.care_type} status={a.status} />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <CareTypeBadge careType={a.care_type} status={a.status} />
+                        <SurgeryStageBadge
+                          stage={a.surgery_stage}
+                          daysLeft={a.observation_days_left}
+                        />
+                      </div>
                     </td>
                     <td className="px-6 py-3 text-xs">
                       <p className="text-slate-500">{formatWhen(a.starts_at)}</p>

@@ -18,8 +18,8 @@ export default function DoctorsTable({ doctors, showDepartment = true, emptyMess
   }
 
   return (
-    <div className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-      <table className="w-full text-left text-sm">
+    <div className="overflow-x-auto rounded-2xl border border-slate-100 bg-white shadow-sm">
+      <table className="w-full min-w-[42rem] text-left text-sm">
         <thead>
           <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
             <th className="px-6 py-3 font-medium">Doctor</th>

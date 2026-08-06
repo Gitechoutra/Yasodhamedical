@@ -5,19 +5,40 @@ from flask import Blueprint, request, send_from_directory
 from flask_jwt_extended import get_jwt, jwt_required
 
 from portal.extensions import db
-from portal.helpers.audit import PATIENT_CREATED, PATIENT_REASSIGNED, PATIENT_UPDATED, audit
+from portal.helpers.audit import (
+    PATIENT_CREATED,
+    PATIENT_DELETED,
+    PATIENT_DISCHARGED,
+    PATIENT_REASSIGNED,
+    PATIENT_UPDATED,
+    SURGERY_CLEARED,
+    SURGERY_COMPLETED,
+    SURGERY_MARKED,
+    audit,
+)
 from portal.helpers.auth_helper import get_current_doctor
-from portal.helpers.broadcast import dashboard_changed
+from portal.helpers.broadcast import dashboard_changed, nursing_changed
 from portal.helpers.decorators import FRONT_DESK_ROLES, role_required
+from portal.helpers.notify import notify
 from portal.helpers.patient_access import can_access_patient, scope_patients
 from portal.helpers.response import error, success
+from portal.helpers.surgery import refresh_surgery_stages
 from portal.helpers.uploads import ImageUploadError, delete_image, save_image, upload_dir
+from portal.models.appointment import Appointment
+from portal.models.consultation import Consultation
 from portal.models.doctor import Doctor
-from portal.models.patient import Patient
+from portal.models.nursing_assignment import NursingAssignment
+from portal.models.patient import MAX_OBSERVATION_DAYS, Patient
+from portal.models.patient_case import PatientCase
 
 patient_bp = Blueprint("patients", __name__)
 
 PHOTOS_SUBDIR = "patients"
+
+# What counts as still being in the Appointments queue. Mirrors
+# appointment_routes.OPEN_STATUSES -- named here rather than imported to avoid
+# a circular import between the two route modules.
+OPEN_APPOINTMENT_STATUSES = ("waiting", "in_progress")
 
 # A date of birth outside this range is a typo, not a patient. Without the
 # floor, a mistyped year like "0001" silently produced an age of 2025.
@@ -59,12 +80,97 @@ def _resolve_assigned_doctor(payload, current_doctor):
     return doctor.id, None
 
 
+PATIENT_SCOPES = ("consulted", "awaiting", "all")
+
+
+def _in_appointments():
+    """Patient ids currently sitting in the Appointments queue.
+
+    "In Appointments" is the appointment's own open status, not the
+    consultation's — the queue is what Appointments renders, and a patient
+    belongs to exactly one of the two sections at a time. Ending a
+    consultation completes its appointment, which is the single moment the
+    patient moves across.
+    """
+    return db.session.query(Appointment.patient_id).filter(
+        Appointment.status.in_(OPEN_APPOINTMENT_STATUSES)
+    )
+
+
+def _has_completed_consultation():
+    return db.session.query(Consultation.patient_id).filter(
+        Consultation.status == "completed"
+    )
+
+
 @patient_bp.get("")
 @jwt_required()
 def list_patients():
+    """The patient list, split by where the patient is in their journey.
+
+    `?scope=` decides which:
+
+      consulted  (default) seen and finished — a completed consultation, and
+                 not currently back in the queue. This is the Patients page.
+      awaiting   registered but never consulted, or waiting / in consultation
+                 right now. These belong to Appointments; they are listed here
+                 only so the front desk can find a new patient to raise an OP
+                 for, which is the one thing that cannot happen from
+                 Appointments alone.
+      all        everything, for pickers that must be able to choose any
+                 patient regardless of where they are.
+
+    A patient is never in both `consulted` and `awaiting`: an open appointment
+    moves them back to awaiting until that consultation is finished too.
+    """
+    scope = request.args.get("scope", "consulted")
+    if scope not in PATIENT_SCOPES:
+        allowed = ", ".join(PATIENT_SCOPES)
+        return error(f"scope must be one of: {allowed}", status=422)
+
     query = scope_patients(Patient.query, get_current_doctor())
+
+    if scope == "consulted":
+        query = query.filter(
+            Patient.id.in_(_has_completed_consultation()),
+            Patient.id.notin_(_in_appointments()),
+        )
+    elif scope == "awaiting":
+        query = query.filter(
+            db.or_(
+                Patient.id.in_(_in_appointments()),
+                Patient.id.notin_(_has_completed_consultation()),
+            )
+        )
+
     patients = query.order_by(Patient.created_at.desc()).all()
+    # A finished observation window is only visible to whoever reads the record
+    # next — see helpers/surgery.
+    refresh_surgery_stages(patients)
     return success([p.to_dict() for p in patients])
+
+
+@patient_bp.get("/counts")
+@jwt_required()
+def patient_counts():
+    """How many patients sit on each side of the split.
+
+    Its own endpoint so the tabs can show counts without fetching both lists —
+    and so the count on a tab always agrees with the rows behind it, both
+    being derived from the same filters.
+    """
+    scoped = scope_patients(Patient.query, get_current_doctor())
+    consulted = scoped.filter(
+        Patient.id.in_(_has_completed_consultation()),
+        Patient.id.notin_(_in_appointments()),
+    ).count()
+    awaiting = scoped.filter(
+        db.or_(
+            Patient.id.in_(_in_appointments()),
+            Patient.id.notin_(_has_completed_consultation()),
+        )
+    ).count()
+    return success({"consulted": consulted, "awaiting": awaiting, "total": scoped.count()})
 
 
 @patient_bp.get("/<int:patient_id>")
@@ -77,6 +183,7 @@ def get_patient(patient_id):
         # Deliberately 404, not 403: confirming the record exists would leak
         # that another doctor has a patient by this id.
         return error("Patient not found", status=404)
+    refresh_surgery_stages([patient])
     return success(patient.to_dict())
 
 
@@ -224,6 +331,305 @@ def reassign_patient(patient_id):
     dashboard_changed("patient_reassigned")
 
     return success(patient.to_dict(), message="Patient reassigned")
+
+
+@patient_bp.delete("/<int:patient_id>")
+@role_required(*FRONT_DESK_ROLES)
+def delete_patient(patient_id):
+    """Removes a registration the front desk should never have created — a
+    duplicate, or a walk-in entered against the wrong person.
+
+    Front-desk work, and only ever for a patient with nothing clinical on
+    file. A consultation, a case or a nursing record is a medical record: it
+    is what the hospital is answerable for later, so a patient who has one is
+    refused here rather than quietly taking their history down with them.
+    Correct such a record, or leave it — deleting is not the tool.
+
+    Queue entries are not records in that sense. An OP raised for a patient
+    who is being deleted has no consultation behind it, so it goes with them.
+    """
+    patient = Patient.query.get(patient_id)
+    if not patient:
+        return error("Patient not found", status=404)
+
+    blockers = []
+    if Consultation.query.filter_by(patient_id=patient.id).count():
+        blockers.append("consultation records")
+    if PatientCase.query.filter_by(patient_id=patient.id).count():
+        blockers.append("case records")
+    if NursingAssignment.query.filter_by(patient_id=patient.id).count():
+        blockers.append("nursing records")
+    if blockers:
+        return error(
+            f"{patient.name} has {' and '.join(blockers)} and cannot be deleted. "
+            "Medical records are kept for audit — correct the patient's details instead.",
+            status=409,
+        )
+
+    name = patient.name
+    code = patient.code
+    photo = patient.photo_path
+
+    # Every appointment left is an unstarted queue entry (anything started has
+    # a consultation, which is refused above), so removing them keeps the
+    # queue from pointing at a patient who no longer exists.
+    Appointment.query.filter_by(patient_id=patient.id).delete(synchronize_session=False)
+
+    audit(
+        PATIENT_DELETED,
+        entity="patient",
+        entity_id=patient.id,
+        detail=f"Deleted {name} ({code})",
+    )
+    db.session.delete(patient)
+    try:
+        db.session.commit()
+    except Exception as exc:  # noqa: BLE001 - surface a DB failure as clean JSON
+        db.session.rollback()
+        return error(f"Could not delete this patient: {exc}", status=500)
+
+    # Only once the row is gone: a failed commit must not leave the record
+    # pointing at a file that has already been removed from disk.
+    delete_image(photo, PHOTOS_SUBDIR)
+
+    dashboard_changed("patient_deleted")
+    return success({"id": patient_id}, message=f"{name} deleted")
+
+
+# --------------------------------------------------------------------------
+# the surgical pathway
+# --------------------------------------------------------------------------
+#
+# Nursing care exists for the days after an operation, so a patient is only
+# handed to a nurse once a doctor has said their case needs surgery. These four
+# routes are the whole pathway:
+#
+#   POST   /patients/<id>/surgery            mark the case as needing surgery
+#   DELETE /patients/<id>/surgery            it doesn't after all
+#   POST   /patients/<id>/surgery/complete   operated; start the observation
+#   POST   /patients/<id>/discharge          done; the nurse's watch ends
+#
+# All four are the treating doctor's, and the same doctor-owns-the-plan rule
+# the nursing module runs on applies: a nurse records what happened, a doctor
+# decides what happens next.
+
+
+def _load_for_surgery(patient_id):
+    """Returns (patient, doctor, error_response) for a pathway route."""
+    doctor = get_current_doctor()
+    if not doctor:
+        return None, None, error("Only the treating doctor can do this", status=403)
+
+    patient = Patient.query.get(patient_id)
+    if not patient:
+        return None, None, error("Patient not found", status=404)
+    if not can_access_patient(patient, doctor):
+        return None, None, error("Patient not found", status=404)
+    return patient, doctor, None
+
+
+def _observation_days(payload):
+    """Returns (days, error_message). Absent reads as None -- the model falls
+    back to its own default rather than this route inventing a second one."""
+    raw = payload.get("observation_days")
+    if raw in (None, ""):
+        return None, None
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        return None, "observation_days must be a whole number"
+    if not 1 <= days <= MAX_OBSERVATION_DAYS:
+        return None, f"observation_days must be between 1 and {MAX_OBSERVATION_DAYS}"
+    return days, None
+
+
+def _active_assignment(patient):
+    return NursingAssignment.query.filter_by(patient_id=patient.id, status="active").first()
+
+
+@patient_bp.post("/<int:patient_id>/surgery")
+@role_required("doctor")
+def mark_surgery_required(patient_id):
+    """The doctor deciding this case needs surgery.
+
+    Nothing else opens the nurse hand-off — `POST /nursing/assignments`
+    refuses a patient who has not been through here.
+    """
+    patient, _doctor, failure = _load_for_surgery(patient_id)
+    if failure:
+        return failure
+
+    payload = request.get_json(silent=True) or {}
+    days, days_error = _observation_days(payload)
+    if days_error:
+        return error(days_error, status=422)
+
+    notes = (payload.get("surgery_notes") or "").strip()[:5000] or None
+    patient.mark_surgery_required(notes=notes, observation_days=days)
+
+    audit(
+        SURGERY_MARKED,
+        entity="patient",
+        entity_id=patient.id,
+        detail=f"{patient.name} marked as requiring surgery",
+    )
+    db.session.commit()
+    dashboard_changed("surgery_marked")
+
+    return success(patient.to_dict(), message=f"{patient.name} marked for surgery")
+
+
+@patient_bp.delete("/<int:patient_id>/surgery")
+@role_required("doctor")
+def clear_surgery(patient_id):
+    """Undoes the decision above — the case turned out not to need surgery.
+
+    Refused once a nurse is actually watching the patient: taking the case off
+    the pathway would strand an assignment that only exists because of it.
+    Close the nursing assignment first, which discharges them properly.
+    """
+    patient, _doctor, failure = _load_for_surgery(patient_id)
+    if failure:
+        return failure
+
+    if patient.surgery_stage is None:
+        return success(patient.to_dict(), message="No surgery was planned")
+    if _active_assignment(patient):
+        return error(
+            f"{patient.name} is under nursing care. Discharge them first.",
+            status=409,
+        )
+
+    patient.clear_surgery()
+    audit(
+        SURGERY_CLEARED,
+        entity="patient",
+        entity_id=patient.id,
+        detail=f"Surgery no longer planned for {patient.name}",
+    )
+    db.session.commit()
+    dashboard_changed("surgery_cleared")
+
+    return success(patient.to_dict(), message="Surgery is no longer planned")
+
+
+@patient_bp.post("/<int:patient_id>/surgery/complete")
+@role_required("doctor")
+def complete_surgery(patient_id):
+    """Surgery is done: the patient moves to post-operative observation.
+
+    The nurse already assigned stays assigned and their watch is re-dated from
+    now, because the days that matter are the days after the operation, not the
+    days since the hand-off was arranged.
+    """
+    patient, _doctor, failure = _load_for_surgery(patient_id)
+    if failure:
+        return failure
+
+    if patient.surgery_stage is None:
+        return error(
+            f"{patient.name} has not been marked as needing surgery", status=409
+        )
+    if patient.surgery_stage != "required":
+        return error(f"{patient.name} is already past surgery", status=409)
+
+    payload = request.get_json(silent=True) or {}
+    days, days_error = _observation_days(payload)
+    if days_error:
+        return error(days_error, status=422)
+
+    ends_at = patient.complete_surgery(observation_days=days)
+
+    assignment = _active_assignment(patient)
+    if assignment:
+        assignment.care_type = "post_surgery"
+        assignment.ends_at = ends_at
+        if assignment.nurse:
+            notify(
+                [assignment.nurse.user_id],
+                title="Post-operative observation started",
+                body=(
+                    f"{patient.name} is out of surgery and under observation for "
+                    f"{patient.observation_days_planned} day"
+                    f"{'' if patient.observation_days_planned == 1 else 's'}."
+                ),
+                category="nursing",
+                link=f"/nurse/patients/{assignment.id}",
+            )
+
+    audit(
+        SURGERY_COMPLETED,
+        entity="patient",
+        entity_id=patient.id,
+        detail=(
+            f"Surgery completed for {patient.name}; observing for "
+            f"{patient.observation_days_planned} days"
+        ),
+    )
+    db.session.commit()
+    if assignment:
+        nursing_changed("assignment_updated", assignment.id)
+    dashboard_changed("surgery_completed")
+
+    return success(patient.to_dict(), message=f"{patient.name} is under observation")
+
+
+@patient_bp.post("/<int:patient_id>/discharge")
+@role_required("doctor")
+def discharge_patient(patient_id):
+    """Ends the surgical pathway, and with it the nurse's assignment.
+
+    Available at any point after surgery — the observation window elapsing
+    moves the patient to `ready_for_discharge`, which is a prompt, not a
+    discharge. A patient still unwell on day four is still the nurse's patient
+    until the doctor here says otherwise.
+    """
+    patient, _doctor, failure = _load_for_surgery(patient_id)
+    if failure:
+        return failure
+
+    if patient.surgery_stage is None:
+        return error(f"{patient.name} is not under post-operative care", status=409)
+    if patient.surgery_stage == "required":
+        return error(
+            f"{patient.name} has not had surgery yet. Mark the surgery completed first, "
+            "or cancel it if it is no longer needed.",
+            status=409,
+        )
+
+    payload = request.get_json(silent=True) or {}
+    summary = (payload.get("summary") or "").strip()[:5000] or None
+
+    assignment = _active_assignment(patient)
+    if assignment:
+        assignment.status = "completed"
+        assignment.completed_at = datetime.utcnow()
+        if assignment.nurse:
+            notify(
+                [assignment.nurse.user_id],
+                title="Patient discharged",
+                body=(
+                    f"{patient.name} has been discharged and is off your list."
+                    + (f" {summary}" if summary else "")
+                )[:255],
+                category="nursing",
+                link=f"/nurse/patients/{assignment.id}",
+            )
+
+    patient.clear_surgery()
+
+    audit(
+        PATIENT_DISCHARGED,
+        entity="patient",
+        entity_id=patient.id,
+        detail=f"{patient.name} discharged from post-operative care",
+    )
+    db.session.commit()
+    if assignment:
+        nursing_changed("assignment_closed", assignment.id)
+    dashboard_changed("patient_discharged")
+
+    return success(patient.to_dict(), message=f"{patient.name} discharged")
 
 
 @patient_bp.post("/<int:patient_id>/photo")

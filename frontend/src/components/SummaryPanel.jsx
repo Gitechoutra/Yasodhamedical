@@ -265,14 +265,11 @@ export default function SummaryPanel({
         )}
 
         <Section title="Clinical Summary">{summary.summary}</Section>
-        <Section title="Symptoms">{summary.symptoms}</Section>
 
-        <Section title="Possible Diagnosis (Assistive)">
-          <p>{summary.possible_diagnosis}</p>
-          <p className="mt-1 text-xs italic text-slate-400">
-            Assistive only — not a confirmed diagnosis. The treating doctor must verify.
-          </p>
-        </Section>
+        {/* No symptoms or diagnosis section — the prescription shown, printed
+            and downloaded here carries the medicines and advice only. Both are
+            still generated and still on the record; they are simply not part
+            of this document. */}
 
         <div>
           <div className="flex flex-wrap items-center gap-2">

@@ -22,7 +22,6 @@ import NursingRecord from "../pages/NursingRecord";
 import Reports from "../pages/Reports";
 import Settings from "../pages/Settings";
 import Profile from "../pages/Profile";
-import ComingSoon from "../pages/ComingSoon";
 import NurseDashboard from "../pages/nurse/NurseDashboard";
 import NursePatients from "../pages/nurse/NursePatients";
 import NursePatientRecord from "../pages/nurse/NursePatientRecord";
@@ -32,6 +31,7 @@ import PharmacyDashboard from "../pages/pharmacy/PharmacyDashboard";
 import AddMedicine from "../pages/pharmacy/AddMedicine";
 import Inventory from "../pages/pharmacy/Inventory";
 import PharmacyDepartments from "../pages/pharmacy/Departments";
+import MedicineRequests from "../pages/pharmacy/MedicineRequests";
 import Categories from "../pages/pharmacy/Categories";
 import MedicineSearch from "../pages/pharmacy/MedicineSearch";
 import StockIn from "../pages/pharmacy/StockIn";
@@ -41,8 +41,6 @@ import DashboardLayout from "../layouts/DashboardLayout";
 import NurseLayout from "../layouts/NurseLayout";
 import ProtectedRoute from "../components/ProtectedRoute";
 import RoleRoute from "../components/RoleRoute";
-
-const COMING_SOON_ROUTES = [{ path: "medicines", title: "Medicines" }];
 
 // Org-structure screens. Hidden from the doctor sidebar (see Sidebar.jsx) and
 // unreachable by URL for doctors — keep the two lists in step.
@@ -178,6 +176,7 @@ export default function AppRouter() {
         <Route path="/pharmacy" element={<PharmacyLayout />}>
           <Route index element={<PharmacyDashboard />} />
           <Route path="medicines/departments" element={<PharmacyDepartments />} />
+          <Route path="medicines/requests" element={<MedicineRequests />} />
           <Route path="medicines/inventory" element={<Inventory />} />
           <Route path="medicines/add" element={<AddMedicine />} />
           <Route path="medicines/categories" element={<Categories />} />
@@ -218,9 +217,6 @@ export default function AppRouter() {
               />
               <Route path="nursing/:id" element={<NursingRecord />} />
               <Route path="reports" element={<Reports />} />
-              {COMING_SOON_ROUTES.map(({ path, title }) => (
-                <Route key={path} path={path} element={<ComingSoon title={title} />} />
-              ))}
             </Route>
 
             <Route element={<RoleRoute deny={ADMIN_ONLY_DENY} />}>

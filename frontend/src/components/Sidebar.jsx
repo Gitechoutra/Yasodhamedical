@@ -9,7 +9,6 @@ import {
   HiOutlineClipboardDocumentList,
   HiOutlineHeart,
   HiOutlineDocumentChartBar,
-  HiOutlineBeaker,
   HiOutlineUserGroup,
   HiOutlineBuildingOffice2,
   HiOutlineIdentification,
@@ -24,9 +23,9 @@ import { useNavigate } from "react-router-dom";
 //
 // Doctors don't manage org structure — staff, departments and user accounts
 // are admin screens. Reception doesn't do patient care at all: consultations,
-// prescriptions, reports, medicines and the nursing record are hidden, and
-// the API returns 403 for every one of them, so a stale bookmark fails
-// server-side too rather than relying on this list.
+// prescriptions, reports and the nursing record are hidden, and the API
+// returns 403 for every one of them, so a stale bookmark fails server-side
+// too rather than relying on this list.
 //
 // The routes are also blocked in AppRouter — keep the three in step.
 const NAV_ITEMS = [
@@ -75,12 +74,10 @@ const NAV_ITEMS = [
     icon: HiOutlineAcademicCap,
     hideFrom: ["receptionist"],
   },
-  {
-    to: "/dashboard/medicines",
-    label: "Medicines",
-    icon: HiOutlineBeaker,
-    hideFrom: ["receptionist"],
-  },
+  // No standalone Medicines section. The catalogue is the pharmacy's, and a
+  // doctor only ever meets it while prescribing — the picker in the
+  // consultation room reads the same formulary, so a browse-only copy of it
+  // on the dashboard was a second door onto data nobody edits from here.
   { to: "/dashboard/doctors", label: "Doctors", icon: HiOutlineUserGroup, hideFrom: ["doctor"] },
   {
     to: "/dashboard/departments",

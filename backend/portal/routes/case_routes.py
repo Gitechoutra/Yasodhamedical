@@ -355,13 +355,14 @@ def replace_final_prescriptions(case_id):
         if not name:
             return error(f"Item {index + 1} needs a medicine name", status=422)
 
-        # Same rule as a session's prescription: the final sheet the patient
-        # takes to the counter must name medicines the hospital stocks.
+        # Same rule as a session's prescription: a name the catalogue does not
+        # know is only accepted when the doctor marked it as entered by hand.
         brand, _medicine_id = resolve_medicine(name, prescribable)
-        if brand is None and _medicine_id is None:
+        is_custom = bool(item.get("is_custom"))
+        if brand is None and _medicine_id is None and not is_custom:
             return error(
-                f"“{name}” is not in this department's medicine list. Use the search "
-                "box to pick a medicine the pharmacy stocks.",
+                f"“{name}” is not in this department's medicine list. Pick a stocked "
+                "medicine, or mark it as a custom entry.",
                 status=422,
             )
 
@@ -373,6 +374,8 @@ def replace_final_prescriptions(case_id):
                 "frequency": (item.get("frequency") or "").strip()[:255] or None,
                 "duration": (item.get("duration") or "").strip()[:255] or None,
                 "quantity": (item.get("quantity") or "").strip()[:80] or None,
+                "route": (item.get("route") or "").strip().lower()[:20] or None,
+                "is_custom": is_custom and brand is None and _medicine_id is None,
                 "instructions": (item.get("instructions") or "").strip()[:2000] or None,
                 "notes": (item.get("notes") or "").strip()[:2000] or None,
                 "source_session_number": source if isinstance(source, int) else None,

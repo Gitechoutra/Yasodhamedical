@@ -46,6 +46,7 @@ from portal.helpers.nursing_access import (
 )
 from portal.helpers.patient_access import can_access_patient
 from portal.helpers.response import error, success
+from portal.helpers.surgery import refresh_for_assignments
 from portal.models.care_message import CareMessage
 from portal.models.clinical_alert import (
     ALERT_STATUSES,
@@ -69,7 +70,10 @@ from portal.models.nursing_assignment import (
     NursingAssignment,
 )
 from portal.models.nursing_note import NOTE_TYPES, SHIFTS, NursingNote
-from portal.models.patient import Patient
+from portal.models.patient import (
+    MAX_OBSERVATION_DAYS as PATIENT_MAX_OBSERVATION_DAYS,
+    Patient,
+)
 from portal.models.patient_observation import PatientObservation
 from portal.models.role import Role
 from portal.models.user import User
@@ -80,9 +84,10 @@ nursing_bp = Blueprint("nursing", __name__)
 # How long the doctor is asked to plan for when they don't set an end date.
 # Only a starting suggestion -- the field is editable, and passing the date
 # does not end anything. Care runs until a nurse or the treating doctor
-# closes it explicitly.
-DEFAULT_OBSERVATION_DAYS = 1
-MAX_OBSERVATION_DAYS = 90
+# closes it explicitly. The default comes from the patient's own surgical
+# pathway (models/patient.DEFAULT_OBSERVATION_DAYS), so the number a doctor
+# sets when marking the surgery is the number used here.
+MAX_OBSERVATION_DAYS = PATIENT_MAX_OBSERVATION_DAYS
 
 MAX_TEXT = 5000
 TIMELINE_LIMIT = 300
@@ -287,6 +292,10 @@ def list_assignments():
         NursingAssignment.created_at.desc(),
     ).all()
 
+    # A patient whose observation window ran out while nobody was looking
+    # shows as ready for discharge the moment somebody is.
+    refresh_for_assignments(assignments)
+
     viewer_id = get_jwt_identity()
     # Only the treating doctor has a review marker, so only they get the count.
     doctor = get_current_doctor()
@@ -316,6 +325,16 @@ def create_assignment():
         return error("Patient not found", status=404)
     if not can_access_patient(patient, doctor):
         return error("This patient is assigned to another doctor", status=403)
+
+    # Nursing care is the post-operative watch, so it is offered for surgery
+    # cases only. Enforced here and not just hidden in the UI: the rule is the
+    # point, and a hidden button is not a rule.
+    if not patient.is_surgical:
+        return error(
+            f"A nurse is assigned for surgery cases only. Mark {patient.name}'s case "
+            "as requiring surgery first.",
+            status=409,
+        )
 
     nurse = Nurse.query.get(payload.get("nurse_id"))
     if not nurse:
@@ -353,13 +372,17 @@ def create_assignment():
         return error(dt_error, status=422)
 
     starts_at = datetime.utcnow()
+    days, days_error = _int(payload, "observation_days", low=1, high=MAX_OBSERVATION_DAYS)
+    if days_error:
+        return error(days_error, status=422)
+    # Kept on the patient too, so marking the surgery completed later re-dates
+    # the watch from the operation using the same number the doctor chose here
+    # rather than falling back to the default.
+    if days:
+        patient.observation_days = days
+
     if ends_at is None:
-        days, days_error = _int(
-            payload, "observation_days", low=1, high=MAX_OBSERVATION_DAYS
-        )
-        if days_error:
-            return error(days_error, status=422)
-        ends_at = starts_at + timedelta(days=days or DEFAULT_OBSERVATION_DAYS)
+        ends_at = starts_at + timedelta(days=days or patient.observation_days_planned)
     elif ends_at <= starts_at:
         return error("The observation period must end in the future", status=422)
 
@@ -511,6 +534,8 @@ def get_assignment(assignment_id):
     assignment, failure = _load_assignment(assignment_id)
     if failure:
         return failure
+
+    refresh_for_assignments([assignment])
 
     data = assignment.to_dict(
         include_detail=True,
@@ -700,6 +725,13 @@ def discharge_assignment(assignment_id):
 
     assignment.status = status
     assignment.completed_at = datetime.utcnow()
+
+    # Closing the watch is the discharge: the surgical pathway exists to put a
+    # nurse on this patient, so it ends with them. Cancelling is different —
+    # it says the hand-off should not have happened, and the patient may still
+    # be waiting for their operation, so the pathway stays as it was.
+    if status == "completed" and assignment.patient:
+        assignment.patient.clear_surgery()
 
     # A closing note keeps the reason on the record rather than only in an
     # audit row, so the next person reading the timeline sees why it ended.
@@ -1658,6 +1690,7 @@ def nursing_summary():
     doctor = get_current_doctor()
     base = scope_assignments(NursingAssignment.query)
     active = base.filter(NursingAssignment.status == "active").all()
+    refresh_for_assignments(active)
 
     now = datetime.utcnow()
     since = datetime.combine(now.date(), datetime.min.time())

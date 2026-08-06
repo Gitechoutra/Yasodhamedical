@@ -28,6 +28,9 @@ appointment_bp = Blueprint("appointments", __name__)
 # i.e. not yet completed or cancelled.
 OPEN_STATUSES = ("waiting", "in_progress")
 
+# Off the board for good — nothing can be started from one of these.
+CLOSED_STATUSES = ("completed", "cancelled")
+
 
 def open_appointments_query():
     """Appointments still on the board.
@@ -200,14 +203,37 @@ def create_appointment():
     return success(appointment.to_dict(), message="OP created", status=201)
 
 
+def _link_to_consultation(appointment, consultation, doctor, status):
+    """Points an appointment at the session it belongs to and moves it on.
+
+    Every path out of `start_appointment` other than an outright refusal ends
+    here, so an appointment the doctor has acted on never stays behind in the
+    queue on its original status.
+    """
+    appointment.doctor_id = doctor.id
+    appointment.consultation_id = consultation.id
+    appointment.status = status
+    return appointment
+
+
 @appointment_bp.post("/<int:appointment_id>/start")
 @jwt_required()
 def start_appointment(appointment_id):
+    """Calls the patient in: opens their consultation room and moves the
+    appointment to `in_progress`.
+
+    Deliberately idempotent. Every reason a session might already exist —
+    the doctor picked this patient up on another tab, the front desk raised a
+    second OP for a visit already under way, the patient was seen earlier the
+    same day — resolves to *that* session rather than to an error, because a
+    refusal here used to leave the appointment sitting in the queue on
+    "waiting" with no action left that could ever clear it.
+    """
     appointment = Appointment.query.get(appointment_id)
     if not appointment:
         return error("Appointment not found", status=404)
-    if appointment.status != "waiting":
-        return error("This appointment has already been picked up", status=409)
+    if appointment.status in CLOSED_STATUSES:
+        return error("This appointment is already closed", status=409)
 
     doctor = get_current_doctor()
     if not doctor:
@@ -216,6 +242,14 @@ def start_appointment(appointment_id):
         return error("This appointment belongs to a different department", status=403)
     if not can_access_patient(appointment.patient, doctor):
         return error("This patient is assigned to another doctor", status=403)
+
+    # Already picked up, by this doctor, with a room to go back to: pressing
+    # start again is the same action as resuming, so it opens that room.
+    if appointment.consultation_id and appointment.consultation:
+        return success(
+            appointment.consultation.to_dict(include_detail=True),
+            message="Consultation resumed",
+        )
 
     # A patient coming back for more of the same treatment continues their
     # open case, so this becomes session 2 (3, …) rather than a fresh visit
@@ -229,11 +263,15 @@ def start_appointment(appointment_id):
     existing = open_case_for(appointment.patient_id, doctor.id)
     running = existing.open_session if existing else None
     if running:
-        return error(
-            f"You already have session {running.session_number} in progress with this "
-            "patient. Resume it instead of starting another.",
-            status=409,
-            errors={"consultation_id": running.id},
+        # The session already open with this patient *is* this visit, so the
+        # appointment joins it and the doctor lands in the room that is
+        # recording. Both rows complete together when the session ends.
+        _link_to_consultation(appointment, running, doctor, "in_progress")
+        db.session.commit()
+        dashboard_changed("consultation_started")
+        return success(
+            running.to_dict(include_detail=True),
+            message=f"Resumed session {running.session_number} with this patient",
         )
 
     # A session is one visit, so a patient seen earlier today continues that
@@ -242,12 +280,19 @@ def start_appointment(appointment_id):
     # OP would quietly split one visit into two half-records.
     todays = todays_session(existing)
     if todays:
-        return error(
-            f"This patient was already seen today in session {todays.session_number}. "
-            "Open that consultation and continue it — a new session is for a visit on "
-            "another day.",
-            status=409,
-            errors={"consultation_id": todays.id},
+        # The visit already happened today, so this OP is closed off against
+        # that session rather than left waiting for a consultation that must
+        # never be created. The doctor is taken to it, where "Continue
+        # consultation" reopens recording on the same record.
+        _link_to_consultation(appointment, todays, doctor, "completed")
+        db.session.commit()
+        dashboard_changed("consultation_started")
+        return success(
+            todays.to_dict(include_detail=True),
+            message=(
+                f"This patient was already seen today in session {todays.session_number} — "
+                "continue that consultation rather than starting another."
+            ),
         )
 
     case = case_for_new_session(appointment.patient_id, doctor.id, appointment.reason)
@@ -262,9 +307,10 @@ def start_appointment(appointment_id):
     db.session.add(consultation)
     db.session.flush()  # assigns consultation.id before we reference it below
 
-    appointment.doctor_id = doctor.id
-    appointment.consultation_id = consultation.id
-    appointment.status = "in_progress"
+    # The appointment moves to "in consultation" in the same commit as the
+    # session it belongs to, so the queue can never show a patient as waiting
+    # while their consultation is already recording.
+    _link_to_consultation(appointment, consultation, doctor, "in_progress")
     db.session.commit()
     dashboard_changed("consultation_started")
 

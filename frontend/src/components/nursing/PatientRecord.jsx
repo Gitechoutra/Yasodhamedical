@@ -9,6 +9,7 @@ import MedicationPanel from "./MedicationPanel";
 import MessageThread from "./MessageThread";
 import NotesPanel from "./NotesPanel";
 import ObservationsPanel from "./ObservationsPanel";
+import SurgeryStageBadge from "../SurgeryStageBadge";
 import { CareTypeBadge, ComplianceBar, formatWhen } from "./NursingBadges";
 import useLiveNursing from "../../hooks/useLiveNursing";
 import { fetchAssignment } from "../../services/nursingService";
@@ -141,6 +142,14 @@ export default function PatientRecord({ assignmentId, backTo, onBack, headerExtr
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-bold text-slate-900">{assignment.patient}</h1>
                 <CareTypeBadge careType={assignment.care_type} status={assignment.status} />
+                {/* Where the patient is on the surgical pathway — the nurse
+                    needs to know whether they are watching someone waiting for
+                    theatre, someone recovering, or someone whose observation
+                    window is up. Renders nothing off the pathway. */}
+                <SurgeryStageBadge
+                  stage={assignment.surgery_stage}
+                  daysLeft={assignment.observation_days_left}
+                />
               </div>
               <p className="mt-1 text-sm text-slate-500">
                 {assignment.patient_code}

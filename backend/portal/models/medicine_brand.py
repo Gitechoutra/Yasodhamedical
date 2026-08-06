@@ -97,6 +97,15 @@ class MedicineBrand(db.Model):
     # general items do not have to be tagged to a dozen departments one by one
     # and stay correct when a new department is opened.
     for_all_departments = db.Column(db.Boolean, nullable=False, default=False)
+    # Created automatically from a doctor's hand-entered prescription line
+    # rather than by the pharmacy.
+    #
+    # Two things follow. It is offered for prescribing even with no stock —
+    # the pharmacy has not bought it yet, and the patient sources it outside,
+    # which is exactly why the doctor typed it in. And it is listed for the
+    # pharmacy to complete, since a name and dosing is all a prescription
+    # carries: no category, manufacturer or price.
+    added_by_doctor = db.Column(db.Boolean, nullable=False, default=False)
     # The clinical formulary row this brand dispenses, when there is one.
     medicine_id = db.Column(db.Integer, db.ForeignKey("medicines.id"), nullable=True)
     is_active = db.Column(db.Boolean, nullable=False, default=True)
@@ -177,7 +186,11 @@ class MedicineBrand(db.Model):
             return "discontinued"
         quantity = self.quantity_in(branch_id) if branch_id is not None else self.total_quantity
         if quantity <= 0:
-            return "out_of_stock"
+            # A doctor-added medicine the pharmacy has not stocked is not the
+            # same as one they carry and have run out of. Saying "out of
+            # stock" would suggest waiting for a delivery that was never
+            # ordered; the patient buys this one outside.
+            return "not_stocked" if self.added_by_doctor else "out_of_stock"
         if quantity < self.reorder_level:
             return "low_stock"
         return "available"
@@ -200,6 +213,7 @@ class MedicineBrand(db.Model):
             "reorder_level": self.reorder_level,
             "is_active": self.is_active,
             "for_all_departments": self.for_all_departments,
+            "added_by_doctor": self.added_by_doctor,
             "departments": [
                 {"id": d.id, "name": d.name} for d in self.departments
             ],

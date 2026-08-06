@@ -9,6 +9,7 @@ import {
 } from "react-icons/hi2";
 import Avatar from "../../components/Avatar";
 import StatCard from "../../components/StatCard";
+import SurgeryStageBadge from "../../components/SurgeryStageBadge";
 import { CareTypeBadge, ComplianceBar, formatWhen } from "../../components/nursing/NursingBadges";
 import { useAuth } from "../../context/AuthContext";
 import useLiveNursing from "../../hooks/useLiveNursing";
@@ -35,7 +36,13 @@ export function AssignmentCard({ assignment, to }) {
             <p className="text-xs text-slate-400">{assignment.patient_code}</p>
           </div>
         </div>
-        <CareTypeBadge careType={assignment.care_type} status={assignment.status} />
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+          <CareTypeBadge careType={assignment.care_type} status={assignment.status} />
+          <SurgeryStageBadge
+            stage={assignment.surgery_stage}
+            daysLeft={assignment.observation_days_left}
+          />
+        </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">

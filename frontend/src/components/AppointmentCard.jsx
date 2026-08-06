@@ -3,9 +3,18 @@ import Avatar from "./Avatar";
 import OpStatusBadge from "./OpStatusBadge";
 
 const STATUS_META = {
-  in_progress: { label: "Ongoing consultation", className: "bg-emerald-100 text-emerald-700" },
+  in_progress: { label: "In consultation", className: "bg-emerald-100 text-emerald-700" },
   waiting: { label: "Pending consultation", className: "bg-amber-100 text-amber-700" },
+  scheduled: { label: "Scheduled", className: "bg-amber-100 text-amber-700" },
+  confirmed: { label: "Confirmed", className: "bg-amber-100 text-amber-700" },
+  completed: { label: "Completed", className: "bg-slate-100 text-slate-600" },
+  cancelled: { label: "Cancelled", className: "bg-slate-100 text-slate-600" },
 };
+
+// The patient is still to be seen, so the doctor can call them in. "waiting"
+// is what the queue actually stores; the other two are accepted so a booked
+// slot labelled scheduled or confirmed offers the button just the same.
+const STARTABLE_STATUSES = ["waiting", "scheduled", "confirmed"];
 
 function Detail({ label, value }) {
   return (
@@ -25,6 +34,9 @@ function Detail({ label, value }) {
 export default function AppointmentCard({ appointment, isNext, onStart, onResume, busy }) {
   const patient = appointment.patient_detail || {};
   const ongoing = appointment.status === "in_progress";
+  // Only an appointment still to be seen gets the button — a completed or
+  // cancelled one has nothing left to start.
+  const canStart = STARTABLE_STATUSES.includes(appointment.status);
   const status = STATUS_META[appointment.status] || {
     label: appointment.status.replace("_", " "),
     className: "bg-slate-100 text-slate-600",
@@ -109,7 +121,7 @@ export default function AppointmentCard({ appointment, isNext, onStart, onResume
               <HiOutlineArrowRightCircle className="h-4.5 w-4.5" />
               Resume Consultation
             </button>
-          ) : (
+          ) : canStart ? (
             <button
               onClick={() => onStart(appointment)}
               disabled={busy}
@@ -127,6 +139,8 @@ export default function AppointmentCard({ appointment, isNext, onStart, onResume
                 </>
               )}
             </button>
+          ) : (
+            <span className="text-xs font-semibold text-slate-400">{status.label}</span>
           )}
         </div>
       </div>

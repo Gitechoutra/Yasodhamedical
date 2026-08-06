@@ -13,12 +13,21 @@ from flask import Blueprint, request
 from flask_jwt_extended import get_jwt, get_jwt_identity
 
 from portal.extensions import db
-from portal.helpers.audit import audit
+from portal.helpers.audit import (
+    CUSTOM_MEDICINE_ADDED,
+    CUSTOM_MEDICINE_DISMISSED,
+    audit,
+)
 from portal.helpers.broadcast import dashboard_changed
 from portal.helpers.decorators import role_required
+from portal.helpers.notify import notify
 from portal.helpers.response import error, success
 from portal.models.branch import Branch
 from portal.models.case_prescription import CasePrescription
+from portal.models.custom_medicine_request import (
+    STATUSES as REQUEST_STATUSES,
+    CustomMedicineRequest,
+)
 from portal.models.department import Department
 from portal.models.generated_prescription import GeneratedPrescription
 from portal.models.medicine import Medicine
@@ -544,6 +553,275 @@ def delete_brand(brand_id):
     dashboard_changed("pharmacy_brand_deleted")
 
     return success({"deleted": True}, message=f"{label} deleted")
+
+
+# --------------------------------------------------------------------------
+# custom medicines doctors had to write by hand
+# --------------------------------------------------------------------------
+
+
+@pharmacy_bp.get("/medicine-requests")
+@role_required("pharmacist", "admin")
+def list_medicine_requests():
+    """Medicines doctors prescribed that the catalogue does not have.
+
+    The pharmacy's side of manual entry: a doctor is never blocked by the
+    catalogue, and in exchange every medicine they type by hand lands here for
+    a decision. Pending first, then the most-prescribed — a gap five doctors
+    have hit matters more than one seen once.
+    """
+    status = request.args.get("status", "pending")
+    if status not in (*REQUEST_STATUSES, "all"):
+        allowed = ", ".join((*REQUEST_STATUSES, "all"))
+        return error(f"status must be one of: {allowed}", status=422)
+
+    query = CustomMedicineRequest.query
+    if status != "all":
+        query = query.filter(CustomMedicineRequest.status == status)
+
+    requests = query.order_by(
+        db.case((CustomMedicineRequest.status == "pending", 0), else_=1),
+        CustomMedicineRequest.times_prescribed.desc(),
+        CustomMedicineRequest.last_requested_at.desc(),
+    ).all()
+
+    return success(
+        {
+            "items": [r.to_dict() for r in requests],
+            "pending": CustomMedicineRequest.query.filter_by(status="pending").count(),
+        }
+    )
+
+
+@pharmacy_bp.post("/medicine-requests/<int:request_id>/add")
+@role_required("pharmacist", "admin")
+def add_requested_medicine(request_id):
+    """Completes a doctor-added medicine and marks it reviewed.
+
+    The medicine already exists — it was added to the catalogue when the
+    doctor signed the prescription, so it is prescribable and searchable
+    already. What is missing is everything a prescription cannot carry:
+    category, manufacturer, price, the real dosage form. This fills those in
+    and records that a pharmacist has looked at it.
+
+    Anything omitted keeps whatever the medicine already has, so a pharmacist
+    correcting one field does not blank the rest.
+    """
+    medicine_request = db.session.get(CustomMedicineRequest, request_id)
+    if not medicine_request:
+        return error("Request not found", status=404)
+    if medicine_request.status == "added":
+        return error(
+            f"{medicine_request.medicine_name} has already been reviewed", status=409
+        )
+
+    brand = medicine_request.created_brand
+    if brand is None:
+        # A dismissed request being revived, or one raised before medicines
+        # were added automatically. Either way there is nothing to complete,
+        # so it is created here.
+        brand = MedicineBrand(
+            brand_name=medicine_request.medicine_name,
+            usage_instructions=medicine_request.instructions,
+            added_by_doctor=True,
+        )
+        brand.departments = (
+            [medicine_request.department] if medicine_request.department else []
+        )
+        brand.for_all_departments = medicine_request.department is None
+        db.session.add(brand)
+        db.session.flush()
+        medicine_request.created_brand_id = brand.id
+
+    payload = request.get_json(silent=True) or {}
+
+    if "brand_name" in payload:
+        brand_name = _clean(payload, "brand_name")
+        if not brand_name:
+            return error("Medicine name is required", status=422)
+        brand.brand_name = brand_name
+    if "strength" in payload:
+        brand.strength = _clean(payload, "strength", 80)
+
+    clash = MedicineBrand.query.filter(
+        MedicineBrand.brand_name == brand.brand_name,
+        MedicineBrand.strength.is_(None)
+        if brand.strength is None
+        else MedicineBrand.strength == brand.strength,
+        MedicineBrand.id != brand.id,
+    ).first()
+    if clash:
+        return error(
+            f"{clash.display_name} is already in the catalogue under that name and "
+            "strength. Give this one a different name, or dismiss it as a duplicate.",
+            status=409,
+        )
+
+    for field, limit in (
+        ("generic_name", 150),
+        ("used_for", 2000),
+        ("usage_instructions", 2000),
+        ("category", 100),
+        ("manufacturer", 150),
+    ):
+        if field in payload:
+            setattr(brand, field, _clean(payload, field, limit))
+
+    if "form" in payload:
+        if payload.get("form") not in FORMS:
+            return error(f"form must be one of: {', '.join(FORMS)}", status=422)
+        brand.form = payload["form"]
+
+    if "reorder_level" in payload:
+        level, failure = _read_reorder_level(payload, default=brand.reorder_level)
+        if failure:
+            return failure
+        brand.reorder_level = level
+
+    if "unit_price" in payload:
+        unit_price, failure = _read_unit_price(payload)
+        if failure:
+            return failure
+        brand.unit_price = unit_price
+
+    if "for_all_departments" in payload:
+        brand.for_all_departments = bool(payload["for_all_departments"])
+    if "department_ids" in payload:
+        departments, failure = _read_departments(payload)
+        if failure:
+            return failure
+        brand.departments = departments or []
+
+    if not brand.for_all_departments and not brand.departments:
+        return error(
+            "Choose at least one department, or mark it as stocked for all departments",
+            status=422,
+        )
+
+    # Reviewed by a pharmacist, so it is an ordinary catalogue medicine now
+    # and subject to the usual stock rules.
+    brand.added_by_doctor = False
+    brand.is_active = True
+
+    medicine_request.status = "added"
+    medicine_request.reviewed_by = int(get_jwt_identity())
+    medicine_request.reviewed_at = datetime.utcnow()
+    medicine_request.review_note = _clean(payload, "review_note", 255)
+
+    audit(
+        BRAND_UPDATED,
+        entity="medicine_brand",
+        entity_id=brand.id,
+        detail=f"Completed {brand.display_name} ({_department_label(brand)}) after a doctor added it",
+    )
+    audit(
+        CUSTOM_MEDICINE_ADDED,
+        entity="custom_medicine_request",
+        entity_id=medicine_request.id,
+        detail=(
+            f"{brand.display_name} reviewed by the pharmacy after being prescribed by "
+            f"hand {medicine_request.times_prescribed} time(s)"
+        ),
+    )
+
+    if medicine_request.doctor and medicine_request.doctor.user_id:
+        notify(
+            [medicine_request.doctor.user_id],
+            title="Medicine confirmed by the pharmacy",
+            body=(
+                f"{brand.display_name}, which you added while prescribing, has been "
+                "completed by the pharmacy and is a standard catalogue medicine now."
+            ),
+            category="pharmacy",
+            link="/dashboard/prescriptions",
+            exclude_user_id=get_jwt_identity(),
+        )
+
+    db.session.commit()
+    dashboard_changed("pharmacy_brand_updated")
+
+    branch, _ = _resolve_branch()
+    return success(
+        {
+            "request": medicine_request.to_dict(),
+            "brand": brand.to_dict(branch_id=branch.id if branch else None),
+        },
+        message=f"{brand.display_name} completed",
+        status=200,
+    )
+
+
+@pharmacy_bp.post("/medicine-requests/<int:request_id>/dismiss")
+@role_required("pharmacist", "admin")
+def dismiss_medicine_request(request_id):
+    """Rejects a doctor-added medicine and withdraws it from the catalogue.
+
+    For a duplicate of something already listed, a typo, or a name the
+    hospital will not carry. Because the medicine went into the catalogue when
+    the doctor signed for it, dismissing has to take it back out — otherwise
+    the rejection would be a note nobody acts on while doctors keep finding
+    it in search.
+
+    Withdrawn rather than deleted when it has already been prescribed: those
+    prescriptions name a real medicine and must keep resolving. The request
+    row stays either way, and its count keeps rising if doctors keep needing
+    it — a dismissal that turns out to be wrong shows itself rather than
+    hiding.
+    """
+    medicine_request = db.session.get(CustomMedicineRequest, request_id)
+    if not medicine_request:
+        return error("Request not found", status=404)
+    if medicine_request.status == "added":
+        return error(
+            "This medicine has already been reviewed and accepted. Edit or delete it "
+            "from the medicines list instead.",
+            status=409,
+        )
+
+    payload = request.get_json(silent=True) or {}
+    brand = medicine_request.created_brand
+    withdrawn = False
+
+    if brand is not None:
+        prescribed = (
+            db.session.query(GeneratedPrescription.id).filter_by(brand_id=brand.id).first()
+            or db.session.query(CasePrescription.id).filter_by(brand_id=brand.id).first()
+        )
+        if prescribed:
+            brand.is_active = False
+            withdrawn = True
+        else:
+            brand.departments = []
+            db.session.delete(brand)
+            medicine_request.created_brand_id = None
+
+    medicine_request.status = "dismissed"
+    medicine_request.reviewed_by = int(get_jwt_identity())
+    medicine_request.reviewed_at = datetime.utcnow()
+    medicine_request.review_note = _clean(payload, "review_note", 255)
+
+    audit(
+        CUSTOM_MEDICINE_DISMISSED,
+        entity="custom_medicine_request",
+        entity_id=medicine_request.id,
+        detail=(
+            f"{medicine_request.medicine_name} rejected and "
+            f"{'discontinued' if withdrawn else 'removed'} from the catalogue"
+            f"{f': {medicine_request.review_note}' if medicine_request.review_note else ''}"
+        ),
+    )
+    db.session.commit()
+    dashboard_changed("pharmacy_brand_deleted")
+
+    return success(
+        {**medicine_request.to_dict(), "withdrawn": withdrawn},
+        message=(
+            f"{medicine_request.medicine_name} discontinued — it has been prescribed, so "
+            "the record is kept but doctors can no longer select it."
+            if withdrawn
+            else f"{medicine_request.medicine_name} removed from the catalogue."
+        ),
+    )
 
 
 @pharmacy_bp.get("/departments")

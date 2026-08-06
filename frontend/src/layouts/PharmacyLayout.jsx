@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Navigate, Outlet } from "react-router-dom";
+import AppShell from "./AppShell";
 import NotificationMenu from "../components/NotificationMenu";
 import ProfileMenu from "../components/ProfileMenu";
 import PharmacySidebar from "../components/pharmacy/PharmacySidebar";
@@ -21,26 +22,24 @@ export default function PharmacyLayout() {
   if (!isAuthenticated) return <Navigate to="/login" replace />;
   if (user?.role !== "pharmacist") return <Navigate to="/dashboard" replace />;
 
-  return (
-    <div className="flex h-screen bg-slate-50">
-      <PharmacySidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-slate-100 bg-white px-8 py-4">
-          <div>
-            <p className="text-sm font-semibold text-slate-800">Pharmacy counter</p>
-            <p className="text-xs text-slate-400">
-              {user?.branch ? `Stock for ${user.branch}` : "No branch assigned"}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <NotificationMenu />
-            <ProfileMenu />
-          </div>
-        </header>
-        <main className="flex-1 overflow-y-auto px-8 py-6">
-          <Outlet />
-        </main>
+  const header = (
+    <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8 lg:py-4">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold text-slate-800">Pharmacy counter</p>
+        <p className="truncate text-xs text-slate-400">
+          {user?.branch ? `Stock for ${user.branch}` : "No branch assigned"}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <NotificationMenu />
+        <ProfileMenu />
       </div>
     </div>
+  );
+
+  return (
+    <AppShell sidebar={<PharmacySidebar />} header={header}>
+      <Outlet />
+    </AppShell>
   );
 }

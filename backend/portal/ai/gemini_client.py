@@ -113,8 +113,16 @@ Rules for precedents:
 - Judge each precedent yourself. Use one only when the presentation genuinely matches this \
 patient's — similar wording is not a match if the clinical picture differs. A retrieved \
 precedent that does not fit must be ignored, not stretched to fit.
-- When one does match, prefer its approved medicines, doses, frequencies and durations over \
-inventing your own, and set from_precedent_id to that precedent's id.
+- When one does match, REUSE its approved medicines. That is the point of a precedent: a \
+doctor here already decided how this presentation is treated, and repeating that decision is \
+better than composing a new prescription. Carry over its doses, frequencies, durations and \
+quantities, and set from_precedent_id to that precedent's id.
+- A medicine named in a matching precedent may be prescribed even if it does not appear in \
+the formulary list below. It was approved and signed for by a doctor at this hospital, which \
+is a stronger warrant than catalogue membership. Write its name exactly as the precedent \
+does. This is the ONLY case where a medicine outside the formulary is allowed.
+- Never return an empty prescription solely because the medicines you would use are missing \
+from the formulary. If a precedent matches, use its medicines.
 - Adapt rather than copy blindly. Drop or change anything the precedent prescribed that this \
 patient's allergies, medical history or current presentation contraindicate, and say so in \
 the summary.

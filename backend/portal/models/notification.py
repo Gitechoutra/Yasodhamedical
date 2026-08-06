@@ -18,6 +18,9 @@ class Notification(db.Model):
             "consultation",
             "report",
             "nursing",
+            # A doctor prescribed something the catalogue lacks, and the
+            # pharmacy is the only party who can close that gap.
+            "pharmacy",
             "system",
             name="notification_category",
         ),

@@ -238,6 +238,17 @@ class NursingAssignment(db.Model):
             "doctor": self.doctor.user.name if self.doctor and self.doctor.user else None,
             "consultation_id": self.consultation_id,
             "care_type": self.care_type,
+            # Where the patient is on the surgical pathway. Carried on the
+            # assignment because both ward lists render from this payload and
+            # both need to distinguish "still to be operated on" from "under
+            # observation" from "observation finished" without a second fetch.
+            "surgery_stage": self.patient.surgery_stage if self.patient else None,
+            "observation_ends_at": (
+                to_utc_iso(self.patient.observation_ends_at) if self.patient else None
+            ),
+            "observation_days_left": (
+                self.patient.observation_days_left if self.patient else None
+            ),
             "status": self.status,
             "starts_at": to_utc_iso(self.starts_at),
             "ends_at": to_utc_iso(self.ends_at),

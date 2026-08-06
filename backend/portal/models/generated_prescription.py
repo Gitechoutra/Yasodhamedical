@@ -1,6 +1,9 @@
 from datetime import datetime
 
 from portal.extensions import db
+# Reused rather than redefined: a prescription and the nursing medication
+# order it becomes must describe the same route with the same word.
+from portal.models.medication_order import ROUTE_LABELS, ROUTES  # noqa: F401
 
 
 class GeneratedPrescription(db.Model):
@@ -26,6 +29,14 @@ class GeneratedPrescription(db.Model):
     # dose is how much the patient takes at a time, quantity is what the
     # pharmacy hands over, and a counter cannot infer one from the other.
     quantity = db.Column(db.String(80), nullable=True)
+    # How it is given. Only worth recording when the medicine is entered by
+    # hand — a catalogue item already carries its dosage form.
+    route = db.Column(db.String(20), nullable=True)
+    # True when the doctor typed this medicine in rather than picking it from
+    # the pharmacy's catalogue. Explicit rather than inferred from a missing
+    # brand link: a line can lose its link when a medicine is archived, and
+    # that is not the same as a doctor deliberately going off-catalogue.
+    is_custom = db.Column(db.Boolean, nullable=False, default=False)
     # How to take it, printed on the label. Defaults from the catalogue item's
     # usage instructions and is editable per prescription, since the same drug
     # is given differently to different patients.
@@ -55,6 +66,9 @@ class GeneratedPrescription(db.Model):
             "frequency": self.frequency,
             "duration": self.duration,
             "quantity": self.quantity,
+            "route": self.route,
+            "route_label": ROUTE_LABELS.get(self.route) if self.route else None,
+            "is_custom": self.is_custom,
             # Falls back to the catalogue item's standing instructions when
             # the doctor did not write their own, so the label is never blank
             # for a medicine the pharmacy has instructions for.

@@ -148,7 +148,7 @@ export default function Appointments() {
       if (todayOnly) listParams.filter = "today";
       if (ongoingOnly) listParams.status = "in_progress";
       const requests = canScheduleAppointments
-        ? [fetchAppointments(listParams), fetchPatients()]
+        ? [fetchAppointments(listParams), fetchPatients("all")]
         : [fetchAppointments(listParams)];
       return Promise.all(requests)
         .then(([a, p]) => {

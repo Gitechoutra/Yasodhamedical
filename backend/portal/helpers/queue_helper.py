@@ -68,13 +68,18 @@ def claim_appointment_for(consultation, doctor, create_if_missing=True):
 
 
 def complete_appointment_for(consultation):
-    """Marks the consultation's appointment completed, which is what drops
-    the patient out of the Appointments queue. Returns it, or None."""
-    appointment = Appointment.query.filter_by(consultation_id=consultation.id).first()
-    if not appointment:
-        return None
-    appointment.status = "completed"
-    return appointment
+    """Marks the consultation's appointments completed, which is what drops
+    the patient out of the Appointments queue. Returns the first, or None.
+
+    Every appointment linked to the consultation is moved, not just one: a
+    patient queued a second time for a visit already under way has two rows
+    pointing at the same session, and leaving either behind is what strands a
+    finished patient in the queue.
+    """
+    appointments = Appointment.query.filter_by(consultation_id=consultation.id).all()
+    for appointment in appointments:
+        appointment.status = "completed"
+    return appointments[0] if appointments else None
 
 
 def reopen_appointment_for(consultation):
@@ -84,10 +89,9 @@ def reopen_appointment_for(consultation):
     consultation they had just ended because the patient is still in the room.
     Without it the queue would show the patient as finished while a recording
     is running, and the active-consultation count would disagree with the
-    consultations actually in progress. Returns the appointment, or None.
+    consultations actually in progress. Returns the first, or None.
     """
-    appointment = Appointment.query.filter_by(consultation_id=consultation.id).first()
-    if not appointment:
-        return None
-    appointment.status = "in_progress"
-    return appointment
+    appointments = Appointment.query.filter_by(consultation_id=consultation.id).all()
+    for appointment in appointments:
+        appointment.status = "in_progress"
+    return appointments[0] if appointments else None

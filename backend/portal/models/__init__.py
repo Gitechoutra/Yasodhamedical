@@ -16,6 +16,7 @@ from portal.models.conversation_message import ConversationMessage
 from portal.models.consultation_summary import ConsultationSummary
 from portal.models.generated_prescription import GeneratedPrescription
 from portal.models.clinical_precedent import ClinicalPrecedent
+from portal.models.custom_medicine_request import CustomMedicineRequest
 from portal.models.appointment import Appointment
 from portal.models.report import Report
 from portal.models.notification import Notification
@@ -48,6 +49,7 @@ __all__ = [
     "ConsultationSummary",
     "GeneratedPrescription",
     "ClinicalPrecedent",
+    "CustomMedicineRequest",
     "Appointment",
     "Report",
     "Notification",

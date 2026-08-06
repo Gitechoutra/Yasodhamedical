@@ -104,7 +104,8 @@ export default function CarePlanPanel({ assignment }) {
                 Not yet verified by the doctor
               </p>
             )}
-            <table className="w-full text-left text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[32rem] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
                   <th className="py-2 font-medium">Medicine</th>
@@ -124,6 +125,7 @@ export default function CarePlanPanel({ assignment }) {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </Section>

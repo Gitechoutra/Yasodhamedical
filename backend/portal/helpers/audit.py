@@ -21,6 +21,18 @@ from portal.models.audit_log import AuditLog
 PATIENT_CREATED = "patient.created"
 PATIENT_UPDATED = "patient.updated"
 PATIENT_REASSIGNED = "patient.reassigned"
+# Reception removing a registration that should never have existed -- a
+# duplicate or a mistyped walk-in. Only ever a patient with no clinical
+# record; see patient_routes.delete_patient.
+PATIENT_DELETED = "patient.deleted"
+# The surgical pathway. Recorded because deciding a patient needs surgery is
+# what opens the nurse hand-off, and discharging them is what ends it -- "who
+# put this patient under observation, and who took them off it" has to be
+# answerable without reading the nursing timeline.
+SURGERY_MARKED = "surgery.marked_required"
+SURGERY_CLEARED = "surgery.cleared"
+SURGERY_COMPLETED = "surgery.completed"
+PATIENT_DISCHARGED = "surgery.discharged"
 APPOINTMENT_CREATED = "appointment.created"
 CONSULTATION_STARTED = "consultation.started"
 CONSULTATION_ENDED = "consultation.ended"
@@ -33,6 +45,11 @@ PRESCRIPTION_UNVERIFIED = "prescription.unverified"
 PRECEDENT_LEARNED = "knowledge.precedent_learned"
 PRECEDENT_RETIRED = "knowledge.precedent_retired"
 PRECEDENT_ACCEPTED = "knowledge.precedent_accepted"
+# A doctor prescribed something the catalogue lacks, and what the pharmacy
+# decided about it. Recorded because it is how the medicine database grows.
+CUSTOM_MEDICINE_REQUESTED = "pharmacy.custom_medicine_requested"
+CUSTOM_MEDICINE_ADDED = "pharmacy.custom_medicine_added"
+CUSTOM_MEDICINE_DISMISSED = "pharmacy.custom_medicine_dismissed"
 CASE_CLOSED = "case.closed"
 CASE_REOPENED = "case.reopened"
 FINAL_PRESCRIPTION_EDITED = "case.final_prescription_edited"

@@ -13,6 +13,9 @@ export default function ConfirmDialog({
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   busy = false,
+  // Colours the confirm button red for an action that destroys something.
+  // Off by default, so every existing confirmation looks exactly as it did.
+  destructive = false,
   onCancel,
   onConfirm,
 }) {
@@ -45,7 +48,11 @@ export default function ConfirmDialog({
           onClick={onConfirm}
           disabled={busy}
           autoFocus
-          className="rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
+          className={`rounded-xl bg-gradient-to-r px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60 ${
+            destructive
+              ? "from-red-500 to-red-600"
+              : "from-emerald-500 to-emerald-600"
+          }`}
         >
           {busy ? "Working…" : confirmLabel}
         </button>

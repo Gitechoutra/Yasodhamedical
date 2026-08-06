@@ -62,7 +62,8 @@ export default function Reports() {
             when a case is closed and its final prescription is verified.
           </p>
         ) : (
-          <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[46rem] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
                 <th className="px-6 py-3 font-medium">Patient</th>
@@ -120,6 +121,7 @@ export default function Reports() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

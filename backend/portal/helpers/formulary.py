@@ -61,7 +61,13 @@ def department_brands(department_id, include_out_of_stock=False, active_only=Tru
     # Filtered in Python rather than SQL: stock is the sum of a brand's
     # unexpired batches, and expressing "unexpired" as a join here would
     # duplicate the rule that already lives on the model.
-    return [b for b in brands if b.total_quantity > 0]
+    #
+    # Doctor-added medicines are kept regardless. The pharmacy never bought
+    # them — a doctor entered one because the hospital does not carry it, and
+    # the patient sources it outside. Applying the stock rule would drop the
+    # medicine straight back out of reach the moment it was added, which is
+    # precisely the gap manual entry exists to close.
+    return [b for b in brands if b.total_quantity > 0 or b.added_by_doctor]
 
 
 def prescribable_for(doctor, include_out_of_stock=False):

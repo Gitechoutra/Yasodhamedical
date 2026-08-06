@@ -7,11 +7,12 @@ from flask_jwt_extended import get_jwt_identity
 from portal.ai import gemini_client
 from portal.extensions import db, socketio
 from portal.helpers.auth_helper import get_current_doctor
-from portal.helpers import knowledge_base
+from portal.helpers import custom_medicines, knowledge_base
 from portal.helpers.audit import (
     CONSULTATION_ENDED,
     CONSULTATION_RESUMED,
     CONSULTATION_STARTED,
+    CUSTOM_MEDICINE_REQUESTED,
     PRECEDENT_ACCEPTED,
     PRECEDENT_LEARNED,
     PRECEDENT_RETIRED,
@@ -41,6 +42,7 @@ from portal.models.consultation import Consultation
 from portal.models.consultation_summary import ConsultationSummary
 from portal.models.conversation_message import ConversationMessage
 from portal.models.generated_prescription import GeneratedPrescription
+from portal.models.medication_order import ROUTES
 from portal.models.patient import Patient
 from portal.websocket.consultation_socket import consultation_room
 
@@ -202,6 +204,11 @@ def start_consultation():
     return success(_room_payload(consultation, can_manage=True), message="Consultation started", status=201)
 
 
+def _department_of(consultation):
+    doctor = consultation.doctor
+    return doctor.department.name if doctor and doctor.department else "shared"
+
+
 def _is_owning_doctor(consultation):
     doctor = get_current_doctor()
     return bool(doctor and doctor.id == consultation.doctor_id)
@@ -353,31 +360,47 @@ def replace_prescriptions(consultation_id):
         if not name:
             return error(f"Item {index + 1} needs a medicine name", status=422)
 
-        # A saved prescription must name something the hospital stocks — that
-        # is what lets the pharmacy fill it without interpreting free text.
-        # The editor only lets a doctor pick from the catalogue, so reaching
-        # this means an AI suggestion nobody carries, and the doctor has to
-        # replace it rather than sign it off.
         brand, medicine_id = resolve_medicine(name, prescribable)
-        if brand is None and medicine_id is None:
+        is_custom = bool(item.get("is_custom"))
+
+        # An unrecognised name is only accepted when the doctor deliberately
+        # chose manual entry. Without that flag it is a typo or an AI
+        # suggestion nobody stocks, and silently accepting it would let the
+        # prescription drift away from what the pharmacy can dispense —
+        # while blocking a doctor who genuinely needs a medicine the
+        # catalogue lacks would be worse still. The flag is what separates
+        # the two, and it can only come from the manual-entry form.
+        if brand is None and medicine_id is None and not is_custom:
             return error(
-                f"“{name}” is not in this department's medicine list. Use the search "
-                "box to pick a medicine the pharmacy stocks, or ask the pharmacy to "
-                "add it.",
+                f"“{name}” is not in this department's medicine list. Pick a stocked "
+                "medicine from the search box, or use Add custom medicine to enter it "
+                "by hand.",
                 status=422,
+            )
+
+        route = (item.get("route") or "").strip().lower() or None
+        if route and route not in ROUTES:
+            return error(
+                f"Item {index + 1}: route must be one of {', '.join(ROUTES)}", status=422
             )
 
         cleaned.append(
             {
                 # Stored as the catalogue's own name when it resolved, so two
-                # doctors writing the same drug produce the same text.
+                # doctors writing the same drug produce the same text. A
+                # hand-entered one keeps the doctor's own wording.
                 "medicine_name": (brand.display_name if brand else name)[:150],
                 "brand_id": brand.id if brand else None,
                 "medicine_id": medicine_id,
+                # A name that turned out to be in the catalogue is not custom,
+                # whatever the client claimed — otherwise a stocked medicine
+                # would land in the pharmacy's review queue.
+                "is_custom": is_custom and brand is None and medicine_id is None,
                 "dose": (item.get("dose") or "").strip()[:255] or None,
                 "frequency": (item.get("frequency") or "").strip()[:255] or None,
                 "duration": (item.get("duration") or "").strip()[:255] or None,
                 "quantity": (item.get("quantity") or "").strip()[:80] or None,
+                "route": route,
                 "instructions": (item.get("instructions") or "").strip()[:MAX_TEXT] or None,
                 "notes": (item.get("notes") or "").strip()[:MAX_TEXT] or None,
             }
@@ -420,8 +443,16 @@ def verify_prescription(consultation_id):
     # before this consultation itself becomes one of them.
     accepted = knowledge_base.record_acceptance(consultation)
     precedent = knowledge_base.learn_from_approval(consultation)
+    # Any medicine the doctor had to type by hand is now a gap in the
+    # catalogue that the pharmacy can close.
+    raised = custom_medicines.record_from(consultation)
 
     patient_name = consultation.patient.name if consultation.patient else "patient"
+    doctor_display = (
+        consultation.doctor.user.name
+        if consultation.doctor and consultation.doctor.user
+        else "A doctor"
+    )
     audit(
         PRESCRIPTION_VERIFIED,
         entity="consultation",
@@ -448,6 +479,35 @@ def verify_prescription(consultation_id):
                 f"Precedent kept in the approved prescription for consultation "
                 f"{consultation.id} (accepted {used.times_accepted} time(s))"
             ),
+        )
+
+    if raised:
+        db.session.flush()  # assigns request ids for the audit rows
+        for request, brand in raised:
+            audit(
+                CUSTOM_MEDICINE_REQUESTED,
+                entity="custom_medicine_request",
+                entity_id=request.id,
+                detail=(
+                    f"{request.medicine_name} prescribed by hand and added to the "
+                    f"{_department_of(consultation)} catalogue (medicine {brand.id}) "
+                    "for the pharmacy to complete"
+                ),
+            )
+        # The medicine is already usable; what the pharmacy still owes it is
+        # the commercial detail a prescription cannot carry.
+        names = ", ".join(r.medicine_name for r, _ in raised)
+        notify(
+            role_user_ids("pharmacist"),
+            title="Medicine added by a doctor",
+            body=(
+                f"{doctor_display} prescribed {names}, which was not in the database. "
+                "It has been added automatically — please complete its category, "
+                "manufacturer and price."
+            ),
+            category="pharmacy",
+            link="/pharmacy/medicines/requests",
+            exclude_user_id=get_jwt_identity(),
         )
 
     db.session.commit()
@@ -653,9 +713,20 @@ def end_consultation(consultation_id):
     # invented an id would otherwise attach doctor-approved provenance to a
     # suggestion no doctor ever made.
     retrieved_ids = {precedent.id for precedent, _ in matches}
+    # Every medicine name any retrieved precedent approved. A precedent whose
+    # treatment includes a medicine the catalogue lacks must still be
+    # reusable — otherwise the approved case that matched is useless, which is
+    # exactly the failure this exists to prevent. Such a line is treated as a
+    # manual entry, so it saves and joins the catalogue on sign-off.
+    precedent_names = {
+        (medicine.get("medicine_name") or "").strip().lower()
+        for precedent, _ in matches
+        for medicine in precedent.medicine_list
+    }
     for item in ai_result.get("prescriptions") or []:
         medicine_name = item.get("medicine_name") or ""
         brand, medicine_id = resolve_medicine(medicine_name, prescribable)
+        from_precedent = medicine_name.strip().lower() in precedent_names
         cited = item.get("from_precedent_id")
         db.session.add(
             GeneratedPrescription(
@@ -665,6 +736,10 @@ def end_consultation(consultation_id):
                 # Normalised to the catalogue's own name when it resolved, so
                 # the pharmacy reads the same text it filed the medicine under.
                 medicine_name=(brand.display_name if brand else medicine_name)[:150],
+                # Carried over from an approved case but not in the catalogue:
+                # the same standing as a medicine the doctor typed in, and it
+                # joins the catalogue the same way when they sign it off.
+                is_custom=brand is None and medicine_id is None and from_precedent,
                 dose=item.get("dose"),
                 frequency=item.get("frequency"),
                 duration=item.get("duration"),

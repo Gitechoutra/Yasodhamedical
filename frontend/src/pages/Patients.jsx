@@ -4,20 +4,26 @@ import {
   HiOutlinePlus,
   HiOutlineCalendarDays,
   HiOutlineCamera,
+  HiOutlineCheckBadge,
   HiOutlineHeart,
   HiOutlinePencilSquare,
+  HiOutlineTrash,
 } from "react-icons/hi2";
 import Avatar from "../components/Avatar";
+import ConfirmDialog from "../components/ConfirmDialog";
 import Modal from "../components/Modal";
 import OpStatusBadge from "../components/OpStatusBadge";
+import SurgeryStageBadge from "../components/SurgeryStageBadge";
 import AssignNurseModal from "../components/nursing/AssignNurseModal";
 import EditPatientModal from "../components/EditPatientModal";
 import { useAuth } from "../context/AuthContext";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDoctors } from "../services/doctorService";
 import {
+  fetchPatientCounts,
   fetchPatients,
   createPatient,
+  deletePatient,
   uploadPatientPhoto,
   assignPatientDoctor,
 } from "../services/patientService";
@@ -239,12 +245,12 @@ function AssignDoctorCell({ patient, doctors, onAssigned }) {
   }
 
   return (
-    <div className="min-w-[12rem]">
+    <div className="w-full min-w-[11rem] max-w-[15rem]">
       <select
         value={patient.assigned_doctor_id ?? ""}
         onChange={handleChange}
         disabled={saving}
-        className={`w-full rounded-lg border px-2 py-1.5 text-xs outline-none transition focus:ring-2 focus:ring-brand-100 disabled:opacity-60 ${
+        className={`w-full truncate rounded-lg border px-2 py-1.5 text-xs outline-none transition focus:ring-2 focus:ring-brand-100 disabled:opacity-60 ${
           unassigned
             ? "border-amber-300 bg-amber-50 font-semibold text-amber-700"
             : "border-slate-200 text-slate-700"
@@ -273,25 +279,47 @@ export default function Patients() {
   // implicitly assigning them to themselves, so no picker is needed.
   const mustAssign = user?.role !== "doctor";
   // Handing a patient to a nurse is the treating doctor's call — the server
-  // rejects it from anyone else.
+  // rejects it from anyone else. It is also offered for surgery cases only
+  // (see the row below): nursing care is the post-operative watch, and the
+  // API refuses the hand-off for a patient who is not on that pathway. The
+  // pathway itself is driven from the consultation room.
   const canAssignNurse = user?.role === "doctor";
   // Reception typed these details in; the treating doctor may correct them
   // too. The server enforces the same pair.
   const canEditPatient = user?.role !== "nurse";
+  // Removing a registration is front-desk work — the same pair the server
+  // allows on the delete route. A doctor or nurse never sees the button.
+  const canDeletePatient = user?.role === "receptionist" || user?.role === "admin";
 
   const [patients, setPatients] = useState([]);
+  const [counts, setCounts] = useState(null);
   const [doctors, setDoctors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [nursePatient, setNursePatient] = useState(null);
   const [editPatient, setEditPatient] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
+  // Which side of the journey is on screen. Defaults to the patients whose
+  // consultation is finished — anyone still pending or in progress belongs to
+  // Appointments, and listing them here is what made the two sections
+  // disagree about where a patient was.
+  const [scope, setScope] = useState("consulted");
 
-  const load = useCallback((silent = false) => {
-    if (!silent) setLoading(true);
-    return fetchPatients()
-      .then(setPatients)
-      .finally(() => setLoading(false));
-  }, []);
+  const load = useCallback(
+    (silent = false) => {
+      if (!silent) setLoading(true);
+      return Promise.all([fetchPatients(scope), fetchPatientCounts()])
+        .then(([rows, totals]) => {
+          setPatients(rows);
+          setCounts(totals);
+        })
+        .finally(() => setLoading(false));
+    },
+    [scope]
+  );
 
   useEffect(() => {
     if (!mustAssign) return;
@@ -305,12 +333,37 @@ export default function Patients() {
   // Front desk registering a patient should show up here immediately.
   useLiveRefresh(load);
 
+  async function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setErrorMsg("");
+    setSuccessMsg("");
+    try {
+      await deletePatient(deleteTarget.id);
+      // Dropped from the table straight away, then the counts and the rest of
+      // the list are refetched so nothing on screen is left stale.
+      setPatients((rows) => rows.filter((p) => p.id !== deleteTarget.id));
+      setSuccessMsg(`${deleteTarget.name} was deleted.`);
+      setDeleteTarget(null);
+      load(true);
+    } catch (err) {
+      setErrorMsg(err.response?.data?.message || "Could not delete this patient.");
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Patients</h1>
-          <p className="mt-1 text-sm text-slate-500">{patients.length} total patients</p>
+          <p className="mt-1 text-sm text-slate-500">
+            {scope === "consulted"
+              ? "Patients whose consultation is complete"
+              : "Registered or in Appointments — not yet consulted"}
+          </p>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
@@ -321,7 +374,64 @@ export default function Patients() {
         </button>
       </div>
 
-      <div className="mt-6 rounded-2xl border border-slate-100 bg-white shadow-sm">
+      {/* A patient sits on exactly one side: in Appointments until their
+          consultation is finished, here afterwards. The tabs make that
+          visible rather than leaving the other half looking missing. */}
+      <div className="mt-5 flex flex-wrap gap-2">
+        {[
+          ["consulted", "Consulted", counts?.consulted],
+          ["awaiting", "Awaiting consultation", counts?.awaiting],
+        ].map(([value, label, count]) => (
+          <button
+            key={value}
+            onClick={() => setScope(value)}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+              scope === value
+                ? "bg-brand-600 text-white shadow-md"
+                : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+            }`}
+          >
+            {label}
+            {count != null && (
+              <span
+                className={`ml-2 rounded-full px-1.5 py-0.5 text-[11px] ${
+                  scope === value ? "bg-white/20" : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {scope === "awaiting" && (
+        <p className="mt-3 flex flex-wrap items-center gap-1.5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          These patients are still with Appointments. They move to Consulted once the doctor
+          completes their consultation.
+          <button
+            onClick={() => navigate("/dashboard/appointments")}
+            className="font-semibold underline underline-offset-2"
+          >
+            Open Appointments
+          </button>
+        </p>
+      )}
+
+      {errorMsg && (
+        <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{errorMsg}</p>
+      )}
+      {successMsg && (
+        <p
+          role="status"
+          className="mt-4 flex items-center gap-2 rounded-xl bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700"
+        >
+          <HiOutlineCheckBadge className="h-5 w-5 shrink-0" />
+          {successMsg}
+        </p>
+      )}
+
+      <div className="mt-5 rounded-2xl border border-slate-100 bg-white shadow-sm">
         {loading ? (
           <div className="space-y-2 p-6">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -329,46 +439,80 @@ export default function Patients() {
             ))}
           </div>
         ) : patients.length === 0 ? (
-          <p className="py-12 text-center text-sm text-slate-400">
-            No patients yet. Add one to get started.
+          <p className="mx-auto max-w-lg py-12 text-center text-sm text-slate-400">
+            {scope === "consulted"
+              ? counts?.awaiting
+                ? `No completed consultations yet. ${counts.awaiting} patient${
+                    counts.awaiting === 1 ? " is" : "s are"
+                  } still in Appointments — they appear here once their consultation is done.`
+                : "No patients have completed a consultation yet."
+              : "Nobody is waiting. Every registered patient has been consulted."}
           </p>
         ) : (
-          <table className="w-full text-left text-sm">
+          // One row, one line. Every cell is nowrap and the two that can hold
+          // arbitrarily long text (name, doctor) truncate instead of wrapping,
+          // so a long value can never push a row to double height and knock
+          // the columns out of line. The table keeps a minimum width and
+          // scrolls sideways below it rather than compressing.
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[56rem] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
-                <th className="px-6 py-3 font-medium">Patient</th>
-                <th className="px-6 py-3 font-medium">Age</th>
-                <th className="px-6 py-3 font-medium">Gender</th>
-                <th className="px-6 py-3 font-medium">Phone</th>
-                <th className="px-6 py-3 font-medium">Blood Group</th>
-                <th className="px-6 py-3 font-medium">OP Status</th>
-                {mustAssign && <th className="px-6 py-3 font-medium">Assigned Doctor</th>}
-                <th className="px-6 py-3 font-medium"></th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium">Patient</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium">Age</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium">Gender</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium">Phone</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium">Blood Group</th>
+                <th className="whitespace-nowrap px-4 py-3 font-medium">OP Status</th>
+                {mustAssign && (
+                  <th className="whitespace-nowrap px-4 py-3 font-medium">Assigned Doctor</th>
+                )}
+                <th className="whitespace-nowrap px-4 py-3 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
               {patients.map((p) => (
-                <tr key={p.id} className="border-b border-slate-50 last:border-0">
-                  <td className="px-6 py-3">
+                <tr
+                  key={p.id}
+                  className="border-b border-slate-50 align-middle transition last:border-0 hover:bg-slate-50/60"
+                >
+                  <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <Avatar name={p.name} imageUrl={p.photo_url} size="sm" />
-                      <div>
-                        <p className="font-medium text-slate-800">{p.name}</p>
-                        <p className="text-xs text-slate-400">{p.code}</p>
+                      <div className="shrink-0">
+                        <Avatar name={p.name} imageUrl={p.photo_url} size="sm" />
+                      </div>
+                      {/* Bounded so an unusually long name ellipsises rather
+                          than stretching the column or wrapping the row. */}
+                      <div className="min-w-0 max-w-[14rem]">
+                        <p className="truncate font-medium text-slate-800" title={p.name}>
+                          {p.name}
+                        </p>
+                        <p className="truncate text-xs text-slate-400">{p.code}</p>
+                        {/* Renders nothing unless this patient is on the
+                            surgical pathway, which most are not. */}
+                        <SurgeryStageBadge
+                          stage={p.surgery_stage}
+                          daysLeft={p.observation_days_left}
+                          className="mt-1"
+                        />
                       </div>
                     </div>
                   </td>
-                  <td className="px-6 py-3 text-slate-500">
+                  <td className="whitespace-nowrap px-4 py-3 text-slate-500">
                     {p.age != null ? `${p.age}` : "—"}
                   </td>
-                  <td className="px-6 py-3 capitalize text-slate-500">{p.gender || "—"}</td>
-                  <td className="px-6 py-3 text-slate-500">{p.phone || "—"}</td>
-                  <td className="px-6 py-3 text-slate-500">{p.blood_group || "—"}</td>
-                  <td className="px-6 py-3">
+                  <td className="whitespace-nowrap px-4 py-3 capitalize text-slate-500">
+                    {p.gender || "—"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-slate-500">{p.phone || "—"}</td>
+                  <td className="whitespace-nowrap px-4 py-3 text-slate-500">
+                    {p.blood_group || "—"}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3">
                     <OpStatusBadge status={p.op_status} />
                   </td>
                   {mustAssign && (
-                    <td className="px-6 py-3 text-slate-500">
+                    <td className="px-4 py-3 text-slate-500">
                       <AssignDoctorCell
                         patient={p}
                         doctors={doctors}
@@ -376,33 +520,48 @@ export default function Patients() {
                       />
                     </td>
                   )}
-                  <td className="px-6 py-3 text-right">
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                  <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <div className="flex flex-nowrap items-center justify-end gap-2">
                       {canScheduleAppointments && (
                         <button
                           onClick={() => navigate(`/dashboard/appointments?patient_id=${p.id}`)}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100"
+                          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100"
                         >
-                          <HiOutlineCalendarDays className="h-3.5 w-3.5" />
+                          <HiOutlineCalendarDays className="h-3.5 w-3.5 shrink-0" />
                           Create OP
                         </button>
                       )}
-                      {canAssignNurse && (
+                      {canAssignNurse && p.surgery_stage === "required" && (
                         <button
                           onClick={() => setNursePatient(p)}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-700 transition hover:bg-teal-100"
+                          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-700 transition hover:bg-teal-100"
                         >
-                          <HiOutlineHeart className="h-3.5 w-3.5" />
+                          <HiOutlineHeart className="h-3.5 w-3.5 shrink-0" />
                           Assign Nurse
                         </button>
                       )}
                       {canEditPatient && (
                         <button
                           onClick={() => setEditPatient(p)}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-200"
+                          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-200"
                         >
-                          <HiOutlinePencilSquare className="h-3.5 w-3.5" />
+                          <HiOutlinePencilSquare className="h-3.5 w-3.5 shrink-0" />
                           Edit
+                        </button>
+                      )}
+                      {canDeletePatient && (
+                        <button
+                          onClick={() => {
+                            setErrorMsg("");
+                            setSuccessMsg("");
+                            setDeleteTarget(p);
+                          }}
+                          title={`Delete ${p.name}`}
+                          aria-label={`Delete ${p.name}`}
+                          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-100"
+                        >
+                          <HiOutlineTrash className="h-3.5 w-3.5 shrink-0" />
+                          Delete
                         </button>
                       )}
                     </div>
@@ -411,6 +570,7 @@ export default function Patients() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -421,7 +581,12 @@ export default function Patients() {
           onClose={() => setShowAddModal(false)}
           onCreated={() => {
             setShowAddModal(false);
-            load();
+            // A patient who has just been registered has no completed
+            // consultation, so they belong to Awaiting. Switching to that tab
+            // means the person who registered them sees them, instead of
+            // watching them apparently not save. The scope change reloads.
+            if (scope === "awaiting") load();
+            else setScope("awaiting");
           }}
         />
       )}
@@ -437,10 +602,28 @@ export default function Patients() {
         />
       )}
 
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete patient"
+          message={
+            `Are you sure you want to delete this patient record?\n\n` +
+            `${deleteTarget.name} (${deleteTarget.code}) will be removed permanently, ` +
+            "along with any appointment they are queued for. This cannot be undone."
+          }
+          confirmLabel="Delete patient"
+          cancelLabel="Cancel"
+          destructive
+          busy={deleting}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={handleConfirmDelete}
+        />
+      )}
+
       {nursePatient && (
         <AssignNurseModal
           patientId={nursePatient.id}
           patientName={nursePatient.name}
+          observationDays={nursePatient.observation_days}
           onClose={() => setNursePatient(null)}
           onAssigned={(assignment) => {
             setNursePatient(null);
