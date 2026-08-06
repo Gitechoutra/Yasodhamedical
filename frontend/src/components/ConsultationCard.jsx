@@ -53,74 +53,69 @@ export default function ConsultationCard({ consultation, onDownloadReport, downl
   const dateLabel = when ? new Date(when).toLocaleString() : "—";
 
   return (
-    <div className="rounded-2xl border border-slate-100 bg-white shadow-sm">
-      <div className="flex items-start gap-4 p-5">
-        <Avatar name={patient.name || consultation.patient} imageUrl={patient.photo_url} size="lg" />
+    <div className="flex h-full flex-col rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:shadow-md">
+      <div className="flex flex-1 flex-col gap-4 p-5">
+        <div className="flex items-start gap-3">
+          <Avatar name={patient.name || consultation.patient} imageUrl={patient.photo_url} size="lg" />
 
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-0 flex-1">
             <p className="truncate font-semibold text-slate-900">
               {patient.name || consultation.patient}
             </p>
-            <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-              Completed
-            </span>
-            {/* Only when the case really has several — a lone "Session 1" tag
-                on an ordinary one-visit consultation is just noise. */}
-            {consultation.case?.session_count > 1 && consultation.session_number && (
-              <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700">
-                Session {consultation.session_number} of {consultation.case.session_count}
-              </span>
-            )}
-            {prescriptions.length > 0 && (
-              <span
-                title={
-                  consultation.prescription_verified
-                    ? `Verified by ${consultation.prescription_verified_by || "the treating doctor"}`
-                    : "The treating doctor has not signed off these medicines yet"
-                }
-                className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                  consultation.prescription_verified
-                    ? "bg-emerald-50 text-emerald-700"
-                    : "bg-amber-100 text-amber-700"
-                }`}
-              >
-                <HiOutlineCheckBadge className="h-3.5 w-3.5" />
-                {consultation.prescription_verified ? "Rx verified" : "Rx unverified"}
-              </span>
-            )}
-            {report && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700">
-                <HiOutlineDocumentText className="h-3.5 w-3.5" />
-                Report ready
-              </span>
-            )}
-          </div>
+            <p className="mt-0.5 text-xs text-slate-400">
+              {patient.code || `PAT${consultation.patient_id}`}
+              {patient.age != null && ` · ${patient.age} yrs`}
+              {patient.gender && ` · ${patient.gender}`}
+              {consultation.doctor && ` · ${consultation.doctor}`}
+            </p>
 
-          <p className="mt-0.5 text-xs text-slate-400">
-            {patient.code || `PAT${consultation.patient_id}`}
-            {patient.age != null && ` · ${patient.age} yrs`}
-            {patient.gender && ` · ${patient.gender}`}
-            {consultation.doctor && ` · ${consultation.doctor}`}
-          </p>
-
-          <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-slate-500">
-            <span>{dateLabel}</span>
-            <span className="inline-flex items-center gap-1">
-              <HiOutlineClock className="h-4 w-4 text-slate-400" />
-              {formatDuration(consultation.duration_seconds)}
-            </span>
-          </div>
-
-          {/* The one line a doctor scans for; the rest is behind the toggle. */}
-          <div className="mt-3">
-            <Section title="Diagnosis">
-              <TextOrDash value={summary?.possible_diagnosis} />
-            </Section>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                Completed
+              </span>
+              {/* Only when the case really has several — a lone "Session 1" tag
+                  on an ordinary one-visit consultation is just noise. */}
+              {consultation.case?.session_count > 1 && consultation.session_number && (
+                <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700">
+                  Session {consultation.session_number} of {consultation.case.session_count}
+                </span>
+              )}
+              {prescriptions.length > 0 && (
+                <span
+                  title={
+                    consultation.prescription_verified
+                      ? `Verified by ${consultation.prescription_verified_by || "the treating doctor"}`
+                      : "The treating doctor has not signed off these medicines yet"
+                  }
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                    consultation.prescription_verified
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}
+                >
+                  <HiOutlineCheckBadge className="h-3.5 w-3.5" />
+                  {consultation.prescription_verified ? "Rx verified" : "Rx unverified"}
+                </span>
+              )}
+              {report && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700">
+                  <HiOutlineDocumentText className="h-3.5 w-3.5" />
+                  Report ready
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="flex shrink-0 flex-col items-end gap-2">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-slate-500">
+          <span>{dateLabel}</span>
+          <span className="inline-flex items-center gap-1">
+            <HiOutlineClock className="h-4 w-4 text-slate-400" />
+            {formatDuration(consultation.duration_seconds)}
+          </span>
+        </div>
+
+        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
           {report ? (
             <button
               onClick={() => onDownloadReport(consultation)}

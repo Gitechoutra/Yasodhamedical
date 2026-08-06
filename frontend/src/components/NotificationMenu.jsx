@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   HiOutlineBell,
   HiOutlineCalendarDays,
@@ -7,17 +8,22 @@ import {
   HiOutlineDocumentChartBar,
   HiOutlineHeart,
   HiOutlineInformationCircle,
+  HiOutlineXMark,
 } from "react-icons/hi2";
 import useDismissable from "../hooks/useDismissable";
+import { onDashboardChanged } from "../services/socket";
 import {
   fetchNotifications,
   markAllNotificationsRead,
   markNotificationRead,
 } from "../services/notificationService";
 
-// How often the badge re-checks in the background. Long enough to be cheap,
-// short enough that a doctor sees a new patient in their queue promptly.
+// How often the badge re-checks in the background. The dashboard socket
+// ping (see below) covers most cases promptly; this is just the backstop.
 const POLL_INTERVAL_MS = 60_000;
+
+// How long a toast stays on screen before it dismisses itself.
+const TOAST_DURATION_MS = 3000;
 
 const CATEGORY_ICONS = {
   appointment: HiOutlineCalendarDays,
@@ -40,6 +46,52 @@ function timeAgo(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
+function Toast({ notification, onDismiss, onClick }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, TOAST_DURATION_MS);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+
+  const Icon = CATEGORY_ICONS[notification.category] || CATEGORY_ICONS.system;
+
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, y: -16, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 48, scale: 0.95, transition: { duration: 0.18 } }}
+      transition={{ duration: 0.25, ease: "easeOut" }}
+      className="pointer-events-auto flex w-full items-start gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-2xl shadow-slate-900/10"
+    >
+      <button
+        onClick={onClick}
+        className="flex min-w-0 flex-1 items-start gap-3 text-left"
+      >
+        <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-brand-600">
+          <Icon className="h-4 w-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-slate-900">
+            {notification.title}
+          </span>
+          {notification.body && (
+            <span className="mt-0.5 block line-clamp-2 text-xs leading-relaxed text-slate-500">
+              {notification.body}
+            </span>
+          )}
+        </span>
+      </button>
+      <button
+        onClick={onDismiss}
+        aria-label="Dismiss notification"
+        className="shrink-0 rounded-full p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+      >
+        <HiOutlineXMark className="h-4 w-4" />
+      </button>
+    </motion.div>
+  );
+}
+
 export default function NotificationMenu() {
   const navigate = useNavigate();
   const containerRef = useRef(null);
@@ -49,14 +101,40 @@ export default function NotificationMenu() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [toasts, setToasts] = useState([]);
+
+  // Tracks unread ids already shown, so only genuinely new arrivals pop a
+  // toast — not every notification that already existed before this page
+  // loaded.
+  const seenIdsRef = useRef(null);
 
   const close = useCallback(() => setIsOpen(false), []);
   useDismissable(containerRef, isOpen, close);
 
+  const dismissToast = useCallback((toastId) => {
+    setToasts((t) => t.filter((x) => x.toastId !== toastId));
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const { items: rows, unread_count: unread } = await fetchNotifications();
-      setItems(rows);
+      const unreadRows = rows.filter((r) => !r.is_read);
+
+      if (seenIdsRef.current === null) {
+        // First load: just note what's already there — no toast backlog.
+        seenIdsRef.current = new Set(unreadRows.map((r) => r.id));
+      } else {
+        const arrivals = unreadRows.filter((r) => !seenIdsRef.current.has(r.id));
+        if (arrivals.length) {
+          arrivals.forEach((r) => seenIdsRef.current.add(r.id));
+          setToasts((t) => [
+            ...t,
+            ...arrivals.map((n) => ({ toastId: `${n.id}-${Date.now()}`, notification: n })),
+          ]);
+        }
+      }
+
+      setItems(unreadRows);
       setUnreadCount(unread);
       setErrorMsg("");
     } catch {
@@ -65,11 +143,16 @@ export default function NotificationMenu() {
     }
   }, []);
 
-  // Keep the badge current even while the panel is closed.
+  // Keep the badge current even while the panel is closed: a server push
+  // when something notification-worthy happens, plus a slow poll backstop.
   useEffect(() => {
     load();
-    const id = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    const pollId = setInterval(load, POLL_INTERVAL_MS);
+    const unsubscribe = onDashboardChanged(() => load());
+    return () => {
+      clearInterval(pollId);
+      unsubscribe();
+    };
   }, [load]);
 
   async function handleToggle() {
@@ -84,24 +167,21 @@ export default function NotificationMenu() {
 
   async function handleOpenNotification(notification) {
     close();
-    if (!notification.is_read) {
-      // Optimistic: the row should stop looking unread the instant it's clicked.
-      setItems((rows) =>
-        rows.map((r) => (r.id === notification.id ? { ...r, is_read: true } : r))
-      );
-      setUnreadCount((c) => Math.max(0, c - 1));
-      try {
-        const { unread_count: unread } = await markNotificationRead(notification.id);
-        setUnreadCount(unread);
-      } catch {
-        load(); // roll back to whatever the server actually thinks
-      }
+    // Once opened, a notification is read — it drops out of the unread list
+    // immediately rather than lingering with a "read" style.
+    setItems((rows) => rows.filter((r) => r.id !== notification.id));
+    setUnreadCount((c) => Math.max(0, c - 1));
+    try {
+      const { unread_count: unread } = await markNotificationRead(notification.id);
+      setUnreadCount(unread);
+    } catch {
+      load(); // roll back to whatever the server actually thinks
     }
     if (notification.link) navigate(notification.link);
   }
 
   async function handleMarkAllRead() {
-    setItems((rows) => rows.map((r) => ({ ...r, is_read: true })));
+    setItems([]);
     setUnreadCount(0);
     try {
       await markAllNotificationsRead();
@@ -110,99 +190,109 @@ export default function NotificationMenu() {
     }
   }
 
+  function handleToastClick(notification) {
+    setToasts((t) => t.filter((x) => x.notification.id !== notification.id));
+    handleOpenNotification(notification);
+  }
+
   return (
-    <div ref={containerRef} className="relative">
-      <button
-        onClick={handleToggle}
-        aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications"}
-        aria-expanded={isOpen}
-        className={`relative grid h-10 w-10 place-items-center rounded-full transition hover:bg-slate-50 ${
-          isOpen ? "bg-slate-100 text-slate-700" : "text-slate-500"
-        }`}
-      >
-        <HiOutlineBell className="h-5 w-5" />
-        {unreadCount > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white">
-            {unreadCount > 9 ? "9+" : unreadCount}
-          </span>
-        )}
-      </button>
+    <>
+      {/* Fixed to the viewport rather than the bell, so a toast is visible
+          no matter where in the layout this component is mounted. */}
+      <div className="pointer-events-none fixed right-4 top-4 z-100 flex w-full max-w-sm flex-col gap-2 sm:right-6 sm:top-6">
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <Toast
+              key={t.toastId}
+              notification={t.notification}
+              onDismiss={() => dismissToast(t.toastId)}
+              onClick={() => handleToastClick(t.notification)}
+            />
+          ))}
+        </AnimatePresence>
+      </div>
 
-      {isOpen && (
-        <div className="absolute right-0 z-50 mt-2 w-88 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl shadow-slate-900/10">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-            <p className="text-sm font-semibold text-slate-900">Notifications</p>
-            {unreadCount > 0 && (
-              <button
-                onClick={handleMarkAllRead}
-                className="text-xs font-semibold text-brand-600 transition hover:text-brand-700"
-              >
-                Mark all read
-              </button>
-            )}
-          </div>
+      <div ref={containerRef} className="relative">
+        <button
+          onClick={handleToggle}
+          aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications"}
+          aria-expanded={isOpen}
+          className={`relative grid h-10 w-10 place-items-center rounded-full transition hover:bg-slate-50 ${
+            isOpen ? "bg-slate-100 text-slate-700" : "text-slate-500"
+          }`}
+        >
+          <HiOutlineBell className="h-5 w-5" />
+          {unreadCount > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 grid h-4.5 min-w-4.5 place-items-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white">
+              {unreadCount > 9 ? "9+" : unreadCount}
+            </span>
+          )}
+        </button>
 
-          <div className="max-h-96 overflow-y-auto">
-            {loading && items.length === 0 ? (
-              <div className="space-y-2 p-4">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="h-12 animate-pulse rounded-lg bg-slate-100" />
-                ))}
-              </div>
-            ) : errorMsg ? (
-              <p className="px-4 py-10 text-center text-sm text-red-600">{errorMsg}</p>
-            ) : items.length === 0 ? (
-              <p className="px-4 py-10 text-center text-sm text-slate-400">
-                You're all caught up. New patients in your queue and completed
-                consultations will show up here.
-              </p>
-            ) : (
-              items.map((n) => {
-                const Icon = CATEGORY_ICONS[n.category] || CATEGORY_ICONS.system;
-                return (
-                  <button
-                    key={n.id}
-                    onClick={() => handleOpenNotification(n)}
-                    className={`flex w-full items-start gap-3 border-b border-slate-50 px-4 py-3 text-left transition hover:bg-slate-50 ${
-                      n.is_read ? "" : "bg-brand-50/50"
-                    }`}
-                  >
-                    <span
-                      className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full ${
-                        n.is_read ? "bg-slate-100 text-slate-400" : "bg-brand-100 text-brand-600"
-                      }`}
+        {isOpen && (
+          <div className="absolute right-0 z-50 mt-2 w-88 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl shadow-slate-900/10">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-900">Notifications</p>
+              {unreadCount > 0 && (
+                <button
+                  onClick={handleMarkAllRead}
+                  className="text-xs font-semibold text-brand-600 transition hover:text-brand-700"
+                >
+                  Mark all read
+                </button>
+              )}
+            </div>
+
+            <div className="max-h-96 overflow-y-auto">
+              {loading && items.length === 0 ? (
+                <div className="space-y-2 p-4">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="h-12 animate-pulse rounded-lg bg-slate-100" />
+                  ))}
+                </div>
+              ) : errorMsg ? (
+                <p className="px-4 py-10 text-center text-sm text-red-600">{errorMsg}</p>
+              ) : items.length === 0 ? (
+                <p className="px-4 py-10 text-center text-sm text-slate-400">
+                  You're all caught up. New patients in your queue and completed
+                  consultations will show up here.
+                </p>
+              ) : (
+                items.map((n) => {
+                  const Icon = CATEGORY_ICONS[n.category] || CATEGORY_ICONS.system;
+                  return (
+                    <button
+                      key={n.id}
+                      onClick={() => handleOpenNotification(n)}
+                      className="flex w-full items-start gap-3 border-b border-slate-50 bg-brand-50/50 px-4 py-3 text-left transition hover:bg-slate-50"
                     >
-                      <Icon className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-2">
-                        <span
-                          className={`truncate text-sm ${
-                            n.is_read ? "font-medium text-slate-600" : "font-semibold text-slate-900"
-                          }`}
-                        >
-                          {n.title}
-                        </span>
-                        {!n.is_read && (
+                      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-brand-600">
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center gap-2">
+                          <span className="truncate text-sm font-semibold text-slate-900">
+                            {n.title}
+                          </span>
                           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
-                        )}
-                      </span>
-                      {n.body && (
-                        <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
-                          {n.body}
                         </span>
-                      )}
-                      <span className="mt-1 block text-[11px] text-slate-400">
-                        {timeAgo(n.created_at)}
+                        {n.body && (
+                          <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
+                            {n.body}
+                          </span>
+                        )}
+                        <span className="mt-1 block text-[11px] text-slate-400">
+                          {timeAgo(n.created_at)}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                );
-              })
-            )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   );
 }

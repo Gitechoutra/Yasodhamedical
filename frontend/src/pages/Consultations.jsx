@@ -180,9 +180,9 @@ export default function Consultations() {
 
       <div className="mt-5">
         {loading ? (
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-40 animate-pulse rounded-2xl bg-slate-100" />
+              <div key={i} className="h-56 animate-pulse rounded-2xl bg-slate-100" />
             ))}
           </div>
         ) : visible.length === 0 ? (
@@ -194,7 +194,7 @@ export default function Consultations() {
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {visible.map((c) => (
               <ConsultationCard
                 key={c.id}

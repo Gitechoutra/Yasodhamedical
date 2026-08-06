@@ -1,19 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  HiOutlinePlus,
-  HiOutlineCalendarDays,
-  HiOutlineCamera,
-  HiOutlineCheckBadge,
-  HiOutlineHeart,
-  HiOutlinePencilSquare,
-  HiOutlineTrash,
-} from "react-icons/hi2";
+import { HiOutlinePlus, HiOutlineCamera, HiOutlineCheckBadge } from "react-icons/hi2";
 import Avatar from "../components/Avatar";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Modal from "../components/Modal";
-import OpStatusBadge from "../components/OpStatusBadge";
-import SurgeryStageBadge from "../components/SurgeryStageBadge";
+import PatientCard from "../components/PatientCard";
 import AssignNurseModal from "../components/nursing/AssignNurseModal";
 import EditPatientModal from "../components/EditPatientModal";
 import { useAuth } from "../context/AuthContext";
@@ -222,53 +213,6 @@ function AddPatientModal({ onClose, onCreated, doctors, mustAssign }) {
   );
 }
 
-function AssignDoctorCell({ patient, doctors, onAssigned }) {
-  const [saving, setSaving] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-  // Highlighted, because an unassigned patient is invisible to every doctor
-  // until the front desk routes them — it needs to look like an open task.
-  const unassigned = !patient.assigned_doctor;
-
-  async function handleChange(e) {
-    const doctorId = e.target.value;
-    if (!doctorId) return;
-    setSaving(true);
-    setErrorMsg("");
-    try {
-      await assignPatientDoctor(patient.id, doctorId);
-      onAssigned();
-    } catch (err) {
-      setErrorMsg(err.response?.data?.message || "Could not save assignment.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="w-full min-w-[11rem] max-w-[15rem]">
-      <select
-        value={patient.assigned_doctor_id ?? ""}
-        onChange={handleChange}
-        disabled={saving}
-        className={`w-full truncate rounded-lg border px-2 py-1.5 text-xs outline-none transition focus:ring-2 focus:ring-brand-100 disabled:opacity-60 ${
-          unassigned
-            ? "border-amber-300 bg-amber-50 font-semibold text-amber-700"
-            : "border-slate-200 text-slate-700"
-        }`}
-      >
-        <option value="">Unassigned — pick a doctor</option>
-        {doctors.map((d) => (
-          <option key={d.id} value={d.id}>
-            {d.name}
-            {d.department ? ` (${d.department})` : ""}
-          </option>
-        ))}
-      </select>
-      {errorMsg && <p className="mt-1 text-[11px] text-red-600">{errorMsg}</p>}
-    </div>
-  );
-}
-
 export default function Patients() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -431,145 +375,51 @@ export default function Patients() {
         </p>
       )}
 
-      <div className="mt-5 rounded-2xl border border-slate-100 bg-white shadow-sm">
+      <div className="mt-5">
         {loading ? (
-          <div className="space-y-2 p-6">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-12 animate-pulse rounded-lg bg-slate-100" />
+              <div key={i} className="h-56 animate-pulse rounded-2xl bg-slate-100" />
             ))}
           </div>
         ) : patients.length === 0 ? (
-          <p className="mx-auto max-w-lg py-12 text-center text-sm text-slate-400">
-            {scope === "consulted"
-              ? counts?.awaiting
-                ? `No completed consultations yet. ${counts.awaiting} patient${
-                    counts.awaiting === 1 ? " is" : "s are"
-                  } still in Appointments — they appear here once their consultation is done.`
-                : "No patients have completed a consultation yet."
-              : "Nobody is waiting. Every registered patient has been consulted."}
-          </p>
+          <div className="rounded-2xl border border-slate-100 bg-white py-16 text-center shadow-sm">
+            <p className="mx-auto max-w-lg text-sm text-slate-400">
+              {scope === "consulted"
+                ? counts?.awaiting
+                  ? `No completed consultations yet. ${counts.awaiting} patient${
+                      counts.awaiting === 1 ? " is" : "s are"
+                    } still in Appointments — they appear here once their consultation is done.`
+                  : "No patients have completed a consultation yet."
+                : "Nobody is waiting. Every registered patient has been consulted."}
+            </p>
+          </div>
         ) : (
-          // One row, one line. Every cell is nowrap and the two that can hold
-          // arbitrarily long text (name, doctor) truncate instead of wrapping,
-          // so a long value can never push a row to double height and knock
-          // the columns out of line. The table keeps a minimum width and
-          // scrolls sideways below it rather than compressing.
-          <div className="overflow-x-auto">
-          <table className="w-full min-w-[56rem] text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
-                <th className="whitespace-nowrap px-4 py-3 font-medium">Patient</th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium">Age</th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium">Gender</th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium">Phone</th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium">Blood Group</th>
-                <th className="whitespace-nowrap px-4 py-3 font-medium">OP Status</th>
-                {mustAssign && (
-                  <th className="whitespace-nowrap px-4 py-3 font-medium">Assigned Doctor</th>
-                )}
-                <th className="whitespace-nowrap px-4 py-3 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {patients.map((p) => (
-                <tr
-                  key={p.id}
-                  className="border-b border-slate-50 align-middle transition last:border-0 hover:bg-slate-50/60"
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="shrink-0">
-                        <Avatar name={p.name} imageUrl={p.photo_url} size="sm" />
-                      </div>
-                      {/* Bounded so an unusually long name ellipsises rather
-                          than stretching the column or wrapping the row. */}
-                      <div className="min-w-0 max-w-[14rem]">
-                        <p className="truncate font-medium text-slate-800" title={p.name}>
-                          {p.name}
-                        </p>
-                        <p className="truncate text-xs text-slate-400">{p.code}</p>
-                        {/* Renders nothing unless this patient is on the
-                            surgical pathway, which most are not. */}
-                        <SurgeryStageBadge
-                          stage={p.surgery_stage}
-                          daysLeft={p.observation_days_left}
-                          className="mt-1"
-                        />
-                      </div>
-                    </div>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-500">
-                    {p.age != null ? `${p.age}` : "—"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 capitalize text-slate-500">
-                    {p.gender || "—"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-500">{p.phone || "—"}</td>
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-500">
-                    {p.blood_group || "—"}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    <OpStatusBadge status={p.op_status} />
-                  </td>
-                  {mustAssign && (
-                    <td className="px-4 py-3 text-slate-500">
-                      <AssignDoctorCell
-                        patient={p}
-                        doctors={doctors}
-                        onAssigned={() => load(true)}
-                      />
-                    </td>
-                  )}
-                  <td className="whitespace-nowrap px-4 py-3 text-right">
-                    <div className="flex flex-nowrap items-center justify-end gap-2">
-                      {canScheduleAppointments && (
-                        <button
-                          onClick={() => navigate(`/dashboard/appointments?patient_id=${p.id}`)}
-                          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100"
-                        >
-                          <HiOutlineCalendarDays className="h-3.5 w-3.5 shrink-0" />
-                          Create OP
-                        </button>
-                      )}
-                      {canAssignNurse && p.surgery_stage === "required" && (
-                        <button
-                          onClick={() => setNursePatient(p)}
-                          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-700 transition hover:bg-teal-100"
-                        >
-                          <HiOutlineHeart className="h-3.5 w-3.5 shrink-0" />
-                          Assign Nurse
-                        </button>
-                      )}
-                      {canEditPatient && (
-                        <button
-                          onClick={() => setEditPatient(p)}
-                          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-200"
-                        >
-                          <HiOutlinePencilSquare className="h-3.5 w-3.5 shrink-0" />
-                          Edit
-                        </button>
-                      )}
-                      {canDeletePatient && (
-                        <button
-                          onClick={() => {
-                            setErrorMsg("");
-                            setSuccessMsg("");
-                            setDeleteTarget(p);
-                          }}
-                          title={`Delete ${p.name}`}
-                          aria-label={`Delete ${p.name}`}
-                          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-100"
-                        >
-                          <HiOutlineTrash className="h-3.5 w-3.5 shrink-0" />
-                          Delete
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {patients.map((p) => (
+              <PatientCard
+                key={p.id}
+                patient={p}
+                doctors={doctors}
+                mustAssign={mustAssign}
+                canScheduleAppointments={canScheduleAppointments}
+                canAssignNurse={canAssignNurse}
+                canEditPatient={canEditPatient}
+                canDeletePatient={canDeletePatient}
+                onCreateOp={() => navigate(`/dashboard/appointments?patient_id=${p.id}`)}
+                onAssignNurse={() => setNursePatient(p)}
+                onEdit={() => setEditPatient(p)}
+                onDelete={() => {
+                  setErrorMsg("");
+                  setSuccessMsg("");
+                  setDeleteTarget(p);
+                }}
+                onAssignDoctor={async (patientId, doctorId) => {
+                  await assignPatientDoctor(patientId, doctorId);
+                  load(true);
+                }}
+              />
+            ))}
           </div>
         )}
       </div>

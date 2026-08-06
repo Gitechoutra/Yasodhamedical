@@ -38,7 +38,6 @@ export default function NursingMonitor() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
-  const [refreshedAt, setRefreshedAt] = useState(null);
 
   const load = useCallback(
     (silent = false) => {
@@ -48,7 +47,6 @@ export default function NursingMonitor() {
           setAssignments(rows);
           setSummary(stats);
           setErrorMsg("");
-          setRefreshedAt(new Date());
         })
         .catch(() => setErrorMsg("Could not load nursing records."))
         .finally(() => setLoading(false));
@@ -74,10 +72,12 @@ export default function NursingMonitor() {
         </div>
         <button
           onClick={() => load()}
+          title="Refresh"
+          aria-label="Refresh"
           className="flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
         >
           <HiOutlineArrowPath className="h-3.5 w-3.5" />
-          {refreshedAt ? `Updated ${refreshedAt.toLocaleTimeString()}` : "Refresh"}
+          Refresh
         </button>
       </div>
 

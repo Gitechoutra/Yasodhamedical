@@ -51,7 +51,7 @@ export default function AppointmentCard({ appointment, isNext, onStart, onResume
 
   return (
     <div
-      className={`rounded-2xl border bg-white p-5 shadow-sm transition ${
+      className={`flex h-full flex-col gap-4 rounded-2xl border bg-white p-5 shadow-sm transition hover:shadow-md ${
         ongoing
           ? "border-emerald-200 ring-1 ring-emerald-100"
           : isNext
@@ -59,8 +59,8 @@ export default function AppointmentCard({ appointment, isNext, onStart, onResume
             : "border-slate-100"
       }`}
     >
-      <div className="flex items-start gap-4">
-        <div className="relative">
+      <div className="flex items-start gap-3">
+        <div className="relative shrink-0">
           <Avatar name={patient.name || appointment.patient} imageUrl={patient.photo_url} size="lg" />
           {appointment.queue_number != null && (
             <span
@@ -73,10 +73,11 @@ export default function AppointmentCard({ appointment, isNext, onStart, onResume
         </div>
 
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="truncate font-semibold text-slate-900">
-              {patient.name || appointment.patient}
-            </p>
+          <p className="truncate font-semibold text-slate-900">
+            {patient.name || appointment.patient}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-400">{patient.code || `PAT${appointment.patient_id}`}</p>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${status.className}`}>
               {status.label}
             </span>
@@ -93,56 +94,55 @@ export default function AppointmentCard({ appointment, isNext, onStart, onResume
               <OpStatusBadge status={appointment.patient_op_status} />
             )}
           </div>
-          <p className="mt-0.5 text-xs text-slate-400">{patient.code || `PAT${appointment.patient_id}`}</p>
-
-          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Detail label="Age" value={patient.age != null ? `${patient.age} yrs` : null} />
-            <Detail label="Gender" value={patient.gender} />
-            <Detail label="Appointment" value={appointmentTime} />
-            <Detail
-              label="Queue"
-              value={appointment.queue_number != null ? `#${appointment.queue_number}` : "In room"}
-            />
-          </div>
-
-          {appointment.reason && (
-            <p className="mt-3 text-sm text-slate-500">
-              <span className="font-medium text-slate-600">Reason:</span> {appointment.reason}
-            </p>
-          )}
         </div>
+      </div>
 
-        <div className="shrink-0">
-          {ongoing ? (
-            <button
-              onClick={() => onResume(appointment)}
-              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
-            >
-              <HiOutlineArrowRightCircle className="h-4.5 w-4.5" />
-              Resume Consultation
-            </button>
-          ) : canStart ? (
-            <button
-              onClick={() => onStart(appointment)}
-              disabled={busy}
-              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
-            >
-              {busy ? (
-                <>
-                  <HiOutlineClock className="h-4.5 w-4.5" />
-                  Starting…
-                </>
-              ) : (
-                <>
-                  <HiOutlinePlay className="h-4.5 w-4.5" />
-                  Start Consultation
-                </>
-              )}
-            </button>
-          ) : (
-            <span className="text-xs font-semibold text-slate-400">{status.label}</span>
-          )}
-        </div>
+      <div className="grid grid-cols-2 gap-4">
+        <Detail label="Age" value={patient.age != null ? `${patient.age} yrs` : null} />
+        <Detail label="Gender" value={patient.gender} />
+        <Detail label="Appointment" value={appointmentTime} />
+        <Detail
+          label="Queue"
+          value={appointment.queue_number != null ? `#${appointment.queue_number}` : "In room"}
+        />
+      </div>
+
+      {appointment.reason && (
+        <p className="text-sm text-slate-500">
+          <span className="font-medium text-slate-600">Reason:</span> {appointment.reason}
+        </p>
+      )}
+
+      <div className="mt-auto pt-1">
+        {ongoing ? (
+          <button
+            onClick={() => onResume(appointment)}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
+          >
+            <HiOutlineArrowRightCircle className="h-4.5 w-4.5" />
+            Resume Consultation
+          </button>
+        ) : canStart ? (
+          <button
+            onClick={() => onStart(appointment)}
+            disabled={busy}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
+          >
+            {busy ? (
+              <>
+                <HiOutlineClock className="h-4.5 w-4.5" />
+                Starting…
+              </>
+            ) : (
+              <>
+                <HiOutlinePlay className="h-4.5 w-4.5" />
+                Start Consultation
+              </>
+            )}
+          </button>
+        ) : (
+          <span className="text-xs font-semibold text-slate-400">{status.label}</span>
+        )}
       </div>
     </div>
   );

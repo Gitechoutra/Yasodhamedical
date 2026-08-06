@@ -246,9 +246,9 @@ export default function Appointments() {
 
       <div className="mt-6">
         {loading ? (
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-36 animate-pulse rounded-2xl bg-slate-100" />
+              <div key={i} className="h-64 animate-pulse rounded-2xl bg-slate-100" />
             ))}
           </div>
         ) : appointments.length === 0 ? (
@@ -262,7 +262,7 @@ export default function Appointments() {
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {appointments.map((a) => (
               <AppointmentCard
                 key={a.id}

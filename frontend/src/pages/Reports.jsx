@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { HiOutlineArrowDownTray } from "react-icons/hi2";
+import ReportCard from "../components/ReportCard";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchReports, downloadReport } from "../services/reportService";
 
@@ -48,79 +47,31 @@ export default function Reports() {
         {todaysReports} generated today · {reports.length} total
       </p>
 
-      <div className="mt-6 rounded-2xl border border-slate-100 bg-white shadow-sm">
+      <div className="mt-6">
         {loading ? (
-          <div className="space-y-2 p-6">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-12 animate-pulse rounded-lg bg-slate-100" />
+              <div key={i} className="h-44 animate-pulse rounded-2xl bg-slate-100" />
             ))}
           </div>
         ) : reports.length === 0 ? (
-          <p className="mx-auto max-w-xl py-12 text-center text-sm text-slate-400">
-            No reports generated yet. A single-session report appears here once a doctor
-            prints or downloads a completed consultation; the full-treatment report appears
-            when a case is closed and its final prescription is verified.
-          </p>
+          <div className="rounded-2xl border border-slate-100 bg-white py-16 text-center shadow-sm">
+            <p className="mx-auto max-w-xl text-sm text-slate-400">
+              No reports generated yet. A single-session report appears here once a doctor
+              prints or downloads a completed consultation; the full-treatment report appears
+              when a case is closed and its final prescription is verified.
+            </p>
+          </div>
         ) : (
-          <div className="overflow-x-auto">
-          <table className="w-full min-w-[46rem] text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
-                <th className="px-6 py-3 font-medium">Patient</th>
-                <th className="px-6 py-3 font-medium">Type</th>
-                <th className="px-6 py-3 font-medium">Doctor</th>
-                <th className="px-6 py-3 font-medium">Generated</th>
-                <th className="px-6 py-3 font-medium"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {reports.map((r) => (
-                <tr key={r.id} className="border-b border-slate-50 last:border-0">
-                  <td className="px-6 py-3 font-medium text-slate-800">
-                    <Link
-                      to={
-                        r.kind === "case"
-                          ? `/dashboard/cases/${r.case_id}`
-                          : `/dashboard/consultations/${r.consultation_id}`
-                      }
-                      className="transition hover:text-brand-700"
-                    >
-                      {r.patient}
-                    </Link>
-                  </td>
-                  {/* A single visit's report and the consolidated report for a
-                      whole course of treatment are very different documents,
-                      and both land in this one list. */}
-                  <td className="px-6 py-3">
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        r.kind === "case"
-                          ? "bg-brand-50 text-brand-700"
-                          : "bg-slate-100 text-slate-600"
-                      }`}
-                    >
-                      {r.kind === "case" ? "Full treatment" : "Single session"}
-                    </span>
-                    <span className="ml-2 text-xs text-slate-400">{r.label}</span>
-                  </td>
-                  <td className="px-6 py-3 text-slate-500">{r.doctor}</td>
-                  <td className="px-6 py-3 text-slate-500">
-                    {new Date(r.generated_at).toLocaleString()}
-                  </td>
-                  <td className="px-6 py-3 text-right">
-                    <button
-                      onClick={() => handleDownload(r)}
-                      disabled={downloadingId === r.id}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 disabled:opacity-60"
-                    >
-                      <HiOutlineArrowDownTray className="h-3.5 w-3.5" />
-                      {downloadingId === r.id ? "Downloading…" : "Download"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {reports.map((r) => (
+              <ReportCard
+                key={r.id}
+                report={r}
+                downloading={downloadingId === r.id}
+                onDownload={handleDownload}
+              />
+            ))}
           </div>
         )}
       </div>

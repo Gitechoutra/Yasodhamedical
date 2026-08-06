@@ -31,7 +31,7 @@ function StatusBadge({ status }) {
 export default function Dashboard() {
   const { user } = useAuth();
   // Counts refresh themselves on server pushes, tab focus and a slow poll.
-  const { summary, loading, errorMsg, refreshedAt, refresh } = useLiveSummary();
+  const { summary, loading, errorMsg, refresh } = useLiveSummary();
 
   return (
     <div>
@@ -49,15 +49,12 @@ export default function Dashboard() {
 
         <button
           onClick={refresh}
-          title={
-            refreshedAt
-              ? `Updated at ${refreshedAt.toLocaleTimeString()} — updates automatically`
-              : "Refresh"
-          }
+          title="Refresh"
+          aria-label="Refresh"
           className="flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
         >
           <HiOutlineArrowPath className="h-3.5 w-3.5" />
-          {refreshedAt ? `Updated ${refreshedAt.toLocaleTimeString()}` : "Refresh"}
+          Refresh
         </button>
       </div>
 
