@@ -62,7 +62,7 @@ export default function StockIn() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="text-2xl font-bold text-slate-900">Stock in</h1>
+      <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Stock in</h1>
       <p className="mt-1 text-sm text-slate-500">
         Receive a batch into this branch. Same batch number and expiry tops up
         the existing row rather than creating a duplicate.

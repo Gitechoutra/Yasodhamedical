@@ -114,7 +114,7 @@ function AddPatientModal({ onClose, onCreated, doctors, mustAssign }) {
           <input required className={inputClass} value={form.name} onChange={update("name")} />
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">
               Date of Birth
@@ -138,7 +138,7 @@ function AddPatientModal({ onClose, onCreated, doctors, mustAssign }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Gender</label>
             <select className={inputClass} value={form.gender} onChange={update("gender")}>
@@ -300,9 +300,9 @@ export default function Patients() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Patients</h1>
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Patients</h1>
           <p className="mt-1 text-sm text-slate-500">
             {scope === "consulted"
               ? "Patients whose consultation is complete"

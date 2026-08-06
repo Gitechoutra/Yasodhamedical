@@ -35,10 +35,10 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            Welcome back, {user?.name} 👋
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
+            Welcome back, {user?.name}
           </h1>
           <p className="mt-1 text-sm text-slate-500">
             {summary?.scope === "front_desk"
@@ -47,11 +47,15 @@ export default function Dashboard() {
           </p>
         </div>
 
+        {/* No "updated at" stamp: these counts refresh themselves on server
+            pushes, tab focus and a slow poll, so the time only ever told the
+            user how long ago the last push happened — not how stale the
+            numbers were. The button stays for a manual nudge. */}
         <button
           onClick={refresh}
-          title="Refresh"
+          title="Refresh — these counts also update on their own"
           aria-label="Refresh"
-          className="flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+          className="flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
         >
           <HiOutlineArrowPath className="h-3.5 w-3.5" />
           Refresh
@@ -159,7 +163,7 @@ export default function Dashboard() {
                 </p>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm">
+                  <table className="w-full min-w-[36rem] text-left text-sm">
                     <thead>
                       <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
                         <th className="pb-3 font-medium">Patient</th>

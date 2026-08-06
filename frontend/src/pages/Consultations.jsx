@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { HiOutlineMagnifyingGlass, HiOutlineXMark } from "react-icons/hi2";
+import {
+  HiOutlineChatBubbleLeftRight,
+  HiOutlineMagnifyingGlass,
+  HiOutlineXMark,
+} from "react-icons/hi2";
 import ConsultationCard from "../components/ConsultationCard";
+import {
+  EmptyState,
+  PageHeader,
+  RecordGrid,
+  RecordGridSkeleton,
+} from "../components/RecordCard";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchConsultations } from "../services/consultationService";
 import { downloadReport } from "../services/reportService";
@@ -99,15 +109,18 @@ export default function Consultations() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-slate-900">Consultations</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        {visible.length} completed consultation{visible.length === 1 ? "" : "s"}
-        {hasFilters && " matching your filters"}
-      </p>
+      <PageHeader
+        icon={HiOutlineChatBubbleLeftRight}
+        title="Consultations"
+        description="Every completed visit, with the AI summary, the medicines prescribed and the report. A consultation still in progress stays in Appointments until the doctor ends it."
+      />
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
-        <form onSubmit={handleSearchSubmit} className="flex flex-1 items-center gap-2">
-          <div className="flex min-w-64 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
+        <form
+          onSubmit={handleSearchSubmit}
+          className="flex w-full items-center gap-2 sm:w-auto sm:min-w-72 sm:flex-1"
+        >
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
             <HiOutlineMagnifyingGlass className="h-4 w-4 shrink-0 text-slate-400" />
             <input
               type="text"
@@ -132,7 +145,7 @@ export default function Consultations() {
           </div>
           <button
             type="submit"
-            className="rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
+            className="shrink-0 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
           >
             Search
           </button>
@@ -178,23 +191,22 @@ export default function Consultations() {
         <p className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{errorMsg}</p>
       )}
 
-      <div className="mt-5">
+      <p className="mt-5 text-sm text-slate-500">
+        {visible.length} completed consultation{visible.length === 1 ? "" : "s"}
+        {hasFilters && " matching your filters"}
+      </p>
+
+      <div className="mt-3">
         {loading ? (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-56 animate-pulse rounded-2xl bg-slate-100" />
-            ))}
-          </div>
+          <RecordGridSkeleton count={3} />
         ) : visible.length === 0 ? (
-          <div className="rounded-2xl border border-slate-100 bg-white py-16 text-center shadow-sm">
-            <p className="text-sm text-slate-400">
-              {hasFilters
-                ? "No completed consultations match those filters."
-                : "No completed consultations yet. They appear here once a doctor ends one — consultations still in progress stay in Appointments."}
-            </p>
-          </div>
+          <EmptyState icon={HiOutlineChatBubbleLeftRight}>
+            {hasFilters
+              ? "No completed consultations match those filters."
+              : "No completed consultations yet. They appear here once a doctor ends one — consultations still in progress stay in Appointments."}
+          </EmptyState>
         ) : (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <RecordGrid>
             {visible.map((c) => (
               <ConsultationCard
                 key={c.id}
@@ -203,7 +215,7 @@ export default function Consultations() {
                 onDownloadReport={handleDownloadReport}
               />
             ))}
-          </div>
+          </RecordGrid>
         )}
       </div>
     </div>

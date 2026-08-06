@@ -176,7 +176,7 @@ export default function CaseRecord() {
 
       <div className="mb-6">
         <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-bold text-slate-900">{caseRecord.patient}</h1>
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">{caseRecord.patient}</h1>
           <StatusBadge status={caseRecord.status} />
           <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500">
             {caseRecord.code}

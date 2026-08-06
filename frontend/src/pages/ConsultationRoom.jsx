@@ -269,7 +269,7 @@ export default function ConsultationRoom() {
         </div>
 
         {!isCompleted && (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <span className="flex items-center gap-1.5 text-sm text-slate-500">
               <span className="h-2 w-2 rounded-full bg-emerald-500" />
               Live Consultation

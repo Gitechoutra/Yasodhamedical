@@ -49,7 +49,7 @@ export default function StockAlerts({ mode = "low" }) {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-slate-900">
+      <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
         {isLow ? "Low stock" : "Expired medicines"}
       </h1>
       <p className="mt-1 text-sm text-slate-500">
@@ -67,7 +67,7 @@ export default function StockAlerts({ mode = "low" }) {
         </div>
       ) : isLow ? (
         <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-100 bg-white shadow-sm">
-          <table className="w-full text-left text-sm">
+          <table className="w-full min-w-[32rem] text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
                 <th className="px-6 py-3 font-medium">Medicine</th>
@@ -118,7 +118,7 @@ export default function StockAlerts({ mode = "low" }) {
                   {heading} ({rows.length})
                 </h2>
                 <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-100 bg-white shadow-sm">
-                  <table className="w-full text-left text-sm">
+                  <table className="w-full min-w-[32rem] text-left text-sm">
                     <thead>
                       <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
                         <th className="px-6 py-3 font-medium">Medicine</th>

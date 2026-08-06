@@ -9,7 +9,6 @@ export default function useLiveSummary() {
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
-  const [refreshedAt, setRefreshedAt] = useState(null);
 
   // Guards against a slow response from an earlier refresh overwriting a
   // newer one, and against setState after the component unmounts.
@@ -30,7 +29,6 @@ export default function useLiveSummary() {
       if (!activeRef.current || requestId !== requestIdRef.current) return;
       setSummary(data);
       setErrorMsg("");
-      setRefreshedAt(new Date());
     } catch {
       if (!activeRef.current || requestId !== requestIdRef.current) return;
       // Keep the last good numbers on screen rather than blanking the cards.
@@ -46,5 +44,5 @@ export default function useLiveSummary() {
 
   useLiveRefresh(refresh);
 
-  return { summary, loading, errorMsg, refreshedAt, refresh };
+  return { summary, loading, errorMsg, refresh };
 }

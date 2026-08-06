@@ -233,7 +233,7 @@ export default function CaseSummaryPanel({
             </p>
           ) : (
             <div className="mt-2 overflow-x-auto rounded-xl border border-slate-100">
-              <table className="w-full text-left text-sm">
+              <table className="w-full min-w-[38rem] text-left text-sm">
                 <thead>
                   <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
                     <th className="px-4 py-2 font-medium">Medicine</th>

@@ -80,7 +80,7 @@ function PrecedentCard({ precedent }) {
 
       {medicines.length > 0 && (
         <div className="mt-4 overflow-x-auto rounded-xl border border-slate-100">
-          <table className="w-full text-left text-sm">
+          <table className="w-full min-w-[32rem] text-left text-sm">
             <thead>
               <tr className="bg-slate-50 text-xs uppercase tracking-wide text-slate-400">
                 <th className="px-4 py-2 font-medium">Medicine</th>
@@ -171,7 +171,7 @@ export default function KnowledgeBase() {
     <div>
       <div className="flex items-center gap-2">
         <HiOutlineAcademicCap className="h-6 w-6 text-brand-600" />
-        <h1 className="text-2xl font-bold text-slate-900">Knowledge Base</h1>
+        <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Knowledge Base</h1>
       </div>
       <p className="mt-1 max-w-3xl text-sm text-slate-500">
         Cases this hospital's doctors have personally approved. When a patient presents the
@@ -196,9 +196,9 @@ export default function KnowledgeBase() {
             e.preventDefault();
             setParam("search", searchInput.trim(), "");
           }}
-          className="flex flex-1 items-center gap-2"
+          className="flex w-full items-center gap-2 sm:w-auto sm:min-w-72 sm:flex-1"
         >
-          <div className="flex min-w-64 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
             <HiOutlineMagnifyingGlass className="h-4 w-4 shrink-0 text-slate-400" />
             <input
               type="text"
@@ -223,7 +223,7 @@ export default function KnowledgeBase() {
           </div>
           <button
             type="submit"
-            className="rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
+            className="shrink-0 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
           >
             Search
           </button>

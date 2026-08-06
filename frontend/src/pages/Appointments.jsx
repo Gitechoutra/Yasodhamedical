@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { HiOutlinePlus } from "react-icons/hi2";
+import { HiOutlineCalendarDays, HiOutlinePlus } from "react-icons/hi2";
 import AppointmentCard from "../components/AppointmentCard";
 import FilterChip from "../components/FilterChip";
 import Modal from "../components/Modal";
+import {
+  EmptyState,
+  PageHeader,
+  RecordGrid,
+  RecordGridSkeleton,
+} from "../components/RecordCard";
 import { useAuth } from "../context/AuthContext";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchAppointments, createAppointment, startAppointment } from "../services/appointmentService";
@@ -212,31 +218,34 @@ export default function Appointments() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Appointments</h1>
-          {/* flex-wrap: the counts line plus both filter chips overflow a
-              narrow viewport if they are forced onto one row. */}
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <p className="text-sm text-slate-500">
-              {user?.department ? `${user.department} queue` : "All departments"} ·{" "}
-              {appointments.length} OP{appointments.length === 1 ? "" : "s"} ·{" "}
-              {ongoingCount} in consultation · {appointments.length - ongoingCount} waiting
-            </p>
-            {todayOnly && <FilterChip label="Today only" onClear={() => clearFilter("filter")} />}
-            {ongoingOnly && (
-              <FilterChip label="In consultation" onClear={() => clearFilter("status")} />
-            )}
-          </div>
-        </div>
-        {canScheduleAppointments && (
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
-          >
-            <HiOutlinePlus className="h-4 w-4" />
-            Create OP
-          </button>
+      <PageHeader
+        icon={HiOutlineCalendarDays}
+        title="Appointments"
+        description="The outpatient queue, in the order patients should be called in. A card moves to Consultations once the doctor ends the visit."
+        action={
+          canScheduleAppointments && (
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
+            >
+              <HiOutlinePlus className="h-4 w-4" />
+              Create OP
+            </button>
+          )
+        }
+      />
+
+      {/* flex-wrap: the counts line plus both filter chips overflow a
+          narrow viewport if they are forced onto one row. */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <p className="text-sm text-slate-500">
+          {user?.department ? `${user.department} queue` : "All departments"} ·{" "}
+          {appointments.length} OP{appointments.length === 1 ? "" : "s"} · {ongoingCount} in
+          consultation · {appointments.length - ongoingCount} waiting
+        </p>
+        {todayOnly && <FilterChip label="Today only" onClear={() => clearFilter("filter")} />}
+        {ongoingOnly && (
+          <FilterChip label="In consultation" onClear={() => clearFilter("status")} />
         )}
       </div>
 
@@ -246,23 +255,17 @@ export default function Appointments() {
 
       <div className="mt-6">
         {loading ? (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-64 animate-pulse rounded-2xl bg-slate-100" />
-            ))}
-          </div>
+          <RecordGridSkeleton count={3} />
         ) : appointments.length === 0 ? (
-          <div className="rounded-2xl border border-slate-100 bg-white py-16 text-center shadow-sm">
-            <p className="text-sm text-slate-400">
-              {ongoingOnly
-                ? "No consultations are in progress right now."
-                : todayOnly
-                  ? "No patients pending or in consultation today."
-                  : `The ${user?.department || "hospital"} queue is empty — nobody is waiting.`}
-            </p>
-          </div>
+          <EmptyState icon={HiOutlineCalendarDays}>
+            {ongoingOnly
+              ? "No consultations are in progress right now."
+              : todayOnly
+                ? "No patients pending or in consultation today."
+                : `The ${user?.department || "hospital"} queue is empty — nobody is waiting.`}
+          </EmptyState>
         ) : (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <RecordGrid>
             {appointments.map((a) => (
               <AppointmentCard
                 key={a.id}
@@ -273,7 +276,7 @@ export default function Appointments() {
                 onResume={(appt) => navigate(`/dashboard/consultations/${appt.consultation_id}`)}
               />
             ))}
-          </div>
+          </RecordGrid>
         )}
       </div>
 

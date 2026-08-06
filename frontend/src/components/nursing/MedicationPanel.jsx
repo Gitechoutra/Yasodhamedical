@@ -78,7 +78,7 @@ function LogDoseModal({ assignmentId, order, onClose, onLogged }) {
     <Modal title={order ? `Log ${order.medicine_name}` : "Log an unscheduled dose"} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-3">
         {!order && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className={labelClass}>Medicine *</label>
               <input
@@ -104,7 +104,7 @@ function LogDoseModal({ assignmentId, order, onClose, onLogged }) {
 
         <div>
           <label className={labelClass}>Outcome *</label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {STATUSES.map((s) => (
               <button
                 key={s.value}
@@ -123,7 +123,7 @@ function LogDoseModal({ assignmentId, order, onClose, onLogged }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className={labelClass}>Dose given</label>
             <input
@@ -234,7 +234,7 @@ function AddMedicationModal({ assignmentId, onClose, onAdded }) {
             onChange={update("medicine_name")}
           />
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className={labelClass}>Route</label>
             <select className={inputClass} value={form.route} onChange={update("route")}>
@@ -250,7 +250,7 @@ function AddMedicationModal({ assignmentId, onClose, onAdded }) {
             <input className={inputClass} value={form.dose} onChange={update("dose")} />
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
             <label className={labelClass}>Frequency</label>
             <input className={inputClass} value={form.frequency} onChange={update("frequency")} />
@@ -423,7 +423,7 @@ export default function MedicationPanel({ assignment, canRecord, canManagePlan, 
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+            <table className="w-full min-w-[44rem] text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
                   <th className="py-2 font-medium">Medicine</th>

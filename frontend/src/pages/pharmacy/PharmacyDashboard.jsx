@@ -39,16 +39,18 @@ export default function PharmacyDashboard() {
     <div>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Hello, {user?.name} 💊</h1>
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
+            Hello, {user?.name}
+          </h1>
           <p className="mt-1 text-sm text-slate-500">
             {summary?.branch?.name || user?.branch || "Pharmacy counter"}
           </p>
         </div>
         <button
           onClick={load}
-          title="Refresh"
+          title="Refresh the counter summary"
           aria-label="Refresh"
-          className="flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
+          className="flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
         >
           <HiOutlineArrowPath className="h-3.5 w-3.5" />
           Refresh
@@ -108,11 +110,11 @@ export default function PharmacyDashboard() {
                 to="/pharmacy/medicines/search"
                 className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md"
               >
-                <span className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-50 text-emerald-600">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600">
                   <HiOutlineMagnifyingGlass className="h-5 w-5" />
                 </span>
-                <div>
-                  <p className="text-sm font-bold text-slate-900">Search medicines</p>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-900">Search medicines</p>
                   <p className="text-xs text-slate-500">Here, or across branches</p>
                 </div>
               </Link>
@@ -120,11 +122,11 @@ export default function PharmacyDashboard() {
                 to="/pharmacy/medicines/add"
                 className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md"
               >
-                <span className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-50 text-emerald-600">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600">
                   <HiOutlinePlus className="h-5 w-5" />
                 </span>
-                <div>
-                  <p className="text-sm font-bold text-slate-900">Add medicine</p>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-900">Add medicine</p>
                   <p className="text-xs text-slate-500">New brand + what it treats</p>
                 </div>
               </Link>
@@ -132,11 +134,11 @@ export default function PharmacyDashboard() {
                 to="/pharmacy/stock/in"
                 className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-md"
               >
-                <span className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-50 text-emerald-600">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-600">
                   <HiOutlineArchiveBox className="h-5 w-5" />
                 </span>
-                <div>
-                  <p className="text-sm font-bold text-slate-900">Receive stock</p>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-900">Receive stock</p>
                   <p className="text-xs text-slate-500">Batch, expiry and MRP</p>
                 </div>
               </Link>

@@ -15,7 +15,7 @@ export default function Categories() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-slate-900">Categories</h1>
+      <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Categories</h1>
       <p className="mt-1 text-sm text-slate-500">
         How the catalogue breaks down, and how much of each this branch holds.
       </p>
