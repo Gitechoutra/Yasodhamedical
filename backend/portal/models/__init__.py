@@ -6,6 +6,7 @@ from portal.models.doctor import Doctor
 from portal.models.nurse import Nurse
 from portal.models.pharmacist import Pharmacist
 from portal.models.staff_profile import StaffProfile
+from portal.models.staff_shift import StaffShift
 from portal.models.patient import Patient
 from portal.models.medicine import Medicine
 from portal.models.medicine_brand import MedicineBrand, StockBatch
@@ -28,6 +29,7 @@ from portal.models.patient_observation import PatientObservation
 from portal.models.nursing_note import NursingNote
 from portal.models.clinical_alert import ClinicalAlert
 from portal.models.care_message import CareMessage
+from portal.models.lab_request import LabMessage, LabRequest
 
 __all__ = [
     "Role",
@@ -38,6 +40,7 @@ __all__ = [
     "Nurse",
     "Pharmacist",
     "StaffProfile",
+    "StaffShift",
     "Patient",
     "Medicine",
     "MedicineBrand",
@@ -62,4 +65,6 @@ __all__ = [
     "NursingNote",
     "ClinicalAlert",
     "CareMessage",
+    "LabRequest",
+    "LabMessage",
 ]

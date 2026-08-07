@@ -5,6 +5,7 @@ import NotFound from "../pages/NotFound";
 import DashboardLayout from "../layouts/DashboardLayout";
 import NurseLayout from "../layouts/NurseLayout";
 import PharmacyLayout from "../layouts/PharmacyLayout";
+import LabLayout from "../layouts/LabLayout";
 import ProtectedRoute from "../components/ProtectedRoute";
 import RoleRoute from "../components/RoleRoute";
 
@@ -37,6 +38,7 @@ const NursingUpdates = lazy(() => import("../pages/NursingUpdates"));
 const NursingRecord = lazy(() => import("../pages/NursingRecord"));
 const Reports = lazy(() => import("../pages/Reports"));
 const Settings = lazy(() => import("../pages/Settings"));
+const Shifts = lazy(() => import("../pages/Shifts"));
 const Profile = lazy(() => import("../pages/Profile"));
 
 const NurseDashboard = lazy(() => import("../pages/nurse/NurseDashboard"));
@@ -54,6 +56,10 @@ const MedicineSearch = lazy(() => import("../pages/pharmacy/MedicineSearch"));
 const StockIn = lazy(() => import("../pages/pharmacy/StockIn"));
 const StockAlerts = lazy(() => import("../pages/pharmacy/StockAlerts"));
 const PharmacySoon = lazy(() => import("../pages/pharmacy/PharmacySoon"));
+
+const LabDashboard = lazy(() => import("../pages/lab/LabDashboard"));
+const LabRequests = lazy(() => import("../pages/lab/LabRequests"));
+const LabRequestDetail = lazy(() => import("../pages/lab/LabRequestDetail"));
 
 /** Shown for the moment a screen's chunk is in flight. Deliberately plain —
  *  a spinner that appears for 80ms reads as a flicker, not as progress. */
@@ -195,6 +201,7 @@ export default function AppRouter() {
             <Route path="patients" element={<NursePatients />} />
             <Route path="patients/:id" element={<NursePatientRecord />} />
             <Route path="alerts" element={<NurseAlerts />} />
+            <Route path="shifts" element={<Shifts />} />
             <Route path="profile" element={<Profile />} />
             <Route path="settings" element={<Settings />} />
           </Route>
@@ -213,6 +220,7 @@ export default function AppRouter() {
             <Route path="stock/in" element={<StockIn />} />
             <Route path="stock/low" element={<StockAlerts mode="low" />} />
             <Route path="stock/expired" element={<StockAlerts mode="expired" />} />
+            <Route path="shifts" element={<Shifts />} />
             <Route path="profile" element={<Profile />} />
             {PHARMACY_SOON.map(({ path, title, blurb, needs }) => (
               <Route
@@ -223,6 +231,19 @@ export default function AppRouter() {
             ))}
           </Route>
 
+          {/* The laboratory. Its own tree for the same reason nursing and
+              pharmacy have one: a technician's whole job here is the tests
+              handed to them, and every clinical screen 403s for the role.
+              LabLayout guards it. */}
+          <Route path="/lab" element={<LabLayout />}>
+            <Route index element={<LabDashboard />} />
+            <Route path="requests" element={<LabRequests />} />
+            <Route path="requests/:id" element={<LabRequestDetail />} />
+            <Route path="shifts" element={<Shifts />} />
+            <Route path="profile" element={<Profile />} />
+            <Route path="settings" element={<Settings />} />
+          </Route>
+
           <Route element={<ProtectedRoute />}>
             <Route path="/dashboard" element={<DashboardLayout />}>
               <Route index element={<Dashboard />} />
@@ -230,6 +251,10 @@ export default function AppRouter() {
               <Route path="appointments" element={<Appointments />} />
               <Route path="settings" element={<Settings />} />
               <Route path="profile" element={<Profile />} />
+              {/* Admin sees the whole rota and manages it; every other
+                  role sees only their own shifts. Shifts.jsx picks the
+                  screen, and the API enforces the same split. */}
+              <Route path="shifts" element={<Shifts />} />
 
               <Route element={<RoleRoute deny={CLINICAL_DENY} />}>
                 <Route path="consultations" element={<Consultations />} />
@@ -246,6 +271,17 @@ export default function AppRouter() {
                 />
                 <Route path="nursing/:id" element={<NursingRecord />} />
                 <Route path="reports" element={<Reports />} />
+                {/* Same two screens as the lab module, told to route back
+                    here. The server scopes the data by role, so a doctor sees
+                    only what they ordered. */}
+                <Route
+                  path="lab"
+                  element={<LabRequests basePath="/dashboard/lab" />}
+                />
+                <Route
+                  path="lab/:id"
+                  element={<LabRequestDetail basePath="/dashboard/lab" />}
+                />
               </Route>
 
               <Route element={<RoleRoute deny={ADMIN_ONLY_DENY} />}>

@@ -19,14 +19,15 @@ export default function Login() {
     setErrorMsg("");
     try {
       const user = await login(email, password);
-      // The one sign-in for every role. Nurses and pharmacists have their own
-      // module trees; everyone else lands on /dashboard.
-      const home =
-        user?.role === "nurse"
-          ? "/nurse"
-          : user?.role === "pharmacist"
-            ? "/pharmacy"
-            : redirectTo;
+      // The one sign-in for every role. Nurses, pharmacists and lab
+      // technicians have their own module trees; everyone else lands on
+      // /dashboard.
+      const MODULE_HOME = {
+        nurse: "/nurse",
+        pharmacist: "/pharmacy",
+        lab_technician: "/lab",
+      };
+      const home = MODULE_HOME[user?.role] || redirectTo;
       navigate(home, { replace: true });
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Unable to sign in. Please try again.");

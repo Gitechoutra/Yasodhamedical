@@ -11,6 +11,7 @@ import {
   HiOutlineXMark,
 } from "react-icons/hi2";
 import useDismissable from "../hooks/useDismissable";
+import { useAuth } from "../context/AuthContext";
 import { onDashboardChanged } from "../services/socket";
 import {
   fetchNotifications,
@@ -92,8 +93,27 @@ function Toast({ notification, onDismiss, onClick }) {
   );
 }
 
+/**
+ * Points a stored link at the module the *reader* actually lives in.
+ *
+ * A notification carries one link for everyone it goes to, but a lab request
+ * is reachable at two different URLs: `/lab/requests/7` inside the laboratory
+ * module and `/dashboard/lab/7` for the doctor who ordered it. Without this
+ * rewrite, a doctor tapping "Lab report ready" would land in the technician's
+ * tree and be bounced straight back out by LabLayout's role guard.
+ */
+export function resolveLink(link, role) {
+  if (!link) return link;
+  const labRequest = link.match(/^\/lab\/requests\/(\d+)$/);
+  if (labRequest && role !== "lab_technician") {
+    return `/dashboard/lab/${labRequest[1]}`;
+  }
+  return link;
+}
+
 export default function NotificationMenu() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const containerRef = useRef(null);
 
   const [isOpen, setIsOpen] = useState(false);
@@ -177,7 +197,7 @@ export default function NotificationMenu() {
     } catch {
       load(); // roll back to whatever the server actually thinks
     }
-    if (notification.link) navigate(notification.link);
+    if (notification.link) navigate(resolveLink(notification.link, user?.role));
   }
 
   async function handleMarkAllRead() {

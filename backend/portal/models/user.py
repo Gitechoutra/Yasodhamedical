@@ -79,7 +79,10 @@ class User(db.Model):
             "employee_no": (
                 self.nurse_profile.employee_no if self.nurse_profile else None
             ),
-            "shift": self.nurse_profile.shift if self.nurse_profile else None,
+            # No "shift" here. The session user used to carry the single
+            # shift on the nurse profile, which the nursing sidebar showed
+            # by default. Shifts are now dated rows an administrator
+            # rosters, read from /api/shifts.
             # Pharmacy-only: which counter this user works. Every stock query
             # is scoped by it, so the frontend needs it on the session user.
             "branch_id": (

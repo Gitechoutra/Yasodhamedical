@@ -25,6 +25,11 @@ export default function DashboardLayout() {
   if (user?.role === "pharmacist") {
     return <Navigate to="/pharmacy" replace />;
   }
+  // Same reason: every screen in this tree is a doctor's or admin's, and the
+  // API 403s all of them for a lab technician.
+  if (user?.role === "lab_technician") {
+    return <Navigate to="/lab" replace />;
+  }
 
   return (
     <AppShell sidebar={<Sidebar />} header={<Topbar />}>

@@ -14,6 +14,8 @@ from portal.routes.doctor_routes import doctor_bp
 from portal.routes.report_routes import report_bp
 from portal.routes.notification_routes import notification_bp
 from portal.routes.nursing_routes import nursing_bp
+from portal.routes.lab_routes import lab_bp
+from portal.routes.shift_routes import shift_bp
 
 
 def register_routes(app):
@@ -33,3 +35,5 @@ def register_routes(app):
     app.register_blueprint(audit_bp, url_prefix="/api/audit")
     app.register_blueprint(pharmacy_bp, url_prefix="/api/pharmacy")
     app.register_blueprint(staff_bp, url_prefix="/api/staff")
+    app.register_blueprint(shift_bp, url_prefix="/api/shifts")
+    app.register_blueprint(lab_bp, url_prefix="/api/lab")

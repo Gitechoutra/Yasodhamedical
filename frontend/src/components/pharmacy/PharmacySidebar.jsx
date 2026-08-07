@@ -5,6 +5,7 @@ import {
   HiOutlineArrowRightOnRectangle,
   HiOutlineBanknotes,
   HiOutlineBell,
+  HiOutlineCalendarDays,
   HiOutlineChevronDown,
   HiOutlineClipboardDocumentList,
   HiOutlineDocumentChartBar,
@@ -88,6 +89,8 @@ const NAV = [
       { to: "/pharmacy/reports/gst", label: "GST" },
     ],
   },
+  // Read-only, same as every other non-admin role.
+  { to: "/pharmacy/shifts", label: "My Shifts", icon: HiOutlineCalendarDays, ready: true },
   { to: "/pharmacy/notifications", label: "Notifications", icon: HiOutlineBell, ready: true },
   { to: "/pharmacy/profile", label: "Profile", icon: HiOutlineUserCircle, ready: true },
 ];

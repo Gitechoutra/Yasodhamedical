@@ -25,8 +25,8 @@ export const ROLE_LABELS = {
  */
 const ROLE_FIELDS = {
   doctor: ["department", "specialization", "designation", "registration_no", "years_experience"],
-  nurse: ["department", "designation", "registration_no", "shift"],
-  receptionist: ["department", "shift"],
+  nurse: ["department", "designation", "registration_no"],
+  receptionist: ["department"],
   pharmacist: ["branch", "designation", "registration_no"],
   lab_technician: ["department", "lab_department", "qualification", "designation"],
   accountant: ["designation", "qualification"],
@@ -60,7 +60,6 @@ const EMPTY = {
   registration_no: "",
   specialization: "",
   years_experience: "",
-  shift: "",
   lab_department: "",
   qualification: "",
   notes: "",
@@ -90,7 +89,6 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
       registration_no: p.registration_no || "",
       specialization: p.specialization || "",
       years_experience: p.years_experience ?? "",
-      shift: p.shift || "",
       lab_department: p.lab_department || "",
       qualification: p.qualification || "",
       notes: p.notes || "",
@@ -118,7 +116,6 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
       ...f,
       specialization: keep.has("specialization") ? f.specialization : "",
       years_experience: keep.has("years_experience") ? f.years_experience : "",
-      shift: keep.has("shift") ? f.shift : "",
       lab_department: keep.has("lab_department") ? f.lab_department : "",
       qualification: keep.has("qualification") ? f.qualification : "",
       registration_no: keep.has("registration_no") ? f.registration_no : "",
@@ -361,20 +358,6 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
                     value={form.years_experience}
                     onChange={update("years_experience")}
                   />
-                </div>
-              )}
-
-              {shown.includes("shift") && (
-                <div>
-                  <label className={label}>Shift</label>
-                  <select className={input} value={form.shift} onChange={update("shift")}>
-                    <option value="">Select</option>
-                    {(options.shifts || []).map((s) => (
-                      <option key={s} value={s} className="capitalize">
-                        {s}
-                      </option>
-                    ))}
-                  </select>
                 </div>
               )}
 

@@ -7,6 +7,7 @@ from portal.models.medicine_brand import MedicineBrand, StockBatch
 from portal.models.nurse import Nurse
 from portal.models.pharmacist import Pharmacist
 from portal.models.role import DEFAULT_ROLES, Role
+from portal.models.staff_profile import StaffProfile
 from portal.models.user import User
 
 DEPARTMENTS = ["Orthopedics", "Gynecology", "Gastroenterology", "General Medicine"]
@@ -53,6 +54,12 @@ DOCTORS = [
 
 
 # (name, email, password, department, employee_no, shift)
+#
+# The trailing shift is no longer seeded onto the nurse profile — shifts are
+# rostered by an administrator on the shift schedule, per date, and a seeded
+# "normal" shift was a fact nobody had entered and nobody could rely on. The
+# value is kept in this table only so the tuples still describe the intent
+# behind each demo account.
 NURSES = [
     (
         "Sr. Lakshmi Rao",
@@ -87,6 +94,28 @@ BRANCHES = [
     ("Yasodha Hospitals — Kakinada", "KKD", "Kakinada"),
     ("Yasodha Hospitals — Rajahmundry", "RJY", "Rajahmundry"),
     ("Yasodha Hospitals — Vizag", "VZG", "Visakhapatnam"),
+]
+
+# (name, email, password, department, lab department, employee code)
+# Seeded so a fresh install has a working laboratory: a doctor ordering a test
+# needs somebody to assign it to.
+LAB_TECHNICIANS = [
+    (
+        "Anita Sharma",
+        "anita.lab@yasodhahospitals.com",
+        "LabTech@123",
+        "General Medicine",
+        "Haematology",
+        "LAB2001",
+    ),
+    (
+        "Kiran Babu",
+        "kiran.lab@yasodhahospitals.com",
+        "LabTech@123",
+        "General Medicine",
+        "Biochemistry",
+        "LAB2002",
+    ),
 ]
 
 # (name, email, password, branch code, license no)
@@ -273,7 +302,7 @@ def seed_doctors(departments):
 
 def seed_nurses(departments):
     nurse_role = Role.query.filter_by(name="nurse").first()
-    for name, email, password, dept_name, employee_no, shift in NURSES:
+    for name, email, password, dept_name, employee_no, _shift in NURSES:
         user = User.query.filter_by(email=email).first()
         if not user:
             user = User(name=name, email=email, role_id=nurse_role.id)
@@ -282,12 +311,39 @@ def seed_nurses(departments):
             db.session.commit()
 
         if not Nurse.query.filter_by(user_id=user.id).first():
+            # No `shift=`: a nurse starts with no rostered shift at all, and
+            # gets one only when an administrator schedules it.
             db.session.add(
                 Nurse(
                     user_id=user.id,
                     department_id=departments[dept_name].id,
                     employee_no=employee_no,
-                    shift=shift,
+                )
+            )
+            db.session.commit()
+
+
+def seed_lab_technicians(departments):
+    """Lab technicians have no operational profile table of their own — the
+    laboratory joins on `users` directly — so this only needs the account and
+    the HR profile that holds which bench they work."""
+    role = Role.query.filter_by(name="lab_technician").first()
+    for name, email, password, dept_name, lab_department, employee_code in LAB_TECHNICIANS:
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            user = User(name=name, email=email, role_id=role.id)
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+
+        if not StaffProfile.query.filter_by(user_id=user.id).first():
+            db.session.add(
+                StaffProfile(
+                    user_id=user.id,
+                    department_id=departments[dept_name].id,
+                    lab_department=lab_department,
+                    employee_code=employee_code,
+                    designation="Lab Technician",
                 )
             )
             db.session.commit()
@@ -319,6 +375,7 @@ def run():
     seed_nurses(departments)
     seed_formulary()
     branches = seed_branches()
+    seed_lab_technicians(departments)
     seed_pharmacists(branches)
     seed_pharmacy_catalogue(branches)
     print("Seed complete.")
@@ -326,8 +383,10 @@ def run():
     print("  Receptionist -> reception@yasodhahospitals.com / Reception@123")
     for _name, email, password, dept_name, _spec, _reg in DOCTORS:
         print(f"  Doctor -> {email} / {password}  ({dept_name})")
-    for _name, email, password, dept_name, _emp, shift in NURSES:
-        print(f"  Nurse  -> {email} / {password}  ({dept_name}, {shift} shift)")
+    for _name, email, password, dept_name, _emp, _shift in NURSES:
+        print(f"  Nurse  -> {email} / {password}  ({dept_name})")
+    for _name, email, password, _dept, lab_dept, _emp in LAB_TECHNICIANS:
+        print(f"  Lab    -> {email} / {password}  ({lab_dept})")
     for _name, email, password, branch_code, _lic in PHARMACISTS:
         print(f"  Pharmacy -> {email} / {password}  ({branch_code})")
     print(f"  Seeded {len(FORMULARY)} formulary medicines, "

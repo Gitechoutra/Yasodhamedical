@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import {
   HiOutlineAcademicCap,
+  HiOutlineBeaker,
   HiOutlineSquares2X2,
   HiOutlineUsers,
   HiOutlineCalendarDays,
@@ -12,6 +13,7 @@ import {
   HiOutlineUserGroup,
   HiOutlineBuildingOffice2,
   HiOutlineIdentification,
+  HiOutlineCalendarDays as HiOutlineShiftCalendar,
   HiOutlineCog6Tooth,
   HiOutlineArrowRightOnRectangle,
 } from "react-icons/hi2";
@@ -60,6 +62,14 @@ const NAV_ITEMS = [
     icon: HiOutlineClipboardDocumentList,
     hideFrom: ["receptionist"],
   },
+  // Lab tests a doctor has ordered, and the discussion with the technician
+  // running each one. Clinical, so hidden from reception.
+  {
+    to: "/dashboard/lab",
+    label: "Lab Tests",
+    icon: HiOutlineBeaker,
+    hideFrom: ["receptionist"],
+  },
   {
     to: "/dashboard/reports",
     label: "Reports",
@@ -93,6 +103,10 @@ const NAV_ITEMS = [
     icon: HiOutlineIdentification,
     hideFrom: ["doctor", "receptionist"],
   },
+  // Everyone sees this entry, but not the same page: admin gets the
+  // hospital rota to manage, every other role gets their own shifts
+  // read-only. Shifts.jsx decides, so there is no hideFrom here.
+  { to: "/dashboard/shifts", label: "Shifts", icon: HiOutlineShiftCalendar },
   { to: "/dashboard/settings", label: "Settings", icon: HiOutlineCog6Tooth },
 ];
 

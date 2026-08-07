@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   HiOutlineArchiveBox,
-  HiOutlineArrowPath,
   HiOutlineBanknotes,
   HiOutlineExclamationTriangle,
   HiOutlineMagnifyingGlass,
@@ -10,6 +9,7 @@ import {
 } from "react-icons/hi2";
 import StatCard from "../../components/StatCard";
 import { useAuth } from "../../context/AuthContext";
+import useLiveRefresh from "../../hooks/useLiveRefresh";
 import { fetchPharmacySummary } from "../../services/pharmacyService";
 
 export default function PharmacyDashboard() {
@@ -18,8 +18,10 @@ export default function PharmacyDashboard() {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
-  const load = useCallback(() => {
-    setLoading(true);
+  // `silent` skips the skeleton so a background refresh updates the counts in
+  // place instead of blanking the cards a pharmacist is reading.
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
     return fetchPharmacySummary()
       .then((d) => {
         setSummary(d);
@@ -35,26 +37,19 @@ export default function PharmacyDashboard() {
     load();
   }, [load]);
 
+  // This page used to update only on mount, with a manual refresh button as
+  // the sole way to see new stock. With the button gone it needs the same
+  // automatic refresh the other dashboards already had, or removing the
+  // control would have made the counter summary go stale.
+  useLiveRefresh(load);
+
   return (
     <div>
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
-            Hello, {user?.name}
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {summary?.branch?.name || user?.branch || "Pharmacy counter"}
-          </p>
-        </div>
-        <button
-          onClick={load}
-          title="Refresh the counter summary"
-          aria-label="Refresh"
-          className="flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"
-        >
-          <HiOutlineArrowPath className="h-3.5 w-3.5" />
-          Refresh
-        </button>
+      <div className="min-w-0">
+        <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Hello, {user?.name}</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          {summary?.branch?.name || user?.branch || "Pharmacy counter"}
+        </p>
       </div>
 
       {errorMsg && (
