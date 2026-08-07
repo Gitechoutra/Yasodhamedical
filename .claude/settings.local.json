@@ -45,7 +45,18 @@
       "Bash(PYTHONPATH=\"c:/Users/Mahesh/OneDrive/Desktop/Medical/backend\" venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/15a2830e-da66-47e0-892e-bec278d4d562/scratchpad/cleanup_db.py\")",
       "Bash(venv/Scripts/python.exe -c \"import requests; print\\(requests.__version__\\)\")",
       "Bash(venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/15a2830e-da66-47e0-892e-bec278d4d562/scratchpad/test_nursing.py\")",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(./venv/Scripts/python.exe -m pip show werkzeug)",
+      "Bash(curl -s -X POST http://127.0.0.1:5000/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"ravi.pharmacy@yasodhahospitals.com\",\"password\":\"Pharma@123\"}' -w '\\\\nHTTP_STATUS:%{http_code}\\\\n')",
+      "Bash(curl -s -X POST http://127.0.0.1:5000/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"lakshmi.rao@yasodhahospitals.com\",\"password\":\"Nurse@123\"}' -w \"\\\\nHTTP_STATUS:%{http_code}\\\\n\")",
+      "Bash(curl -s -X POST http://127.0.0.1:5000/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"ravi.pharmacy@yasodhahospitals.com\",\"password\":\"WrongPass\"}' -w \"\\\\nHTTP_STATUS:%{http_code}\\\\n\")",
+      "Bash(curl -s -X POST http://127.0.0.1:5000/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"lab.tech@yasodhahospitals.com\",\"password\":\"LabTech@123\"}' -w '\\\\nHTTP_STATUS:%{http_code}\\\\n')",
+      "Bash(npx --yes playwright@1 install chromium --with-deps)",
+      "Bash(tasklist //FI \"IMAGENAME eq node.exe\")",
+      "Bash(node \"C:\\\\Users\\\\Dell\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--MedAsst-Yasodha-Yasodhamedical\\\\a30aaf78-2d77-4be4-a09c-1ed4ed6bac39\\\\scratchpad\\\\check_mobile_bell.mjs\")",
+      "Bash(node check_mobile_bell.mjs)",
+      "Bash(node check_bell_widths.mjs)",
+      "Bash(node check_adjacent.mjs)"
     ],
     "additionalDirectories": [
       "C:\\Users\\ADMIN\\Downloads\\AI_medical\\backend"

@@ -60,10 +60,13 @@ class CustomMedicineRequest(db.Model):
     requested_by_doctor_id = db.Column(db.Integer, db.ForeignKey("doctors.id"), nullable=True)
     department_id = db.Column(db.Integer, db.ForeignKey("departments.id"), nullable=True)
 
+    # Indexed (added via a raw migration, not this flag originally — declared
+    # here too so `flask db migrate` sees it and stops proposing to drop it).
     status = db.Column(
         db.Enum(*STATUSES, name="custom_medicine_request_status"),
         nullable=False,
         default="pending",
+        index=True,
     )
     reviewed_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     reviewed_at = db.Column(db.DateTime, nullable=True)

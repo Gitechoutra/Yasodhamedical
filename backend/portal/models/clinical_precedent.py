@@ -106,7 +106,9 @@ class ClinicalPrecedent(db.Model):
     # Set when the source prescription's sign-off is withdrawn. Retired rows
     # are skipped by retrieval but kept, so the audit trail still shows what
     # the knowledge base contained at any point.
-    retired_at = db.Column(db.DateTime, nullable=True)
+    # Indexed (added via a raw migration, not this flag originally — declared
+    # here too so `flask db migrate` sees it and stops proposing to drop it).
+    retired_at = db.Column(db.DateTime, nullable=True, index=True)
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
     updated_at = db.Column(
         db.TIMESTAMP,
