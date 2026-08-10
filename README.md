@@ -47,7 +47,7 @@ pip install -r requirements.txt
 cp config/dev.ini.example config/dev.ini   # then fill in the DB password,
                                            # secret keys and Gemini key
 flask db upgrade                    # create tables
-python -m portal.seeds              # seed roles + demo admin/doctor accounts
+python -m portal.seeds              # seed roles, admin account, and default medicine master data
 python app.py                       # http://127.0.0.1:5000
 ```
 
@@ -61,11 +61,16 @@ Seeded logins:
 - Doctor: `sandeep.viswanadh@yasodhahospitals.com` / `Doctor@123`
 - Nurse: `lakshmi.rao@yasodhahospitals.com` / `Nurse@123`
 
-The seeder creates reference data only — roles, departments, the formulary and
-staff logins. It deliberately does not create patients: a patient with no
-assigned doctor is invisible to every doctor (see
-`portal/helpers/patient_access.py`), so demo rows only ever showed up as
-clutter. Register patients through the front desk instead.
+The seeder creates reference data: roles, the default admin account, and the
+default medicine master data (the clinical formulary and the pharmacy brand
+catalogue, in `portal/seeders/seed_medicines.py`) — every developer gets the
+same medicines after `git pull` without inserting them by hand. Re-running
+`python -m portal.seeds` is always safe: existing rows, including any
+medicine a developer added or edited manually, are left untouched. It
+deliberately does not create patients: a patient with no assigned doctor is
+invisible to every doctor (see `portal/helpers/patient_access.py`), so demo
+rows only ever showed up as clutter. Register patients through the front desk
+instead.
 
 ### 3. Frontend
 

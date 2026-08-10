@@ -56,7 +56,12 @@
       "Bash(node \"C:\\\\Users\\\\Dell\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--MedAsst-Yasodha-Yasodhamedical\\\\a30aaf78-2d77-4be4-a09c-1ed4ed6bac39\\\\scratchpad\\\\check_mobile_bell.mjs\")",
       "Bash(node check_mobile_bell.mjs)",
       "Bash(node check_bell_widths.mjs)",
-      "Bash(node check_adjacent.mjs)"
+      "Bash(node check_adjacent.mjs)",
+      "Read(//d/MedAsft_Yasodha/Yasodhamedical/backend/portal/seeders/**)",
+      "Bash(python -c \"import pymysql; print\\('pymysql ok'\\)\")",
+      "Bash(python -m portal.seeds)",
+      "Bash(DATABASE_URL=\"mysql+pymysql://root:Revanth%40106003@127.0.0.1:3306/hospital_seed_test?charset=utf8mb4\" flask db upgrade)",
+      "Bash(DATABASE_URL=\"mysql+pymysql://root:Revanth%40106003@127.0.0.1:3306/hospital_seed_test?charset=utf8mb4\" python -m portal.seeds)"
     ],
     "additionalDirectories": [
       "C:\\Users\\ADMIN\\Downloads\\AI_medical\\backend"
