@@ -1,42 +1,41 @@
-"""Seeds the default medicine master data: the clinical formulary
-(`medicines`) and the pharmacy brand catalogue (`medicine_brands`, plus which
-departments each brand serves).
+"""Seeds medicine master data beyond the starting formulary: the pharmacy
+brand catalogue (`medicine_brands`), including which departments each brand
+serves.
 
-This is the version-controlled source of truth for that data. Before this
-existed, every developer built up their own local copy by hand (raw SQL run
-against their own database), so no two checkouts agreed and nothing was
-shared by `git pull`. `FORMULARY` and `MEDICINE_BRANDS` below are that data,
-captured from the shared working set so everyone starts from the same
-catalogue.
+The clinical formulary itself (`medicines`) is reconciled from
+`models/medicine.DEFAULT_FORMULARY` on every application start (see
+`helpers/bootstrap.ensure_medicines`); it is seeded again here, from the same
+list, only so this command alone brings a fresh database fully up to date
+without needing the app to have started first.
 
-Matched by natural key (`Medicine.name`, and `MedicineBrand.brand_name` +
-`strength` — the same pair the table's unique constraint uses) and only ever
-inserted, never updated: re-running this is a no-op for anything already
-present, and it never touches a medicine a developer added or edited by hand
-afterward, seeded or not.
+`MEDICINE_BRANDS` has no natural home beside a model the way the formulary and
+departments do — it isn't a hospital-wide invariant the way an empty
+`medicines` table would be (a blank prescription picker), it's the pharmacy's
+starting catalogue — so it lives here, seeded once explicitly rather than
+reconciled at every boot. This is the data developers used to insert into
+their own database by hand; every checkout now gets the same rows after
+`git pull`.
 
-Deliberately scoped to master data only — no branches, no stock batches. Where
-a medicine ends up in inventory is operational, not master data, and belongs
-to whoever runs the pharmacy at each site, not to a seed every developer runs.
+Brands are matched by (brand_name, strength) — the same pair the table's
+unique constraint uses — and only ever inserted, never updated: re-running
+this is a no-op for anything already present, and it never touches a brand a
+developer added or edited by hand afterward, seeded or not.
+
+Requires departments to already exist — `seed_departments`/`ensure_departments`
+runs first, both in `portal/seeds.py` and at application boot — for the
+department links to attach. A brand whose department is somehow still missing
+is created anyway, just without that link; nothing here fails because of it.
+
+Deliberately scoped to master data only — no branches, no stock batches.
+Where a medicine ends up in inventory is operational, not master data, and
+belongs to whoever runs the pharmacy at each site, not to a seed every
+developer runs.
 """
 
 from portal.extensions import db
 from portal.models.department import Department
-from portal.models.medicine import Medicine
+from portal.models.medicine import DEFAULT_FORMULARY, Medicine
 from portal.models.medicine_brand import MedicineBrand
-
-# (name, category, default_dose, default_frequency)
-FORMULARY = [
-    ("Paracetamol 650mg", "Analgesic/Antipyretic", "1 Tablet", "Every 6 hours"),
-    ("Vitamin C 500mg", "Supplement", "1 Tablet", "Once Daily"),
-    ("Zincovit Tablet", "Supplement", "1 Tablet", "Once Daily"),
-    ("ORS", "Rehydration", "1 Sachet", "As needed"),
-    ("Cetirizine 10mg", "Antihistamine", "1 Tablet", "Once Daily"),
-    ("Amoxicillin 500mg", "Antibiotic", "1 Capsule", "Every 8 hours"),
-    ("Ibuprofen 400mg", "NSAID", "1 Tablet", "Every 8 hours"),
-    ("Omeprazole 20mg", "Antacid", "1 Capsule", "Once Daily, before food"),
-    ("Cough Syrup (Dextromethorphan)", "Antitussive", "10ml", "Every 8 hours"),
-]
 
 # (brand_name, generic_name, used_for, category, manufacturer, form, strength,
 #  departments)
@@ -188,40 +187,31 @@ MEDICINE_BRANDS = [
 
 
 def seed_formulary():
-    """Creates any missing formulary entry. Returns the names it created."""
-    created = []
-    for name, category, dose, frequency in FORMULARY:
-        if not Medicine.query.filter_by(name=name).first():
-            db.session.add(
-                Medicine(name=name, category=category, default_dose=dose, default_frequency=frequency)
-            )
-            created.append(name)
-    db.session.commit()
-    return created
+    """Creates any missing formulary entry from DEFAULT_FORMULARY. Returns the
+    names it created.
+
+    Belt-and-braces: `ensure_medicines` already guarantees these exist on
+    every application start, so this only matters for a database `python -m
+    portal.seeds` is run against directly, without the app having started.
+    """
+    existing = {name for (name,) in db.session.query(Medicine.name).all()}
+    missing = [row for row in DEFAULT_FORMULARY if row[0] not in existing]
+
+    for name, category, dose, frequency in missing:
+        db.session.add(
+            Medicine(name=name, category=category, default_dose=dose, default_frequency=frequency)
+        )
+    if missing:
+        db.session.commit()
+
+    return [row[0] for row in missing]
 
 
 def seed_medicine_brands():
     """Creates any missing brand, linking it to its formulary generic (if one
     matches) and to the departments it serves. Returns the brand names it
     created — a brand that already exists is left exactly as it is, including
-    any department links a developer has since changed by hand.
-
-    12 of the 16 departments these brands reference are seeded by migration
-    f7a3c58e91b2; the other 4 (General Medicine, Orthopedics, Gynecology,
-    Gastroenterology) are not created by any migration, so they are ensured
-    here — by name, idempotently — before any brand tries to link to them.
-    """
-    required_departments = {
-        name
-        for *_rest, dept_spec in MEDICINE_BRANDS
-        if dept_spec != "ALL"
-        for name in dept_spec
-    }
-    for name in sorted(required_departments):
-        if not Department.query.filter_by(name=name).first():
-            db.session.add(Department(name=name))
-    db.session.commit()
-
+    any department links a developer has since changed by hand."""
     departments = {d.name: d for d in Department.query.all()}
     created = []
 
@@ -265,7 +255,7 @@ def run():
     if formulary_created:
         print(f"  Formulary   -> added {len(formulary_created)}: {', '.join(formulary_created)}")
     else:
-        print(f"  Formulary   -> all {len(FORMULARY)} already present")
+        print(f"  Formulary   -> all {len(DEFAULT_FORMULARY)} already present")
 
     if brands_created:
         print(f"  Medicines   -> added {len(brands_created)} brand(s)")

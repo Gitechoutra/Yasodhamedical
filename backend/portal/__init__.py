@@ -93,17 +93,25 @@ class InitApp:
         self._register_health(app)
 
         # -- Reference data ------------------------------------------------
-        # The two things a database needs before anyone can use it: the roles
-        # the authorization model is written against, and an administrator to
-        # sign in as. Checked on every start rather than left to a migration
-        # or a seed command, so a fresh clone or a restored dump comes up
-        # usable. Both are additive and non-fatal -- see helpers/bootstrap.
+        # What a database needs before anyone can use it: the roles the
+        # authorization model is written against, an administrator to sign in
+        # as, and the departments and formulary the clinical workflows assume.
+        # Checked on every start rather than left to a migration or a seed
+        # command, so a fresh clone or a restored dump comes up usable.
         #
-        # Roles first: the admin account needs its role to exist.
-        from portal.helpers.bootstrap import ensure_admin, ensure_roles
+        # All additive and non-fatal -- see helpers/bootstrap. Roles run first
+        # because the admin account needs its role to exist.
+        from portal.helpers.bootstrap import (
+            ensure_admin,
+            ensure_departments,
+            ensure_medicines,
+            ensure_roles,
+        )
 
         ensure_roles(app)
         ensure_admin(app)
+        ensure_departments(app)
+        ensure_medicines(app)
 
         app.logger.info("Portal initialization completed successfully")
 
