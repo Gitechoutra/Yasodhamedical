@@ -88,15 +88,19 @@ def ensure_roles(app):
 
 
 def ensure_admin(app):
-    """Creates the default administrator when that account is absent.
+    """Creates the default administrator when the database has no admin at all.
 
     Returns True if it created one. Same contract as `ensure_roles`: additive,
     idempotent, and never raises.
 
-    The actual work is `seeders/seed_admin.create_admin_if_missing`, so the
-    credentials and the "never touch an existing account" rule are defined
-    once and behave identically whether they arrive via `python app.py` or
-    `python -m portal.seeds`.
+    Note what this does *not* do: it never re-creates the default account
+    beside an administrator who has changed their credentials. Restarting the
+    server after changing your email must leave you with one admin, not two —
+    the second holding a password that is published in the repository.
+
+    The actual work is `seeders/seed_admin.create_admin_if_missing`, so that
+    rule and the credentials are defined once and behave identically whether
+    they arrive via `python app.py` or `python -m portal.seeds`.
 
     Must run after `ensure_roles` — the account needs its role to exist.
     """
@@ -116,14 +120,27 @@ def ensure_admin(app):
                     )
                     return False
 
-            _name, email, _password, is_default_password = admin_credentials()
-            _admin, created = create_admin_if_missing()
+            _name, _email, _password, is_default_password = admin_credentials()
+            admin, created = create_admin_if_missing()
 
             if not created:
-                app.logger.info("Admin check: %s already exists", email)
+                # The existing admin's own address, which is not the configured
+                # one once somebody has changed it. Logging the configured
+                # value here would imply the check had touched the account.
+                app.logger.info(
+                    "Admin check: an administrator already exists (%s) -- left untouched",
+                    admin.email,
+                )
+                if not admin.is_active:
+                    app.logger.warning(
+                        "The only administrator (%s) is disabled. No replacement has "
+                        "been created -- re-enable it in the database if you are "
+                        "locked out.",
+                        admin.email,
+                    )
                 return False
 
-            app.logger.info("Admin check: created the default administrator -- %s", email)
+            app.logger.info("Admin check: created the default administrator -- %s", admin.email)
             if is_default_password:
                 app.logger.warning(
                     "That admin uses the default password. Set SEED_ADMIN_PASSWORD, "
