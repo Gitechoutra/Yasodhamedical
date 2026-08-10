@@ -24,18 +24,42 @@ export const ROLE_LABELS = {
  * changes, and the form re-renders itself.
  */
 const ROLE_FIELDS = {
+  // Department is a doctor-only field. It is what the OP queue routes on —
+  // an appointment is raised against a department and only a doctor in that
+  // department can pick it up — so for a doctor it is operational data the
+  // account cannot work without.
+  //
+  // For every other role it was HR trivia: a receptionist works the front
+  // desk, a pharmacist is scoped by branch, and an accountant belongs to no
+  // clinical department at all. Nothing read those values.
   doctor: ["department", "specialization", "designation", "registration_no", "years_experience"],
-  nurse: ["department", "designation", "registration_no"],
-  receptionist: ["department"],
+  nurse: ["designation", "registration_no"],
+  receptionist: [],
   pharmacist: ["branch", "designation", "registration_no"],
-  lab_technician: ["department", "lab_department", "qualification", "designation"],
+  lab_technician: ["lab_department", "qualification", "designation"],
   accountant: ["designation", "qualification"],
-  other_staff: ["department", "designation"],
+  other_staff: ["designation"],
 };
 
 // Fields the server refuses to create the account without, because the role's
 // operational profile cannot exist otherwise.
-const REQUIRED_BY_ROLE = { doctor: ["department"], nurse: ["department"], pharmacist: ["branch"] };
+// Nurse is deliberately absent: `nurses.department_id` is nullable, the only
+// query that filters on it passes the department optionally (and no caller
+// ever does), and POST /nursing/nurses has always created nurses without one.
+// Requiring it here was stricter than the rest of the application.
+// Exactly ten digits. Mirrors PHONE_RE in routes/staff_routes.py — the server
+// is the boundary, this is what stops the administrator finding out only when
+// they press Save.
+const PHONE_DIGITS = 10;
+
+/** Everything that is not a digit, dropped. Lets a pasted "+91 98765 43210"
+ *  become a usable number instead of an error the admin has to clean up by
+ *  hand, while typing a letter simply does nothing. */
+function digitsOnly(value) {
+  return (value || "").replace(/\D/g, "").slice(0, PHONE_DIGITS);
+}
+
+const REQUIRED_BY_ROLE = { doctor: ["department"], pharmacist: ["branch"] };
 
 const REGISTRATION_LABELS = {
   doctor: "Medical registration number",
@@ -78,7 +102,12 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
       email: staff.email || "",
       role: staff.role || "",
       is_active: staff.is_active,
-      phone: p.phone || "",
+      // Sanitised on the way in too. No stored number currently breaks the
+      // rule, but one written before it existed would otherwise load into a
+      // field that can no longer represent it — leaving the admin unable to
+      // save the record at all without first clearing a number they may have
+      // wanted to keep.
+      phone: digitsOnly(p.phone),
       gender: p.gender || "",
       date_of_birth: p.date_of_birth || "",
       joined_on: p.joined_on || "",
@@ -128,6 +157,10 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
   const mismatch =
     form.confirm_password.length > 0 && form.password !== form.confirm_password;
 
+  // Optional, but exact when given: a half-typed number is not "nearly valid",
+  // it is a number that would reach the wrong person.
+  const phoneIncomplete = form.phone.length > 0 && form.phone.length < PHONE_DIGITS;
+
   // Trivial to compute and `required` is rebuilt each render anyway, so a
   // memo here would cost more than it saves.
   const missing = required.filter((r) =>
@@ -138,6 +171,10 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
     e.preventDefault();
     if (mismatch) {
       setErrorMsg("Those passwords do not match.");
+      return;
+    }
+    if (phoneIncomplete) {
+      setErrorMsg(`Mobile number must be exactly ${PHONE_DIGITS} digits.`);
       return;
     }
     setSaving(true);
@@ -202,7 +239,26 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
             <label className={label}>Mobile number</label>
-            <input className={input} value={form.phone} onChange={update("phone")} />
+            <input
+              type="tel"
+              // inputMode gets a phone keypad on mobile; the value is still
+              // sanitised on the way in, because a keypad is a suggestion and
+              // paste ignores it entirely.
+              inputMode="numeric"
+              autoComplete="tel"
+              maxLength={PHONE_DIGITS}
+              placeholder={`${PHONE_DIGITS} digits`}
+              className={`${input} ${phoneIncomplete ? "border-red-300" : ""}`}
+              value={form.phone}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, phone: digitsOnly(e.target.value) }))
+              }
+            />
+            {phoneIncomplete && (
+              <p className="mt-1 text-xs text-red-600">
+                {form.phone.length} of {PHONE_DIGITS} digits
+              </p>
+            )}
           </div>
           <div>
             <label className={label}>Gender</label>
@@ -249,7 +305,10 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
         </div>
 
         {/* Everything below depends on the role selected above. */}
-        {form.role && (
+        {/* Only when the role actually adds fields. Receptionist now adds
+            none, and a "Receptionist details" heading over an empty box
+            reads as something failing to load. */}
+        {form.role && shown.length > 0 && (
           <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/70 p-4">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
               {ROLE_LABELS[form.role]} details
@@ -450,7 +509,7 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
 
         <button
           type="submit"
-          disabled={saving || mismatch || missing.length > 0}
+          disabled={saving || mismatch || phoneIncomplete || missing.length > 0}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
           {saving ? "Saving…" : editing ? "Save changes" : "Create staff account"}

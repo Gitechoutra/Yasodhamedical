@@ -38,6 +38,29 @@ from portal.models.user import User
 staff_bp = Blueprint("staff", __name__)
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+# Exactly ten digits and nothing else -- no spaces, punctuation, country code
+# or letters. Anchored, so a longer string containing ten digits is rejected
+# rather than partially matched.
+#
+# Deliberately not a general international phone format: this is an Indian
+# hospital's staff directory and every number in it is a ten-digit mobile.
+# Widening it later means changing this constant and the matching hint in
+# StaffFormModal, which is why the message below spells the rule out rather
+# than saying "invalid".
+PHONE_DIGITS = 10
+# `[0-9]`, not `\d`. Python's `\d` matches every Unicode decimal digit, so
+# `\d{10}` happily accepts Devanagari "९८७६५४३२१०" — ten characters that are
+# digits by Unicode's definition and unusable as a phone number by anyone's.
+# JavaScript's `\d` is ASCII-only, so the browser was already stripping them
+# and only the server was wrong; this is exactly the kind of gap that makes
+# server-side validation worth writing separately rather than assuming the
+# form has already dealt with it.
+PHONE_RE = re.compile(rf"^[0-9]{{{PHONE_DIGITS}}}$")
+PHONE_ERROR = (
+    f"Mobile number must be exactly {PHONE_DIGITS} digits, "
+    "with no spaces, symbols or letters"
+)
 MIN_PASSWORD = 8
 MAX_AGE_YEARS = 100
 
@@ -49,7 +72,6 @@ STAFF_DELETED = "staff.deleted"
 # Fields the administrator types that live on the staff profile. Listed once so
 # create and edit cannot drift apart.
 PROFILE_TEXT_FIELDS = (
-    ("phone", 20),
     ("designation", 100),
     ("employee_code", 50),
     ("registration_no", 60),
@@ -130,8 +152,20 @@ def _sync_role_profile(user, role_name, profile, payload):
         db.session.add(row)
 
     elif role_name == "nurse":
-        if not department_id:
-            return "A nurse needs a department"
+        # No department requirement, unlike a doctor.
+        #
+        # A doctor's department is operational: an OP is raised against a
+        # department and only a doctor in it can pick the patient up, so an
+        # account without one cannot do its job. A nurse's is not — nursing
+        # work arrives by direct assignment from the treating doctor, never by
+        # department.
+        #
+        # This route used to demand one anyway, which made it stricter than
+        # everything around it: `nurses.department_id` is nullable, the only
+        # query that filters on it does so optionally and no caller passes it,
+        # and POST /nursing/nurses has always accepted `department_id or None`.
+        # That inconsistency is what made hiding the field on the staff form
+        # produce a 422 the administrator had no way to satisfy.
         row = user.nurse_profile or Nurse(user_id=user.id)
         row.department_id = department_id
         row.employee_no = profile.employee_code
@@ -155,6 +189,18 @@ def _apply_profile(profile, payload):
     for field, limit in PROFILE_TEXT_FIELDS:
         if field in payload:
             setattr(profile, field, _text(payload, field, limit))
+
+    if "phone" in payload:
+        # Optional, but exact when given. An absent or cleared number stores
+        # NULL rather than an empty string, so "no number on file" is one
+        # value in the column instead of two.
+        raw = (payload.get("phone") or "").strip()
+        if not raw:
+            profile.phone = None
+        elif not PHONE_RE.match(raw):
+            return PHONE_ERROR
+        else:
+            profile.phone = raw
 
     if "gender" in payload:
         gender = (payload.get("gender") or "").strip().lower() or None

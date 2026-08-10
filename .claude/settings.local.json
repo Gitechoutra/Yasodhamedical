@@ -56,7 +56,11 @@
       "Bash(node \"C:\\\\Users\\\\Dell\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--MedAsst-Yasodha-Yasodhamedical\\\\a30aaf78-2d77-4be4-a09c-1ed4ed6bac39\\\\scratchpad\\\\check_mobile_bell.mjs\")",
       "Bash(node check_mobile_bell.mjs)",
       "Bash(node check_bell_widths.mjs)",
-      "Bash(node check_adjacent.mjs)"
+      "Bash(node check_adjacent.mjs)",
+      "Bash(./venv/Scripts/python.exe -m py_compile portal/routes/staff_routes.py)",
+      "Bash(./venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/cdc6d854-eaf1-49ce-8f6f-0690ad1080f9/scratchpad/phone_test.py\")",
+      "PowerShell(& \"c:\\\\Users\\\\Mahesh\\\\OneDrive\\\\Desktop\\\\Medical\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m py_compile \"c:\\\\Users\\\\Mahesh\\\\OneDrive\\\\Desktop\\\\Medical\\\\backend\\\\portal\\\\routes\\\\patient_routes.py\")",
+      "PowerShell(if \\($?\\) { \"backend OK\" })"
     ],
     "additionalDirectories": [
       "C:\\Users\\ADMIN\\Downloads\\AI_medical\\backend"

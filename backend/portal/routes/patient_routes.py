@@ -62,16 +62,16 @@ def _parse_dob(raw):
     return parsed, None
 
 
-def _resolve_assigned_doctor(payload, current_doctor):
+def _resolve_assigned_doctor(payload):
     """Returns (doctor_id, error_message).
 
-    Front desk must name the doctor; a doctor registering a patient during
-    their own consultation is assigning to themselves, so it's implied.
+    Always explicit: registration is reception's, and picking the treating
+    doctor is the routing decision that registration exists to make. Nothing
+    infers it, because the only caller who could be inferred from -- a doctor
+    -- cannot reach this route.
     """
     raw = payload.get("assigned_doctor_id")
     if raw in (None, ""):
-        if current_doctor:
-            return current_doctor.id, None
         return None, "assigned_doctor_id is required — choose the doctor for this patient"
 
     doctor = Doctor.query.get(raw)
@@ -188,8 +188,22 @@ def get_patient(patient_id):
 
 
 @patient_bp.post("")
-@jwt_required()
+@role_required("receptionist")
 def create_patient():
+    """Registers a patient. Reception only -- not admin, not the doctor.
+
+    A patient enters the hospital through the front desk, which is what makes
+    admission one accountable step: the demographics, the patient code and the
+    choice of treating doctor are all recorded by the person who met them. A
+    doctor registering a patient would be assigning themselves the case, which
+    is precisely the routing decision reception owns; admin monitors the
+    hospital and administers accounts, and admits nobody.
+
+    Narrower than FRONT_DESK_ROLES on purpose -- correcting a registration
+    (`update_patient`) and re-routing one (`reassign_patient`) stay open to
+    admin, because unsticking a bad record is administration. Creating one is
+    not.
+    """
     payload = request.get_json(silent=True) or {}
     name = (payload.get("name") or "").strip()
     if not name:
@@ -199,7 +213,7 @@ def create_patient():
     if dob_error:
         return error(dob_error, status=422)
 
-    assigned_doctor_id, doctor_error = _resolve_assigned_doctor(payload, get_current_doctor())
+    assigned_doctor_id, doctor_error = _resolve_assigned_doctor(payload)
     if doctor_error:
         return error(doctor_error, status=422)
 

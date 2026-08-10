@@ -8,7 +8,7 @@ import PatientCard from "../components/PatientCard";
 import AssignNurseModal from "../components/nursing/AssignNurseModal";
 import EditPatientModal from "../components/EditPatientModal";
 import { useAuth } from "../context/AuthContext";
-import { canCreateOp } from "../utils/permissions";
+import { canCreateOp, canReassignDoctor, canRegisterPatient } from "../utils/permissions";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDoctors } from "../services/doctorService";
 import {
@@ -22,7 +22,10 @@ import {
 
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024; // must match the backend's limit
 
-function AddPatientModal({ onClose, onCreated, doctors, mustAssign }) {
+// Only ever rendered for the front desk — see `canRegisterPatient`. The
+// treating doctor is therefore always chosen here rather than implied, which
+// is why the picker below is unconditional.
+function AddPatientModal({ onClose, onCreated, doctors }) {
   const [form, setForm] = useState({
     name: "",
     gender: "",
@@ -162,33 +165,29 @@ function AddPatientModal({ onClose, onCreated, doctors, mustAssign }) {
           <label className="mb-1 block text-xs font-semibold text-slate-600">Allergies</label>
           <input className={inputClass} value={form.allergies} onChange={update("allergies")} />
         </div>
-        {mustAssign && (
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">
-              Assign Doctor *
-            </label>
-            {/* Chosen from the condition the patient presents with — this is
-                also what decides who can see the record afterwards. */}
-            <select
-              required
-              className={inputClass}
-              value={form.assigned_doctor_id}
-              onChange={update("assigned_doctor_id")}
-            >
-              <option value="">Select the treating doctor</option>
-              {doctors.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                  {d.specialization ? ` — ${d.specialization}` : ""}
-                  {d.department ? ` (${d.department})` : ""}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-[11px] text-slate-400">
-              Only this doctor will be able to see this patient.
-            </p>
-          </div>
-        )}
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-slate-600">Assign Doctor *</label>
+          {/* Chosen from the condition the patient presents with — this is
+              also what decides who can see the record afterwards. */}
+          <select
+            required
+            className={inputClass}
+            value={form.assigned_doctor_id}
+            onChange={update("assigned_doctor_id")}
+          >
+            <option value="">Select the treating doctor</option>
+            {doctors.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+                {d.specialization ? ` — ${d.specialization}` : ""}
+                {d.department ? ` (${d.department})` : ""}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-slate-400">
+            Only this doctor will be able to see this patient.
+          </p>
+        </div>
 
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">Medical History</label>
@@ -217,14 +216,18 @@ function AddPatientModal({ onClose, onCreated, doctors, mustAssign }) {
 export default function Patients() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  // A patient is admitted at the front desk and nowhere else. A doctor works
+  // whoever reception routes to them; they never register a patient — and the
+  // server refuses the call, so this only decides whether to draw the button.
+  const canRegister = canRegisterPatient(user?.role);
   // Scheduling a patient into a department queue is front-desk/admin work —
   // doctors just work whatever lands in their own Appointments queue.
   // Front desk only — same rule as the Appointments page, from one place so
   // the two cannot drift. Admin monitors; it does not raise visits.
   const canScheduleAppointments = canCreateOp(user?.role);
-  // Front desk picks the treating doctor; a doctor registering a patient is
-  // implicitly assigning them to themselves, so no picker is needed.
-  const mustAssign = user?.role !== "doctor";
+  // Correcting a mis-routed patient. Front desk *and* admin, matching the
+  // server's assignment route — wider than registration on purpose.
+  const canReroute = canReassignDoctor(user?.role);
   // Handing a patient to a nurse is the treating doctor's call — the server
   // rejects it from anyone else. It is also offered for surgery cases only
   // (see the row below): nursing care is the post-operative watch, and the
@@ -268,10 +271,14 @@ export default function Patients() {
     [scope]
   );
 
+  // The doctor list backs both the registration form and the re-route picker;
+  // nobody who can do neither needs to pay for the request.
+  const needsDoctors = canRegister || canReroute;
+
   useEffect(() => {
-    if (!mustAssign) return;
+    if (!needsDoctors) return;
     fetchDoctors().then(setDoctors).catch(() => setDoctors([]));
-  }, [mustAssign]);
+  }, [needsDoctors]);
 
   useEffect(() => {
     load();
@@ -312,13 +319,15 @@ export default function Patients() {
               : "Registered or in Appointments — not yet consulted"}
           </p>
         </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
-        >
-          <HiOutlinePlus className="h-4 w-4" />
-          Add Patient
-        </button>
+        {canRegister && (
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
+          >
+            <HiOutlinePlus className="h-4 w-4" />
+            Add Patient
+          </button>
+        )}
       </div>
 
       {/* A patient sits on exactly one side: in Appointments until their
@@ -404,7 +413,7 @@ export default function Patients() {
                 key={p.id}
                 patient={p}
                 doctors={doctors}
-                mustAssign={mustAssign}
+                canReassignDoctor={canReroute}
                 canScheduleAppointments={canScheduleAppointments}
                 canAssignNurse={canAssignNurse}
                 canEditPatient={canEditPatient}
@@ -427,10 +436,9 @@ export default function Patients() {
         )}
       </div>
 
-      {showAddModal && (
+      {showAddModal && canRegister && (
         <AddPatientModal
           doctors={doctors}
-          mustAssign={mustAssign}
           onClose={() => setShowAddModal(false)}
           onCreated={() => {
             setShowAddModal(false);
