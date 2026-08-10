@@ -631,10 +631,19 @@ def end_consultation(consultation_id):
     consultation = Consultation.query.get(consultation_id)
     if not consultation:
         return error("Consultation not found", status=404)
-    if consultation.status == "completed":
-        return success(_room_payload(consultation), message="Already completed")
+    # Ownership is checked before the already-completed shortcut, not after.
+    # The other way round, ending an *already finished* consultation returned
+    # 200 to anyone `clinical_only` let through — an admin included — because
+    # the no-op branch answered before the guard ran. Harmless in effect, but
+    # it reported success for an action admin is not allowed to take, and
+    # anything reading that response could reasonably conclude it had.
+    #
+    # Pressing End twice is still a no-op *for the doctor it belongs to*,
+    # which is the only person it was ever idempotent for.
     if not _is_owning_doctor(consultation):
         return error("Only the doctor running this consultation can end it", status=403)
+    if consultation.status == "completed":
+        return success(_room_payload(consultation), message="Already completed")
 
     if not consultation.messages:
         return error("Cannot end a consultation with no conversation recorded", status=422)

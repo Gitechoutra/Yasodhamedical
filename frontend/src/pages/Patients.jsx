@@ -8,6 +8,7 @@ import PatientCard from "../components/PatientCard";
 import AssignNurseModal from "../components/nursing/AssignNurseModal";
 import EditPatientModal from "../components/EditPatientModal";
 import { useAuth } from "../context/AuthContext";
+import { canCreateOp } from "../utils/permissions";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDoctors } from "../services/doctorService";
 import {
@@ -218,7 +219,9 @@ export default function Patients() {
   const { user } = useAuth();
   // Scheduling a patient into a department queue is front-desk/admin work —
   // doctors just work whatever lands in their own Appointments queue.
-  const canScheduleAppointments = user?.role !== "doctor";
+  // Front desk only — same rule as the Appointments page, from one place so
+  // the two cannot drift. Admin monitors; it does not raise visits.
+  const canScheduleAppointments = canCreateOp(user?.role);
   // Front desk picks the treating doctor; a doctor registering a patient is
   // implicitly assigning them to themselves, so no picker is needed.
   const mustAssign = user?.role !== "doctor";

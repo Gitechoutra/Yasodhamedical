@@ -13,7 +13,7 @@ from portal.helpers.case_helper import (
     todays_session,
 )
 from portal.helpers.broadcast import dashboard_changed
-from portal.helpers.decorators import FRONT_DESK_ROLES, role_required
+from portal.helpers.decorators import role_required
 from portal.helpers.notify import department_doctor_user_ids, notify
 from portal.helpers.patient_access import can_access_patient, patient_scope
 from portal.helpers.response import error, success
@@ -124,11 +124,24 @@ def list_appointments():
 
 
 @appointment_bp.post("")
-@role_required(*FRONT_DESK_ROLES)
+@role_required("receptionist")
 def create_appointment():
-    # Intentionally NOT open to doctors: registering a patient for an OP visit
-    # is front-desk work, not something a doctor should self-serve — keeps the
-    # department queues an honest reflection of real intake.
+    # The front desk, and only the front desk.
+    #
+    # Not doctors: registering a patient for an OP visit is intake work, not
+    # something a doctor should self-serve — that keeps the department queues
+    # an honest reflection of who actually walked in.
+    #
+    # Not admins either, which is narrower than the FRONT_DESK_ROLES used by
+    # the patient-routing endpoints. Admin is a monitoring and administration
+    # role: it reads the queue and the appointment book, but calling a patient
+    # in is an operational act belonging to the desk. Raising an OP from an
+    # admin account would put a visit into a department queue that no
+    # receptionist knows about.
+    #
+    # FRONT_DESK_ROLES deliberately still includes admin for reassigning and
+    # removing a registration (patient_routes) — those are corrections to bad
+    # data, which is administration.
     payload = request.get_json(silent=True) or {}
     patient_id = payload.get("patient_id")
     department_id = payload.get("department_id")

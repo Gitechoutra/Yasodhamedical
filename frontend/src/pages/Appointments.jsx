@@ -14,6 +14,7 @@ import { useAuth } from "../context/AuthContext";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchAppointments, createAppointment, startAppointment } from "../services/appointmentService";
 import { fetchPatients } from "../services/patientService";
+import { canCreateOp, canRunConsultation } from "../utils/permissions";
 
 function CreateOpModal({ patients, preselectedPatientId, onClose, onCreated }) {
   const [patientId, setPatientId] = useState(preselectedPatientId || "");
@@ -121,9 +122,15 @@ export default function Appointments() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Scheduling (assigning a patient to a department) is front-desk/admin
-  // work, not something a doctor does for themselves — see appointment_routes.py.
-  const canScheduleAppointments = user?.role !== "doctor";
+  // Raising an OP is front-desk work only. Not doctors (they would be
+  // queueing their own patients), and not admins — admin monitors the queue
+  // rather than calling patients in. `POST /appointments` enforces the same
+  // rule, so this only decides whether the control is worth drawing.
+  const canScheduleAppointments = canCreateOp(user?.role);
+
+  // Starting or resuming a consultation is the doctor's, and the server
+  // narrows it further to the doctor the appointment belongs to.
+  const canConsult = canRunConsultation(user?.role);
 
   const [appointments, setAppointments] = useState([]);
   const [patients, setPatients] = useState([]);
@@ -272,6 +279,7 @@ export default function Appointments() {
                 appointment={a}
                 isNext={a.id === nextInQueueId}
                 busy={startingId === a.id}
+                canConsult={canConsult}
                 onStart={(appt) => handleStart(appt.id)}
                 onResume={(appt) => navigate(`/dashboard/consultations/${appt.consultation_id}`)}
               />

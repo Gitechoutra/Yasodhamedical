@@ -29,13 +29,25 @@ const STARTABLE_STATUSES = ["waiting", "scheduled", "confirmed"];
  *
  * `isNext` highlights the top waiting card — the person the doctor should
  * call in once the current consultation ends.
+ *
+ * `canConsult` is whether this viewer may call patients in at all. False for
+ * a receptionist and for an admin, who both read this queue for their own
+ * reasons without ever running the visit. They still see the card, its
+ * status and its position — the card is the queue, not the action.
  */
-export default function AppointmentCard({ appointment, isNext, onStart, onResume, busy }) {
+export default function AppointmentCard({
+  appointment,
+  isNext,
+  canConsult = false,
+  onStart,
+  onResume,
+  busy,
+}) {
   const patient = appointment.patient_detail || {};
   const ongoing = appointment.status === "in_progress";
   // Only an appointment still to be seen gets the button — a completed or
   // cancelled one has nothing left to start.
-  const canStart = STARTABLE_STATUSES.includes(appointment.status);
+  const canStart = canConsult && STARTABLE_STATUSES.includes(appointment.status);
   const status = STATUS_META[appointment.status] || {
     label: appointment.status.replace("_", " "),
     tone: "slate",
@@ -96,8 +108,13 @@ export default function AppointmentCard({ appointment, isNext, onStart, onResume
         )}
       </RecordCardBody>
 
+      {/* The footer always carries two things — a state on the left, the
+          time on the right — so a card without the action button keeps the
+          same shape rather than leaving a hole where it was. For a viewer
+          who cannot consult, the left slot is the status label, which is the
+          same fallback an already-completed appointment has always used. */}
       <RecordCardFooter>
-        {ongoing ? (
+        {ongoing && canConsult ? (
           <button
             onClick={() => onResume(appointment)}
             className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:shadow-md"

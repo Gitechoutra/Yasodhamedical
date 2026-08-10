@@ -13,13 +13,6 @@ a deployment story — see the warning both callers emit when it is in use.
     SEED_ADMIN_EMAIL     default: admin@yasodhahospitals.com
     SEED_ADMIN_PASSWORD  default: Admin@123
 
-These describe the account to create when there is nobody to sign in as. They
-are *not* a description of what the administrator must remain: once the
-account exists, changing its email or password in the application is the
-administrator's business, and nothing here overwrites, re-creates or
-duplicates it. Editing the values above after an admin exists therefore does
-nothing at all — which is the point.
-
 Two callers share `create_admin_if_missing` so the credentials are defined in
 exactly one place:
 
