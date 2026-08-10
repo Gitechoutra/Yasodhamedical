@@ -1,42 +1,4 @@
-"""Seeds the default administrator login, and keeps it in step afterwards.
 
-The one account that cannot be created through the application: Staff
-Management deliberately refuses to grant the `admin` role (see
-`models/role.STAFF_ROLES`), because granting administrator is how every other
-grant is made. So the first admin has to come from outside the app.
-
-The credentials are read from the environment, falling back to the documented
-development defaults. That fallback is a convenience for a local checkout, not
-a deployment story — see the warning both callers emit when it is in use.
-
-    SEED_ADMIN_NAME      default: Admin
-    SEED_ADMIN_EMAIL     default: ramanamuddada@gmail.com
-    SEED_ADMIN_PASSWORD  default: Admin@123
-    SEED_ADMIN_SYNC      default: true
-
-These describe the administrator account, not merely the one to create when
-there is nobody to sign in as: changing a value here and restarting rewrites
-the existing account to match, which is how the administrator's credentials
-are meant to be changed. Exactly one admin row is ever involved — the account
-is moved, never duplicated.
-
-That authority cuts both ways, and it is worth being plain about it. Because
-the configuration wins at every start, a password the administrator changes
-*inside* the application is reverted the next time the server boots, and the
-default password above is a working login for as long as it stays configured
-rather than only until first sign-in. Set `SEED_ADMIN_SYNC=false` to give that
-up and pin the account instead: nothing here will then touch an admin that
-already exists, and the credentials become the application's business alone.
-
-Two callers share `ensure_admin_account` so the credentials and the rule are
-defined in exactly one place:
-
-  * `portal/seeds.py`   -- the explicit `python -m portal.seeds` command
-  * `helpers/bootstrap` -- the automatic check on every application start
-
-Which is why the function below neither prints nor logs: the CLI wants stdout,
-the boot path wants the application log, and each formats its own.
-"""
 
 import os
 
@@ -45,8 +7,8 @@ from portal.models.role import Role
 from portal.models.user import User
 
 DEFAULT_NAME = "Admin"
-DEFAULT_EMAIL = "goddumahesh123@gmail.com"
-DEFAULT_PASSWORD = "Admin@123"
+DEFAULT_EMAIL = "ramanamuddada@gmail.com"
+DEFAULT_PASSWORD = "Ramana@123"
 
 # Spellings of "no" accepted from the environment. Anything else — including
 # an unset or empty value — leaves syncing on, so the documented default
