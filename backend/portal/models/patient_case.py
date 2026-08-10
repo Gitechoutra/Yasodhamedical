@@ -58,6 +58,14 @@ class PatientCase(db.Model):
 
     created_at = db.Column(db.TIMESTAMP, server_default=db.func.now(), default=datetime.utcnow)
 
+    __table_args__ = (
+        # Backs "this patient's open case" / "this patient's cases by status"
+        # lookups. Declared explicitly because it was added via a raw
+        # migration rather than a model column flag — without this, autogenerate
+        # can't see it and proposes to drop it on every `flask db migrate`.
+        db.Index("ix_patient_cases_patient_status", "patient_id", "status"),
+    )
+
     patient = db.relationship("Patient")
     doctor = db.relationship("Doctor")
     closed_by_user = db.relationship("User", foreign_keys=[closed_by])

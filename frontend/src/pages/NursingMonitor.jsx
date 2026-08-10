@@ -3,10 +3,22 @@ import { Link } from "react-router-dom";
 import {
   HiOutlineBellAlert,
   HiOutlineExclamationTriangle,
+  HiOutlineHeart,
   HiOutlineInboxArrowDown,
 } from "react-icons/hi2";
-import Avatar from "../components/Avatar";
 import SurgeryStageBadge from "../components/SurgeryStageBadge";
+import {
+  Badge,
+  EmptyState,
+  RecordCard,
+  RecordCardBadges,
+  RecordCardBody,
+  RecordCardFooter,
+  RecordCardHeader,
+  RecordGrid,
+  RecordGridSkeleton,
+  cardLinkClass,
+} from "../components/RecordCard";
 import {
   CareTypeBadge,
   ComplianceBar,
@@ -14,6 +26,54 @@ import {
 } from "../components/nursing/NursingBadges";
 import useLiveNursing from "../hooks/useLiveNursing";
 import { fetchAssignments, fetchNursingSummary } from "../services/nursingService";
+
+function AssignmentCard({ assignment: a, remaining }) {
+  return (
+    <RecordCard accent={a.open_alerts > 0 ? "brand" : undefined}>
+      <RecordCardBody>
+        <RecordCardHeader
+          name={a.patient}
+          imageUrl={a.patient_photo_url}
+          lines={[a.patient_code, `Nurse: ${a.nurse}`]}
+        />
+
+        <RecordCardBadges>
+          <CareTypeBadge careType={a.care_type} status={a.status} />
+          <SurgeryStageBadge stage={a.surgery_stage} daysLeft={a.observation_days_left} />
+          {a.open_alerts > 0 && (
+            <Badge tone="amber" icon={HiOutlineBellAlert}>
+              {a.open_alerts} alert{a.open_alerts > 1 ? "s" : ""}
+            </Badge>
+          )}
+          {a.unreviewed_updates > 0 && <Badge tone="brand">{a.unreviewed_updates} new</Badge>}
+        </RecordCardBadges>
+
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
+          <span className="font-medium text-slate-700">{formatWhen(a.starts_at)}</span>
+          <span>
+            {a.status !== "active"
+              ? a.status
+              : remaining === null || remaining <= 0
+                ? "Under care"
+                : remaining === 1
+                  ? "1 day planned"
+                  : `${remaining} days planned`}
+          </span>
+        </div>
+
+        <div className="mt-3">
+          <ComplianceBar compliance={a.compliance} />
+        </div>
+      </RecordCardBody>
+
+      <RecordCardFooter>
+        <Link to={`/dashboard/nursing/${a.id}`} className={cardLinkClass}>
+          Open record
+        </Link>
+      </RecordCardFooter>
+    </RecordCard>
+  );
+}
 
 const FILTERS = [
   { key: "active", label: "Under nursing care" },
@@ -125,112 +185,23 @@ export default function NursingMonitor() {
         <p className="mt-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{errorMsg}</p>
       )}
 
-      {loading ? (
-        <div className="mt-6 space-y-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-24 animate-pulse rounded-2xl bg-slate-100" />
-          ))}
-        </div>
-      ) : assignments.length === 0 ? (
-        <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center">
-          <p className="text-sm font-medium text-slate-600">
-            You haven&apos;t assigned a nurse to anyone yet.
-          </p>
-          <p className="mt-1 text-sm text-slate-400">
-            Finish a consultation and use <span className="font-semibold">Assign nurse</span> to
-            hand the patient over for the observation period.
-          </p>
-        </div>
-      ) : (
-        <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-100 bg-white shadow-sm">
-          <table className="w-full min-w-[48rem] text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-100 text-xs uppercase tracking-wide text-slate-400">
-                <th className="px-6 py-3 font-medium">Patient</th>
-                <th className="px-6 py-3 font-medium">Nurse</th>
-                <th className="px-6 py-3 font-medium">Care</th>
-                <th className="px-6 py-3 font-medium">Period</th>
-                <th className="px-6 py-3 font-medium">Medication</th>
-                <th className="px-6 py-3 font-medium">Alerts</th>
-                <th className="px-6 py-3 font-medium">New</th>
-              </tr>
-            </thead>
-            <tbody>
-              {assignments.map((a) => {
-                const remaining = daysLeft(a.ends_at);
-                return (
-                  <tr
-                    key={a.id}
-                    className="border-b border-slate-50 transition last:border-0 hover:bg-slate-50/60"
-                  >
-                    <td className="px-6 py-3">
-                      <Link
-                        to={`/dashboard/nursing/${a.id}`}
-                        className="flex items-center gap-3"
-                      >
-                        <Avatar name={a.patient} imageUrl={a.patient_photo_url} size="sm" />
-                        <div>
-                          <p className="font-medium text-slate-800">{a.patient}</p>
-                          <p className="text-xs text-slate-400">{a.patient_code}</p>
-                        </div>
-                      </Link>
-                    </td>
-                    <td className="px-6 py-3 text-slate-600">{a.nurse}</td>
-                    <td className="px-6 py-3">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <CareTypeBadge careType={a.care_type} status={a.status} />
-                        <SurgeryStageBadge
-                          stage={a.surgery_stage}
-                          daysLeft={a.observation_days_left}
-                        />
-                      </div>
-                    </td>
-                    <td className="px-6 py-3 text-xs">
-                      <p className="text-slate-500">{formatWhen(a.starts_at)}</p>
-                      <p className="text-slate-400">
-                        {a.status !== "active"
-                          ? a.status
-                          : remaining === null || remaining <= 0
-                            ? "Under care"
-                            : remaining === 1
-                              ? "1 day planned"
-                              : `${remaining} days planned`}
-                      </p>
-                    </td>
-                    <td className="px-6 py-3">
-                      <ComplianceBar compliance={a.compliance} className="min-w-[10rem]" />
-                    </td>
-                    <td className="px-6 py-3">
-                      {a.open_alerts > 0 ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700">
-                          <HiOutlineBellAlert className="h-3.5 w-3.5" />
-                          {a.open_alerts}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-400">—</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-3">
-                      {/* Nursing activity logged since this doctor last opened
-                          the record — cleared by opening it, not by the bell. */}
-                      {a.unreviewed_updates > 0 ? (
-                        <Link
-                          to={`/dashboard/nursing/${a.id}`}
-                          className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2.5 py-1 text-xs font-semibold text-brand-700 transition hover:bg-brand-200"
-                        >
-                          {a.unreviewed_updates} new
-                        </Link>
-                      ) : (
-                        <span className="text-xs text-slate-400">reviewed</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <div className="mt-6">
+        {loading ? (
+          <RecordGridSkeleton count={3} />
+        ) : assignments.length === 0 ? (
+          <EmptyState icon={HiOutlineHeart}>
+            You haven&apos;t assigned a nurse to anyone yet. Finish a consultation and use{" "}
+            <span className="font-semibold">Assign nurse</span> to hand the patient over for the
+            observation period.
+          </EmptyState>
+        ) : (
+          <RecordGrid>
+            {assignments.map((a) => (
+              <AssignmentCard key={a.id} assignment={a} remaining={daysLeft(a.ends_at)} />
+            ))}
+          </RecordGrid>
+        )}
+      </div>
     </div>
   );
 }

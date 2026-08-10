@@ -250,7 +250,13 @@ export default function NotificationMenu() {
         </button>
 
         {isOpen && (
-          <div className="absolute right-0 z-50 mt-2 w-88 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl shadow-slate-900/10">
+          // Below `sm` this anchors to the viewport edges (`fixed inset-x-4`)
+          // rather than the bell: the bell isn't the last icon in the header,
+          // so a panel wide enough to be readable and anchored to *its own*
+          // right edge runs off the left side of a phone screen. From `sm` up
+          // there's enough room either way, so it reverts to hanging off the
+          // bell like every other dropdown in the app.
+          <div className="fixed inset-x-4 top-16 z-50 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl shadow-slate-900/10 sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-88 sm:max-w-[calc(100vw-2rem)]">
             <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
               <p className="text-sm font-semibold text-slate-900">Notifications</p>
               {unreadCount > 0 && (

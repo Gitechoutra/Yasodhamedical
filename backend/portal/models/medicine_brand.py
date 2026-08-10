@@ -63,6 +63,13 @@ medicine_departments = db.Table(
         db.ForeignKey("departments.id", ondelete="CASCADE"),
         primary_key=True,
     ),
+    # `department_id` is the second column of the composite primary key, so
+    # MySQL/InnoDB additionally creates its own single-column index to back
+    # the foreign key (a leading-column PK index doesn't satisfy that on its
+    # own). Declared explicitly so autogenerate can see it — otherwise it
+    # looks like an untracked index and `flask db migrate` proposes to drop
+    # it, which MySQL then refuses because the FK still needs it.
+    db.Index("ix_medicine_departments_department", "department_id"),
 )
 
 
