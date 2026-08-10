@@ -16,16 +16,130 @@ Doing both at boot removes that class of problem: whatever `python app.py` is
 pointed at, the roles exist and there is an account to sign in with by the
 time it serves a request.
 
-Deliberately *only* these two. Demo doctors, nurses, departments and stock are
-seed data, not startup requirements, and live in `seeders/seed_core.py` behind
-an explicit command.
+  * **the departments and the formulary.** Reference lists the rest of the
+    app is written against rather than demo content: a doctor account needs a
+    department to belong to, the OP queue is filed by department, and an empty
+    `medicines` table makes every line of every AI-suggested prescription come
+    back flagged off-formulary. A teammate pulling the code got neither, and
+    the failure only showed up later as an odd-looking prescription.
+
+Doing all of it at boot removes that class of problem: whatever `python app.py`
+is pointed at, the roles exist, there is an account to sign in with, and the
+reference data the workflows assume is there by the time it serves a request.
+
+Every check is *additive*. Nothing here renames, overwrites or deletes a row
+that already exists — a hospital's own departments and its tuned medicine
+defaults survive every restart untouched.
+
+Deliberately not here: demo doctors, nurses, patients and pharmacy stock.
+Those are sample content, not startup requirements, and stay in
+`seeders/seed_core.py` behind an explicit command.
 """
 
 from sqlalchemy import inspect
 
 from portal.extensions import db
+from portal.models.department import DEFAULT_DEPARTMENTS, Department
+from portal.models.medicine import DEFAULT_FORMULARY, Medicine
 from portal.models.role import DEFAULT_ROLES, Role
 from portal.models.user import User
+
+
+def _guarded(app, model, label, work):
+    """Runs one reconciliation with the guarantees every check here shares.
+
+    Skips quietly when the table does not exist yet — `flask db upgrade`
+    imports this same factory, so querying blindly would break the migration
+    that creates it — and never raises, because startup failing over a
+    transient database problem is worse than starting and reporting it per
+    request.
+
+    `work` returns the list of names it added, for the log line.
+    """
+    try:
+        with app.app_context():
+            if not inspect(db.engine).has_table(model.__tablename__):
+                app.logger.info(
+                    "%s check: '%s' table does not exist yet -- run "
+                    "'flask db upgrade' first. Skipping.",
+                    label,
+                    model.__tablename__,
+                )
+                return []
+            return work()
+    except Exception as exc:  # noqa: BLE001 - see the docstring
+        # rollback so a half-applied insert cannot poison the next session
+        # that picks this connection up.
+        try:
+            db.session.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        app.logger.warning("Could not verify %s at startup: %s", label.lower(), exc)
+        return []
+
+
+def _report(app, label, added, total):
+    if added:
+        app.logger.info(
+            "%s check: added %d missing -- %s", label, len(added), ", ".join(added)
+        )
+    else:
+        app.logger.info("%s check: all %d present", label, total)
+    return added
+
+
+def ensure_departments(app):
+    """Inserts any of DEFAULT_DEPARTMENTS the database is missing.
+
+    Matched on name, which is unique on the table. A department the hospital
+    added itself is never touched, and one of ours that somebody renamed is
+    treated as absent and re-added under its original name rather than the
+    rename being undone — the two then coexist, which is recoverable, whereas
+    renaming a department out from under its doctors is not.
+    """
+
+    def work():
+        existing = {name for (name,) in db.session.query(Department.name).all()}
+        missing = [n for n in DEFAULT_DEPARTMENTS if n not in existing]
+        for name in missing:
+            db.session.add(Department(name=name))
+        if missing:
+            db.session.commit()
+        return _report(app, "Department", missing, len(DEFAULT_DEPARTMENTS))
+
+    return _guarded(app, Department, "Department", work)
+
+
+def ensure_medicines(app):
+    """Inserts any of DEFAULT_FORMULARY the database is missing.
+
+    Matched on name. `medicines.name` has no unique constraint — two strengths
+    of the same drug are a legitimate pair of rows — so this comparison is the
+    only thing standing between a restart and a duplicated formulary.
+
+    An entry already on file keeps its category, dose and frequency. Those are
+    clinical defaults somebody may have tuned; a restart must not reset them.
+    """
+
+    def work():
+        existing = {name for (name,) in db.session.query(Medicine.name).all()}
+        missing = [row for row in DEFAULT_FORMULARY if row[0] not in existing]
+        for name, category, dose, frequency in missing:
+            db.session.add(
+                Medicine(
+                    name=name,
+                    category=category,
+                    default_dose=dose,
+                    default_frequency=frequency,
+                )
+            )
+        if missing:
+            db.session.commit()
+        return _report(
+            app, "Medicine", [r[0] for r in missing], len(DEFAULT_FORMULARY)
+        )
+
+    return _guarded(app, Medicine, "Medicine", work)
 
 
 def ensure_roles(app):
