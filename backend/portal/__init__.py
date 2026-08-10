@@ -92,6 +92,16 @@ class InitApp:
         self._register_error_handlers(app)
         self._register_health(app)
 
+        # -- Reference data ------------------------------------------------
+        # The eight roles the whole authorization model is written against.
+        # Checked on every start rather than left to the migration alone, so a
+        # database restored from an older dump comes up complete instead of
+        # failing later at staff creation. Additive and non-fatal -- see
+        # helpers/bootstrap.
+        from portal.helpers.bootstrap import ensure_roles
+
+        ensure_roles(app)
+
         app.logger.info("Portal initialization completed successfully")
 
         APP = app
