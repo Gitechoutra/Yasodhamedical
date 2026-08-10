@@ -1,21 +1,31 @@
 """Reconciliation that runs every time the app starts.
 
-The roles table is the one piece of data the application cannot function
-without: `users.role_id` is NOT NULL, and several routes look a role up by
-name and fail outright if it is missing. A migration inserts them, and the
-seeder reconciles them, but both are things somebody has to remember to run —
-and a database restored from an older dump, or one migrated before a role was
-added, comes up missing them with no obvious symptom beyond staff creation
-failing later.
+Two things a database has to have before anybody can do anything, and both
+are otherwise a command somebody has to remember to run:
 
-Doing it at boot removes that class of problem: whatever `python app.py` is
-pointed at, the eight roles exist by the time it serves a request.
+  * **the roles.** `users.role_id` is NOT NULL and several routes look a role
+    up by name, so a database restored from an older dump — or migrated before
+    a role was added — comes up broken with no symptom until staff creation
+    fails.
+  * **an administrator.** The admin role is the one Staff Management refuses
+    to grant, so a database with no admin cannot grow one through the UI. A
+    teammate who pulls and runs `python app.py` would have a working server
+    and no way to sign in to it.
+
+Doing both at boot removes that class of problem: whatever `python app.py` is
+pointed at, the roles exist and there is an account to sign in with by the
+time it serves a request.
+
+Deliberately *only* these two. Demo doctors, nurses, departments and stock are
+seed data, not startup requirements, and live in `seeders/seed_core.py` behind
+an explicit command.
 """
 
 from sqlalchemy import inspect
 
 from portal.extensions import db
 from portal.models.role import DEFAULT_ROLES, Role
+from portal.models.user import User
 
 
 def ensure_roles(app):
@@ -75,3 +85,56 @@ def ensure_roles(app):
             pass
         app.logger.warning("Could not verify the roles table at startup: %s", exc)
         return []
+
+
+def ensure_admin(app):
+    """Creates the default administrator when that account is absent.
+
+    Returns True if it created one. Same contract as `ensure_roles`: additive,
+    idempotent, and never raises.
+
+    The actual work is `seeders/seed_admin.create_admin_if_missing`, so the
+    credentials and the "never touch an existing account" rule are defined
+    once and behave identically whether they arrive via `python app.py` or
+    `python -m portal.seeds`.
+
+    Must run after `ensure_roles` — the account needs its role to exist.
+    """
+    # Imported here rather than at module scope: helpers are imported early in
+    # the app factory, and reaching into a seeder at that point would pull the
+    # models in before they are registered.
+    from portal.seeders.seed_admin import admin_credentials, create_admin_if_missing
+
+    try:
+        with app.app_context():
+            for table in (Role.__tablename__, User.__tablename__):
+                if not inspect(db.engine).has_table(table):
+                    app.logger.info(
+                        "Admin check: '%s' table does not exist yet -- run "
+                        "'flask db upgrade' first. Skipping.",
+                        table,
+                    )
+                    return False
+
+            _name, email, _password, is_default_password = admin_credentials()
+            _admin, created = create_admin_if_missing()
+
+            if not created:
+                app.logger.info("Admin check: %s already exists", email)
+                return False
+
+            app.logger.info("Admin check: created the default administrator -- %s", email)
+            if is_default_password:
+                app.logger.warning(
+                    "That admin uses the default password. Set SEED_ADMIN_PASSWORD, "
+                    "or change it after the first sign-in."
+                )
+            return True
+
+    except Exception as exc:  # noqa: BLE001 - startup must not die over this
+        try:
+            db.session.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        app.logger.warning("Could not verify the administrator account at startup: %s", exc)
+        return False

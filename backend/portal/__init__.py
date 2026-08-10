@@ -93,14 +93,17 @@ class InitApp:
         self._register_health(app)
 
         # -- Reference data ------------------------------------------------
-        # The eight roles the whole authorization model is written against.
-        # Checked on every start rather than left to the migration alone, so a
-        # database restored from an older dump comes up complete instead of
-        # failing later at staff creation. Additive and non-fatal -- see
-        # helpers/bootstrap.
-        from portal.helpers.bootstrap import ensure_roles
+        # The two things a database needs before anyone can use it: the roles
+        # the authorization model is written against, and an administrator to
+        # sign in as. Checked on every start rather than left to a migration
+        # or a seed command, so a fresh clone or a restored dump comes up
+        # usable. Both are additive and non-fatal -- see helpers/bootstrap.
+        #
+        # Roles first: the admin account needs its role to exist.
+        from portal.helpers.bootstrap import ensure_admin, ensure_roles
 
         ensure_roles(app)
+        ensure_admin(app)
 
         app.logger.info("Portal initialization completed successfully")
 
