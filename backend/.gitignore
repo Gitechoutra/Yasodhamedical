@@ -8,3 +8,5 @@ logs/*.log
 .bin/
 uploads/
 test_tone.wav
+migrations/
+uploads/
