@@ -4,6 +4,7 @@ import { HiOutlineCamera, HiOutlineTrash } from "react-icons/hi2";
 import Avatar from "../components/Avatar";
 import { useAuth } from "../context/AuthContext";
 import { removeAvatar, updateProfile, uploadAvatar } from "../services/authService";
+import { EMAIL_ERROR, EMAIL_HINT, isValidEmail } from "../utils/contact";
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // must match the backend's limit
 const ACCEPTED_TYPES = "image/png,image/jpeg,image/webp,image/gif";
@@ -50,10 +51,18 @@ export default function Profile() {
     setErrorMsg("");
   }
 
+  // This is the address the account's password-reset link is sent to, so it is
+  // held to the same rule as the one an administrator typed when creating it.
+  const emailInvalid = !isValidEmail(email);
+
   async function handleSubmit(e) {
     e.preventDefault();
     setErrorMsg("");
     setSuccessMsg("");
+    if (emailInvalid) {
+      setErrorMsg(EMAIL_ERROR);
+      return;
+    }
     setSaving(true);
     try {
       const fields = { name: name.trim(), email: email.trim() };
@@ -171,10 +180,12 @@ export default function Profile() {
             <input
               type="email"
               required
-              className={inputClass}
+              placeholder={EMAIL_HINT}
+              className={`${inputClass} ${emailInvalid ? "border-red-300" : ""}`}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
+            {emailInvalid && <p className="mt-1 text-xs text-red-600">{EMAIL_ERROR}</p>}
           </div>
 
           {isDoctor && (

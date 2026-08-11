@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { HiOutlineCheckCircle, HiOutlineUser } from "react-icons/hi2";
 import Logo from "../components/Logo";
 import { requestPasswordReset } from "../services/authService";
+import { EMAIL_ERROR, isValidEmail, looksLikeEmail } from "../utils/contact";
 
 /**
  * "I can't get in."
@@ -18,8 +19,16 @@ export default function ForgotPassword() {
   const [sent, setSent] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
+  // Same rule as the sign-in field, and checked for the same reason: only once
+  // an '@' says they meant an address rather than their username.
+  const emailInvalid = looksLikeEmail(identifier) && !isValidEmail(identifier);
+
   async function handleSubmit(e) {
     e.preventDefault();
+    if (emailInvalid) {
+      setErrorMsg(`${EMAIL_ERROR} You can also use your username.`);
+      return;
+    }
     setSending(true);
     setErrorMsg("");
     try {
@@ -87,6 +96,11 @@ export default function ForgotPassword() {
                     className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
                   />
                 </div>
+                {emailInvalid && (
+                  <p className="mt-1.5 text-xs text-red-600">
+                    {EMAIL_ERROR} You can also use your username.
+                  </p>
+                )}
               </div>
 
               {errorMsg && (
@@ -97,7 +111,7 @@ export default function ForgotPassword() {
 
               <button
                 type="submit"
-                disabled={sending}
+                disabled={sending || emailInvalid}
                 className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-3 text-sm font-semibold text-white shadow-lg shadow-brand-500/30 transition hover:shadow-xl hover:shadow-brand-500/40 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {sending ? "Sending…" : "Send reset link"}

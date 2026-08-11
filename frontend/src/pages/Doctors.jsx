@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { HiOutlineClock, HiOutlinePlus } from "react-icons/hi2";
+import { Link, useSearchParams } from "react-router-dom";
+import {
+  HiOutlineClock,
+  HiOutlineMagnifyingGlass,
+  HiOutlinePlus,
+  HiOutlineXMark,
+} from "react-icons/hi2";
 import Modal from "../components/Modal";
 import DoctorsTable from "../components/DoctorsTable";
 import { useAuth } from "../context/AuthContext";
 import { fetchDoctors, createDoctor } from "../services/doctorService";
 import { fetchDepartments } from "../services/departmentService";
+import { EMAIL_ERROR, EMAIL_HINT, isValidEmail } from "../utils/contact";
 
 function AddDoctorModal({ departments, onClose, onCreated }) {
   const [form, setForm] = useState({
@@ -23,8 +29,14 @@ function AddDoctorModal({ departments, onClose, onCreated }) {
     return (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
   }
 
+  const emailInvalid = !isValidEmail(form.email);
+
   async function handleSubmit(e) {
     e.preventDefault();
+    if (emailInvalid) {
+      setErrorMsg(EMAIL_ERROR);
+      return;
+    }
     setSaving(true);
     setErrorMsg("");
     try {
@@ -52,10 +64,14 @@ function AddDoctorModal({ departments, onClose, onCreated }) {
           <input
             type="email"
             required
-            className={inputClass}
+            placeholder={EMAIL_HINT}
+            className={`${inputClass} ${emailInvalid ? "border-red-300" : ""}`}
             value={form.email}
             onChange={update("email")}
           />
+          <p className={`mt-1 text-xs ${emailInvalid ? "text-red-600" : "text-slate-400"}`}>
+            {emailInvalid ? EMAIL_ERROR : `Must be ${EMAIL_HINT}`}
+          </p>
         </div>
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">
@@ -113,7 +129,7 @@ function AddDoctorModal({ departments, onClose, onCreated }) {
 
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || emailInvalid}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
           {saving ? "Creating…" : "Add Doctor"}
@@ -132,6 +148,18 @@ export default function Doctors() {
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
 
+  // In the URL so the header's search box can land here on a named doctor,
+  // and so the filtered list survives a reload.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const searchTerm = searchParams.get("search") || "";
+  const [searchInput, setSearchInput] = useState(searchTerm);
+
+  useEffect(() => setSearchInput(searchTerm), [searchTerm]);
+
+  const query = searchTerm.trim();
+  // The API's floor: below it the server stops narrowing (helpers/search.py).
+  const searching = query.length >= MIN_SEARCH_LENGTH;
+
   // Depends on the caller's role: only an admin fetches departments, which
   // the add-doctor form needs. Wrapped so the effect below re-runs if the
   // role resolves after mount — the cached user loads asynchronously, and an
@@ -139,20 +167,33 @@ export default function Doctors() {
   // form they could not submit.
   const load = useCallback(() => {
     setLoading(true);
-    const requests = canManageDoctors
-      ? [fetchDoctors(), fetchDepartments()]
-      : [fetchDoctors()];
+    const list = fetchDoctors(undefined, searching ? query : undefined);
+    const requests = canManageDoctors ? [list, fetchDepartments()] : [list];
     return Promise.all(requests)
       .then(([d, deps]) => {
         setDoctors(d);
         if (deps) setDepartments(deps);
       })
       .finally(() => setLoading(false));
-  }, [canManageDoctors]);
+  }, [canManageDoctors, searching, query]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Debounced, and replacing rather than pushing: one history entry for the
+  // search, not one per character.
+  useEffect(() => {
+    const next = searchInput.trim();
+    if (next === searchTerm) return;
+    const id = setTimeout(() => {
+      const params = new URLSearchParams(searchParams);
+      if (next) params.set("search", next);
+      else params.delete("search");
+      setSearchParams(params, { replace: true });
+    }, 300);
+    return () => clearTimeout(id);
+  }, [searchInput, searchTerm, searchParams, setSearchParams]);
 
   return (
     <div>

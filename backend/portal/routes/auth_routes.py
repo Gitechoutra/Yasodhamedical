@@ -1,5 +1,4 @@
 import os
-import re
 from datetime import datetime
 
 from flask import Blueprint, request, send_from_directory
@@ -8,6 +7,7 @@ from flask_jwt_extended import create_access_token, create_refresh_token, get_jw
 from portal.extensions import db
 from portal.helpers import email as mailer
 from portal.helpers.audit import audit
+from portal.helpers.contact import looks_like_email, normalize_email
 from portal.helpers.credentials import (
     MIN_PASSWORD,
     find_link,
@@ -22,8 +22,6 @@ from portal.models.user import User
 auth_bp = Blueprint("auth", __name__)
 
 AVATARS_SUBDIR = "avatars"
-
-EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 PASSWORD_RESET_REQUESTED = "auth.password_reset_requested"
 PASSWORD_RESET_COMPLETED = "auth.password_reset_completed"
@@ -60,6 +58,18 @@ def login():
 
     if not identifier or not password:
         return error("Username or email and password are required", status=422)
+
+    # Only when they typed an address. A username has no '@' and is not held to
+    # the email rule -- which is also the way out for anyone whose account sits
+    # on a domain this no longer accepts: their username still signs them in.
+    #
+    # Answering on the shape of what was typed rather than on what is in the
+    # database keeps the enumeration property of the 401 below intact: this
+    # says nothing about whether an account exists.
+    if looks_like_email(identifier):
+        _address, email_error = normalize_email(identifier)
+        if email_error:
+            return error(f"{email_error}, or sign in with your username", status=422)
 
     user = _find_by_identifier(identifier)
     if not user or not user.check_password(password):
@@ -118,9 +128,11 @@ def update_me():
         user.name = name
 
     if "email" in payload:
-        email = (payload.get("email") or "").strip().lower()
-        if not EMAIL_RE.match(email):
-            return error("Enter a valid email address", status=422)
+        email, email_error = normalize_email(payload.get("email"))
+        if email_error:
+            return error(email_error, status=422)
+        if not email:
+            return error("Email is required", status=422)
         clash = User.query.filter(User.email == email, User.id != user.id).first()
         if clash:
             return error("That email is already in use", status=409)
@@ -246,6 +258,14 @@ def forgot_password():
     """
     payload = request.get_json(silent=True) or {}
     identifier = payload.get("identifier") or payload.get("email") or ""
+
+    # Checked before the uniform answer below, and safe to: this depends only
+    # on the string typed, never on whether an account matches it, so it tells
+    # the sender nothing the route is trying to keep from them.
+    if looks_like_email(identifier):
+        _address, email_error = normalize_email(identifier)
+        if email_error:
+            return error(f"{email_error}, or use your username", status=422)
 
     answer = success(
         message=(

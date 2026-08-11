@@ -5,6 +5,7 @@ import {
   HiOutlineBell,
   HiOutlineCalendarDays,
   HiOutlineChatBubbleLeftRight,
+  HiOutlineClock,
   HiOutlineDocumentChartBar,
   HiOutlineHeart,
   HiOutlineInformationCircle,
@@ -31,7 +32,21 @@ const CATEGORY_ICONS = {
   consultation: HiOutlineChatBubbleLeftRight,
   report: HiOutlineDocumentChartBar,
   nursing: HiOutlineHeart,
+  shift: HiOutlineClock,
   system: HiOutlineInformationCircle,
+};
+
+/**
+ * Where each role's own copy of a shared screen lives.
+ *
+ * Nursing, pharmacy and the laboratory are separate route trees, each guarded
+ * by its layout — a nurse sent to `/dashboard/...` is bounced straight back
+ * out. Every role not listed here already lives under `/dashboard`.
+ */
+const MODULE_HOME = {
+  nurse: "/nurse",
+  pharmacist: "/pharmacy",
+  lab_technician: "/lab",
 };
 
 function timeAgo(iso) {
@@ -107,6 +122,13 @@ export function resolveLink(link, role) {
   const labRequest = link.match(/^\/lab\/requests\/(\d+)$/);
   if (labRequest && role !== "lab_technician") {
     return `/dashboard/lab/${labRequest[1]}`;
+  }
+  // The rota is the same screen in all four trees, so a shift notification is
+  // stored with one link and pointed at the reader's own module here. Without
+  // this a rostered nurse taps "You have a new shift" and lands back on her
+  // dashboard, which is the one place the shift is not.
+  if (link === "/dashboard/shifts" && MODULE_HOME[role]) {
+    return `${MODULE_HOME[role]}/shifts`;
   }
   return link;
 }

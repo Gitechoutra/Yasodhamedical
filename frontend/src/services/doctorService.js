@@ -1,8 +1,12 @@
 import api from "./api";
 
-export async function fetchDoctors(departmentId) {
+/** The doctor directory. `search` matches name, speciality or department. */
+export async function fetchDoctors(departmentId, search) {
+  const params = {};
+  if (departmentId) params.department_id = departmentId;
+  if (search) params.search = search;
   const res = await api.get("/doctors", {
-    params: departmentId ? { department_id: departmentId } : undefined,
+    params: Object.keys(params).length ? params : undefined,
   });
   return res.data.data;
 }

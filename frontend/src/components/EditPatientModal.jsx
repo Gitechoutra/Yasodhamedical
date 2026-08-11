@@ -2,6 +2,15 @@ import { useState } from "react";
 import Modal from "./Modal";
 import { BLOOD_GROUPS, isValidBloodGroup } from "../constants/patient";
 import { updatePatient } from "../services/patientService";
+import {
+  EMAIL_ERROR,
+  EMAIL_HINT,
+  PHONE_DIGITS,
+  PHONE_ERROR,
+  digitsOnly,
+  isPhoneIncomplete,
+  isValidEmail,
+} from "../utils/contact";
 
 const inputClass =
   "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
@@ -26,7 +35,11 @@ export default function EditPatientModal({ patient, onClose, onSaved }) {
     name: patient.name || "",
     gender: patient.gender || "",
     dob: patient.dob || "",
-    phone: patient.phone || "",
+    // Sanitised on the way in, so a number written before the rule existed
+    // ("+91 98765 43210") loads as the ten digits it contains rather than into
+    // a field that can no longer represent it — which would leave the front
+    // desk unable to save the record at all without clearing it first.
+    phone: digitsOnly(patient.phone),
     email: patient.email || "",
     blood_group: storedBloodGroupInvalid ? "" : patient.blood_group || "",
     allergies: patient.allergies || "",
@@ -37,8 +50,19 @@ export default function EditPatientModal({ patient, onClose, onSaved }) {
 
   const update = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
+  const phoneIncomplete = isPhoneIncomplete(form.phone);
+  const emailInvalid = !isValidEmail(form.email);
+
   async function handleSubmit(e) {
     e.preventDefault();
+    if (phoneIncomplete) {
+      setErrorMsg(PHONE_ERROR);
+      return;
+    }
+    if (emailInvalid) {
+      setErrorMsg(EMAIL_ERROR);
+      return;
+    }
     setSaving(true);
     setErrorMsg("");
     try {
@@ -79,7 +103,21 @@ export default function EditPatientModal({ patient, onClose, onSaved }) {
           </div>
           <div>
             <label className={labelClass}>Phone</label>
-            <input className={inputClass} value={form.phone} onChange={update("phone")} />
+            <input
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel"
+              maxLength={PHONE_DIGITS}
+              placeholder={`${PHONE_DIGITS} digits`}
+              className={`${inputClass} ${phoneIncomplete ? "border-red-300" : ""}`}
+              value={form.phone}
+              onChange={(e) => setForm((f) => ({ ...f, phone: digitsOnly(e.target.value) }))}
+            />
+            {phoneIncomplete && (
+              <p className="mt-1 text-xs text-red-600">
+                {form.phone.length} of {PHONE_DIGITS} digits
+              </p>
+            )}
           </div>
         </div>
 
@@ -118,7 +156,14 @@ export default function EditPatientModal({ patient, onClose, onSaved }) {
 
         <div>
           <label className={labelClass}>Email</label>
-          <input type="email" className={inputClass} value={form.email} onChange={update("email")} />
+          <input
+            type="email"
+            placeholder={EMAIL_HINT}
+            className={`${inputClass} ${emailInvalid ? "border-red-300" : ""}`}
+            value={form.email}
+            onChange={update("email")}
+          />
+          {emailInvalid && <p className="mt-1 text-xs text-red-600">{EMAIL_ERROR}</p>}
         </div>
         <div>
           <label className={labelClass}>Allergies</label>
@@ -138,7 +183,7 @@ export default function EditPatientModal({ patient, onClose, onSaved }) {
 
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || phoneIncomplete || emailInvalid}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
           {saving ? "Saving…" : "Save changes"}

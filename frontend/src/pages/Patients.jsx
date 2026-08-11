@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { HiOutlinePlus, HiOutlineCheckBadge } from "react-icons/hi2";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  HiOutlinePlus,
+  HiOutlineCheckBadge,
+  HiOutlineMagnifyingGlass,
+  HiOutlineXMark,
+} from "react-icons/hi2";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Modal from "../components/Modal";
 import PatientCard from "../components/PatientCard";
@@ -8,6 +13,15 @@ import AssignNurseModal from "../components/nursing/AssignNurseModal";
 import EditPatientModal from "../components/EditPatientModal";
 import { useAuth } from "../context/AuthContext";
 import { BLOOD_GROUPS } from "../constants/patient";
+import {
+  EMAIL_ERROR,
+  EMAIL_HINT,
+  PHONE_DIGITS,
+  PHONE_ERROR,
+  digitsOnly,
+  isPhoneIncomplete,
+  isValidEmail,
+} from "../utils/contact";
 import { canCreateOp, canReassignDoctor, canRegisterPatient } from "../utils/permissions";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDoctors } from "../services/doctorService";
@@ -18,6 +32,11 @@ import {
   deletePatient,
   assignPatientDoctor,
 } from "../services/patientService";
+
+// Matches the API's own floor (helpers/search.py). Below it the server stops
+// narrowing and answers with the whole list, which would read on this page as
+// a search that matched everybody.
+const MIN_SEARCH_LENGTH = 2;
 
 // Only ever rendered for the front desk — see `canRegisterPatient`. The
 // treating doctor is therefore always chosen here rather than implied, which
@@ -41,8 +60,21 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
     return (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
   }
 
+  // Both optional on a patient record — somebody brought in unconscious has
+  // neither — but exact when given, and the same rule the staff form uses.
+  const phoneIncomplete = isPhoneIncomplete(form.phone);
+  const emailInvalid = !isValidEmail(form.email);
+
   async function handleSubmit(e) {
     e.preventDefault();
+    if (phoneIncomplete) {
+      setErrorMsg(PHONE_ERROR);
+      return;
+    }
+    if (emailInvalid) {
+      setErrorMsg(EMAIL_ERROR);
+      return;
+    }
     setSaving(true);
     setErrorMsg("");
     try {
@@ -86,7 +118,25 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Phone</label>
-            <input className={inputClass} value={form.phone} onChange={update("phone")} />
+            {/* Sanitised as it is typed rather than validated on submit: a
+                pasted "+91 98765 43210" becomes usable instead of an error,
+                and a letter simply cannot be entered. Same rule as the staff
+                form — see utils/contact.js. */}
+            <input
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel"
+              maxLength={PHONE_DIGITS}
+              placeholder={`${PHONE_DIGITS} digits`}
+              className={`${inputClass} ${phoneIncomplete ? "border-red-300" : ""}`}
+              value={form.phone}
+              onChange={(e) => setForm((f) => ({ ...f, phone: digitsOnly(e.target.value) }))}
+            />
+            {phoneIncomplete && (
+              <p className="mt-1 text-xs text-red-600">
+                {form.phone.length} of {PHONE_DIGITS} digits
+              </p>
+            )}
           </div>
         </div>
 
@@ -122,7 +172,14 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
         </div>
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">Email</label>
-          <input type="email" className={inputClass} value={form.email} onChange={update("email")} />
+          <input
+            type="email"
+            placeholder={EMAIL_HINT}
+            className={`${inputClass} ${emailInvalid ? "border-red-300" : ""}`}
+            value={form.email}
+            onChange={update("email")}
+          />
+          {emailInvalid && <p className="mt-1 text-xs text-red-600">{EMAIL_ERROR}</p>}
         </div>
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">Allergies</label>
@@ -166,7 +223,7 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
 
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || phoneIncomplete || emailInvalid}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
           {saving ? "Saving…" : "Add Patient"}
@@ -221,17 +278,40 @@ export default function Patients() {
   // disagree about where a patient was.
   const [scope, setScope] = useState("consulted");
 
+  // The term lives in the URL so the header's search box can land here with a
+  // patient already picked out, and so the result is a page somebody can
+  // bookmark or reload.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const searchTerm = searchParams.get("search") || "";
+  const [searchInput, setSearchInput] = useState(searchTerm);
+
+  // Arriving from the header search (or the back button) has to move the box,
+  // which otherwise keeps whatever was last typed into it.
+  useEffect(() => setSearchInput(searchTerm), [searchTerm]);
+
+  const query = searchTerm.trim();
+  // Same floor as the API, which stops narrowing below it — one character
+  // would come back as the entire list and read as a broken search.
+  const searching = query.length >= MIN_SEARCH_LENGTH;
+
   const load = useCallback(
     (silent = false) => {
       if (!silent) setLoading(true);
-      return Promise.all([fetchPatients(scope), fetchPatientCounts()])
+      // A search runs across every patient rather than the open tab. Whoever
+      // is being looked for is as likely to be waiting in Appointments as to
+      // have been seen, and a name that exists returning "no patients" is
+      // indistinguishable from the record having been lost.
+      return Promise.all([
+        fetchPatients(searching ? "all" : scope, searching ? query : undefined),
+        fetchPatientCounts(),
+      ])
         .then(([rows, totals]) => {
           setPatients(rows);
           setCounts(totals);
         })
         .finally(() => setLoading(false));
     },
-    [scope]
+    [scope, searching, query]
   );
 
   // The doctor list backs both the registration form and the re-route picker;
@@ -246,6 +326,21 @@ export default function Patients() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Typing moves the URL, debounced — one request per pause rather than one
+  // per keystroke, and `replace` so a search does not bury the previous page
+  // under a history entry per character.
+  useEffect(() => {
+    const next = searchInput.trim();
+    if (next === searchTerm) return;
+    const id = setTimeout(() => {
+      const params = new URLSearchParams(searchParams);
+      if (next) params.set("search", next);
+      else params.delete("search");
+      setSearchParams(params, { replace: true });
+    }, 300);
+    return () => clearTimeout(id);
+  }, [searchInput, searchTerm, searchParams, setSearchParams]);
 
   // Front desk registering a patient should show up here immediately.
   useLiveRefresh(load);
@@ -277,9 +372,11 @@ export default function Patients() {
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Patients</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {scope === "consulted"
-              ? "Patients whose consultation is complete"
-              : "Registered or in Appointments — not yet consulted"}
+            {searching
+              ? `Matching “${query}” — every patient, consulted or not`
+              : scope === "consulted"
+                ? "Patients whose consultation is complete"
+                : "Registered or in Appointments — not yet consulted"}
           </p>
         </div>
         {canRegister && (
@@ -293,10 +390,44 @@ export default function Patients() {
         )}
       </div>
 
+      {/* Name, patient code (PAT0004), phone or email. The server does the
+          matching so it reaches every patient the caller may see, not just the
+          page already loaded. */}
+      <div className="mt-5 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100 sm:max-w-md">
+        <HiOutlineMagnifyingGlass className="h-4 w-4 shrink-0 text-slate-400" />
+        <input
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          aria-label="Search patients"
+          placeholder="Search by name, patient ID, phone or email…"
+          className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
+        />
+        {searchInput && (
+          <button
+            type="button"
+            onClick={() => setSearchInput("")}
+            aria-label="Clear search"
+            className="shrink-0 rounded-full p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          >
+            <HiOutlineXMark className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {searchInput.trim().length === 1 && (
+        <p className="mt-2 text-xs text-slate-400">
+          Keep typing — at least {MIN_SEARCH_LENGTH} characters.
+        </p>
+      )}
+
       {/* A patient sits on exactly one side: in Appointments until their
           consultation is finished, here afterwards. The tabs make that
-          visible rather than leaving the other half looking missing. */}
-      <div className="mt-5 flex flex-wrap gap-2">
+          visible rather than leaving the other half looking missing.
+
+          Hidden while searching: the search deliberately crosses both sides,
+          so a tab claiming to be the active filter would be a lie — and a
+          match on the other side would look like no match at all. */}
+      <div className={`mt-5 flex-wrap gap-2 ${searching ? "hidden" : "flex"}`}>
         {[
           ["consulted", "Consulted", counts?.consulted],
           ["awaiting", "Awaiting consultation", counts?.awaiting],
@@ -324,7 +455,7 @@ export default function Patients() {
         ))}
       </div>
 
-      {scope === "awaiting" && (
+      {scope === "awaiting" && !searching && (
         <p className="mt-3 flex flex-wrap items-center gap-1.5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
           These patients are still with Appointments. They move to Consulted once the doctor
           completes their consultation.
@@ -360,13 +491,28 @@ export default function Patients() {
         ) : patients.length === 0 ? (
           <div className="rounded-2xl border border-slate-100 bg-white py-16 text-center shadow-sm">
             <p className="mx-auto max-w-lg text-sm text-slate-400">
-              {scope === "consulted"
-                ? counts?.awaiting
-                  ? `No completed consultations yet. ${counts.awaiting} patient${
-                      counts.awaiting === 1 ? " is" : "s are"
-                    } still in Appointments — they appear here once their consultation is done.`
-                  : "No patients have completed a consultation yet."
-                : "Nobody is waiting. Every registered patient has been consulted."}
+              {searching ? (
+                <>
+                  No patient matches “{query}”. Names, patient IDs, phone
+                  numbers and email addresses are all searched.
+                  <button
+                    onClick={() => setSearchInput("")}
+                    className="ml-1 font-semibold text-brand-600 underline underline-offset-2"
+                  >
+                    Clear the search
+                  </button>
+                </>
+              ) : scope === "consulted" ? (
+                counts?.awaiting ? (
+                  `No completed consultations yet. ${counts.awaiting} patient${
+                    counts.awaiting === 1 ? " is" : "s are"
+                  } still in Appointments — they appear here once their consultation is done.`
+                ) : (
+                  "No patients have completed a consultation yet."
+                )
+              ) : (
+                "Nobody is waiting. Every registered patient has been consulted."
+              )}
             </p>
           </div>
         ) : (

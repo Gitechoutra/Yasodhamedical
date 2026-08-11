@@ -132,6 +132,18 @@ SETTINGS = (
     ("INVITE_TOKEN_HOURS", "email", "invite_token_hours", "72"),
     ("RESET_TOKEN_MINUTES", "email", "reset_token_minutes", "60"),
     # -- [server] ----------------------------------------------------------
+    # Domains an email address may be at, anywhere one is typed: staff
+    # accounts, patient records and the sign-in form. Comma-separated, and `*`
+    # turns the restriction off. (Not blank -- a key left empty in the ini
+    # falls back to the default here, by _resolve's own rule, so there has to
+    # be something to write.) Enforced by helpers/contact.py -- see the note
+    # there about keeping the frontend's copy of the list in step.
+    (
+        "ALLOWED_EMAIL_DOMAINS",
+        "server",
+        "allowed_email_domains",
+        "gmail.com,yasodhahospitals.com",
+    ),
     ("CORS_ORIGINS", "server", "cors_origins", "http://localhost:5173"),
     ("PORTAL_BASE_URL", "server", "portal_base_url", "http://localhost:5173"),
     # -- [upload_folder] ---------------------------------------------------
@@ -537,6 +549,13 @@ class BaseConfig:
 
     # -- CORS --------------------------------------------------------------
     CORS_ORIGINS = [o.strip() for o in _VALUES["CORS_ORIGINS"].split(",") if o.strip()]
+
+    # -- Contact details ---------------------------------------------------
+    ALLOWED_EMAIL_DOMAINS = [
+        d.strip().lower().lstrip("@")
+        for d in _VALUES["ALLOWED_EMAIL_DOMAINS"].split(",")
+        if d.strip()
+    ]
 
     # -- AI ----------------------------------------------------------------
     GEMINI_API_KEY = _VALUES["GEMINI_API_KEY"]

@@ -35,6 +35,7 @@ from portal.helpers.audit import (
     audit,
 )
 from portal.helpers.broadcast import dashboard_changed, nursing_changed
+from portal.helpers.contact import normalize_email
 from portal.helpers.credentials import unique_username
 from portal.helpers.datetime_helper import to_utc_iso
 from portal.helpers.decorators import clinical_only, role_required
@@ -222,10 +223,12 @@ def create_nurse():
     `POST /doctors` — staff accounts stay an admin action."""
     payload = request.get_json(silent=True) or {}
     name = (payload.get("name") or "").strip()
-    email = (payload.get("email") or "").strip().lower()
+    email, email_error = normalize_email(payload.get("email"))
     password = payload.get("password") or ""
     department_id = payload.get("department_id")
 
+    if email_error:
+        return error(email_error, status=422)
     if not name or not email or not password:
         return error("name, email and password are required", status=422)
     if len(password) < 6:

@@ -4,9 +4,11 @@ from flask import Blueprint, request
 from flask_jwt_extended import jwt_required
 
 from portal.extensions import db
+from portal.helpers.contact import normalize_email
 from portal.helpers.credentials import unique_username
 from portal.helpers.decorators import FRONT_DESK_ROLES, role_required
 from portal.helpers.response import error, success
+from portal.helpers.search import matches_all, terms_from
 from portal.models.department import Department
 from portal.models.doctor import Doctor
 from portal.models.role import Role
@@ -24,11 +26,28 @@ MAX_AVAILABILITY_DAYS = 60
 @doctor_bp.get("")
 @jwt_required()
 def list_doctors():
+    """The doctor directory, optionally narrowed by department or `?search=`.
+
+    Searchable by the three things somebody has when they are looking for a
+    doctor: the name, the speciality, and the department they sit in.
+    """
     query = Doctor.query.join(Doctor.user).order_by(Doctor.department_id)
 
     department_id = request.args.get("department_id", type=int)
     if department_id:
         query = query.filter(Doctor.department_id == department_id)
+
+    terms = terms_from(request.args.get("search"))
+    if terms:
+        # Outer join: a doctor with no department on file must still be
+        # findable by name rather than dropping out of every search.
+        query = query.outerjoin(Department, Doctor.department_id == Department.id)
+        query = query.filter(
+            matches_all(
+                terms,
+                (User.name, Doctor.specialization, Department.name),
+            )
+        )
 
     return success([d.to_dict() for d in query.all()])
 
@@ -234,10 +253,12 @@ def doctor_availability():
 def create_doctor():
     payload = request.get_json(silent=True) or {}
     name = (payload.get("name") or "").strip()
-    email = (payload.get("email") or "").strip().lower()
+    email, email_error = normalize_email(payload.get("email"))
     password = payload.get("password") or ""
     department_id = payload.get("department_id")
 
+    if email_error:
+        return error(email_error, status=422)
     if not name or not email or not password or not department_id:
         return error("name, email, password, and department_id are required", status=422)
 

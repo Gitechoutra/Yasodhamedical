@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import Modal from "../Modal";
 import { createStaff, updateStaff } from "../../services/staffService";
+import {
+  EMAIL_ERROR,
+  EMAIL_HINT,
+  PHONE_DIGITS,
+  PHONE_ERROR,
+  digitsOnly,
+  isPhoneIncomplete,
+  isValidEmail,
+} from "../../utils/contact";
 
 const input =
   "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
@@ -47,17 +56,10 @@ const ROLE_FIELDS = {
 // query that filters on it passes the department optionally (and no caller
 // ever does), and POST /nursing/nurses has always created nurses without one.
 // Requiring it here was stricter than the rest of the application.
-// Exactly ten digits. Mirrors PHONE_RE in routes/staff_routes.py — the server
-// is the boundary, this is what stops the administrator finding out only when
-// they press Save.
-const PHONE_DIGITS = 10;
-
-/** Everything that is not a digit, dropped. Lets a pasted "+91 98765 43210"
- *  become a usable number instead of an error the admin has to clean up by
- *  hand, while typing a letter simply does nothing. */
-function digitsOnly(value) {
-  return (value || "").replace(/\D/g, "").slice(0, PHONE_DIGITS);
-}
+//
+// The phone and email rules themselves live in utils/contact.js, shared with
+// every other form that collects either — the server is the boundary, and
+// these are what stop the administrator finding out only when they press Save.
 
 const REQUIRED_BY_ROLE = { doctor: ["department"], pharmacist: ["branch"] };
 
@@ -161,7 +163,12 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
 
   // Optional, but exact when given: a half-typed number is not "nearly valid",
   // it is a number that would reach the wrong person.
-  const phoneIncomplete = form.phone.length > 0 && form.phone.length < PHONE_DIGITS;
+  const phoneIncomplete = isPhoneIncomplete(form.phone);
+
+  // This address is where the account's credentials are sent, so it being at a
+  // domain the hospital accepts is not a formality — a typo'd one produces an
+  // account whose only way in is a mail that goes nowhere.
+  const emailInvalid = !isValidEmail(form.email);
 
   // Trivial to compute and `required` is rebuilt each render anyway, so a
   // memo here would cost more than it saves.
@@ -172,7 +179,11 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
   async function handleSubmit(e) {
     e.preventDefault();
     if (phoneIncomplete) {
-      setErrorMsg(`Mobile number must be exactly ${PHONE_DIGITS} digits.`);
+      setErrorMsg(PHONE_ERROR);
+      return;
+    }
+    if (emailInvalid) {
+      setErrorMsg(EMAIL_ERROR);
       return;
     }
     setSaving(true);
@@ -226,10 +237,14 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
             <input
               required
               type="email"
-              className={input}
+              className={`${input} ${emailInvalid ? "border-red-300" : ""}`}
+              placeholder={EMAIL_HINT}
               value={form.email}
               onChange={update("email")}
             />
+            <p className={`mt-1 text-xs ${emailInvalid ? "text-red-600" : "text-slate-400"}`}>
+              {emailInvalid ? EMAIL_ERROR : `Must be ${EMAIL_HINT}`}
+            </p>
           </div>
         </div>
 
@@ -474,7 +489,7 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
 
         <button
           type="submit"
-          disabled={saving || phoneIncomplete || missing.length > 0}
+          disabled={saving || phoneIncomplete || emailInvalid || missing.length > 0}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
           {saving

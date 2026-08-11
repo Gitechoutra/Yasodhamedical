@@ -30,7 +30,15 @@ export async function fetchShiftOptions() {
   return res.data.data;
 }
 
-/** Admin only. `user_id` may be omitted to roster an unfilled slot. */
+/**
+ * Admin only. Adds one shift per day between `from_date` and `to_date`
+ * inclusive — pass the same date for both to add a single one. `user_id` may
+ * be omitted to leave the slots unfilled; when it is given, that staff member
+ * is notified and nobody else is.
+ *
+ * Resolves to `{ items, count }` rather than a single shift, since one call
+ * can create a run of them.
+ */
 export async function createShift(payload) {
   const res = await api.post("/shifts", payload);
   return res.data.data;

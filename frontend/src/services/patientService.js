@@ -9,9 +9,15 @@ import api from "./api";
  *
  * A patient is never in both consulted and awaiting: going back into the
  * queue moves them to awaiting until that consultation finishes too.
+ *
+ * `search` narrows the list by name, patient code, phone or email. It only
+ * ever narrows — the server scopes the result to what the caller may see
+ * either way, so a doctor searching still sees only their own patients.
  */
-export async function fetchPatients(scope = "consulted") {
-  const res = await api.get("/patients", { params: { scope } });
+export async function fetchPatients(scope = "consulted", search) {
+  const params = { scope };
+  if (search) params.search = search;
+  const res = await api.get("/patients", { params });
   return res.data.data;
 }
 
