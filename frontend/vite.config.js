@@ -5,11 +5,13 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    // Bind every interface, not just loopback. Vite's default listens on
-    // localhost alone, which means the reset link in a staff member's email
-    // is unreachable from their machine no matter what host the link names —
-    // the connection is refused before any route is considered.
-    host: true,
+    // Loopback only, so `npm run dev` prints the one Local URL and nothing
+    // else. `host: true` binds every interface and adds a Network line per
+    // adapter — which is what a staff member on another machine needs to
+    // reach an emailed link, and what to set again if that is ever wanted
+    // back. It also has to agree with VITE_API_BASE_URL in .env: the page and
+    // the API it calls are named by the same host.
+    host: 'localhost',
     port: 5173,
     // Fail if 5173 is taken, rather than quietly moving to 5174. `port` on
     // its own is only a preference — a dev server left running in another
