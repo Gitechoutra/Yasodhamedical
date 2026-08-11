@@ -28,7 +28,7 @@ from portal.models.appointment import Appointment
 from portal.models.consultation import Consultation
 from portal.models.doctor import Doctor
 from portal.models.nursing_assignment import NursingAssignment
-from portal.models.patient import MAX_OBSERVATION_DAYS, Patient
+from portal.models.patient import MAX_OBSERVATION_DAYS, Patient, normalize_blood_group
 from portal.models.patient_case import PatientCase
 
 patient_bp = Blueprint("patients", __name__)
@@ -217,13 +217,17 @@ def create_patient():
     if doctor_error:
         return error(doctor_error, status=422)
 
+    blood_group, blood_group_error = normalize_blood_group(payload.get("blood_group"))
+    if blood_group_error:
+        return error(blood_group_error, status=422)
+
     patient = Patient(
         name=name,
         gender=payload.get("gender") or None,
         dob=dob,
         phone=payload.get("phone") or None,
         email=payload.get("email") or None,
-        blood_group=payload.get("blood_group") or None,
+        blood_group=blood_group,
         allergies=payload.get("allergies") or None,
         medical_history=payload.get("medical_history") or None,
         assigned_doctor_id=assigned_doctor_id,
@@ -282,6 +286,14 @@ def update_patient(patient_id):
         if gender and gender not in GENDERS:
             return error(f"gender must be one of: {', '.join(GENDERS)}", status=422)
 
+    # Validated before anything is written, so a bad group refuses the whole
+    # edit rather than saving the other fields and dropping this one.
+    blood_group = None
+    if "blood_group" in payload:
+        blood_group, blood_group_error = normalize_blood_group(payload.get("blood_group"))
+        if blood_group_error:
+            return error(blood_group_error, status=422)
+
     if "dob" in payload:
         dob, dob_error = _parse_dob(payload.get("dob"))
         if dob_error:
@@ -295,6 +307,9 @@ def update_patient(patient_id):
         value = (payload.get(field) or "").strip() or None
         if field == "gender" and value:
             value = value.lower()
+        # Already validated and upper-cased above; "o+" is stored as "O+".
+        if field == "blood_group":
+            value = blood_group
         if getattr(patient, field) != value:
             changed.append(field)
         setattr(patient, field, value)

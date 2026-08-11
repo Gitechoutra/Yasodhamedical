@@ -20,6 +20,38 @@ SURGERY_STAGES = ("required", "post_op", "ready_for_discharge")
 DEFAULT_OBSERVATION_DAYS = 3
 MAX_OBSERVATION_DAYS = 90
 
+# The eight ABO/Rh groups, and the only values `patients.blood_group` may hold.
+#
+# A closed list rather than free text because of what this field is for: it is
+# read before a transfusion is arranged and printed on the record a nurse works
+# from. "P+" is not a typo anyone catches downstream -- it is a group that does
+# not exist, sitting where a real one is expected. The column is left a String
+# rather than an Enum so a correction does not need a migration, which makes
+# `normalize_blood_group` the actual boundary; every write path goes through it.
+BLOOD_GROUPS = ("A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-")
+
+
+def normalize_blood_group(raw):
+    """Returns (value, error_message) for a blood group off a form or the API.
+
+    Empty is allowed and means "not recorded" -- reception often registers a
+    patient before anyone has typed it -- so blank comes back as None with no
+    error. Anything present must be one of `BLOOD_GROUPS`.
+
+    Case and spacing are forgiven ("o+", " AB- ") because they are the same
+    group written carelessly. Nothing else is: "O" without a sign is not a
+    blood group, and guessing which one it meant is exactly the kind of help
+    this field must not offer.
+    """
+    if raw is None:
+        return None, None
+    value = str(raw).strip().upper().replace(" ", "")
+    if not value:
+        return None, None
+    if value not in BLOOD_GROUPS:
+        return None, f"blood_group must be one of: {', '.join(BLOOD_GROUPS)}"
+    return value, None
+
 
 class Patient(db.Model):
     __tablename__ = "patients"

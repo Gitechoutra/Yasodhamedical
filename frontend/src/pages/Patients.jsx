@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { HiOutlinePlus, HiOutlineCamera, HiOutlineCheckBadge } from "react-icons/hi2";
-import Avatar from "../components/Avatar";
+import { HiOutlinePlus, HiOutlineCheckBadge } from "react-icons/hi2";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Modal from "../components/Modal";
 import PatientCard from "../components/PatientCard";
 import AssignNurseModal from "../components/nursing/AssignNurseModal";
 import EditPatientModal from "../components/EditPatientModal";
 import { useAuth } from "../context/AuthContext";
+import { BLOOD_GROUPS } from "../constants/patient";
 import { canCreateOp, canReassignDoctor, canRegisterPatient } from "../utils/permissions";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDoctors } from "../services/doctorService";
@@ -16,11 +16,8 @@ import {
   fetchPatients,
   createPatient,
   deletePatient,
-  uploadPatientPhoto,
   assignPatientDoctor,
 } from "../services/patientService";
-
-const MAX_PHOTO_BYTES = 2 * 1024 * 1024; // must match the backend's limit
 
 // Only ever rendered for the front desk — see `canRegisterPatient`. The
 // treating doctor is therefore always chosen here rather than implied, which
@@ -37,28 +34,11 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
     medical_history: "",
     assigned_doctor_id: "",
   });
-  const [photo, setPhoto] = useState(null);
-  const [photoPreview, setPhotoPreview] = useState(null);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const photoInputRef = useRef(null);
 
   function update(field) {
     return (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
-  }
-
-  function handlePhotoPick(e) {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    if (file.size > MAX_PHOTO_BYTES) {
-      setErrorMsg("Photo must be 2 MB or smaller.");
-      return;
-    }
-    setErrorMsg("");
-    setPhoto(file);
-    // Local preview, so the photo is visible before the patient row exists.
-    setPhotoPreview(URL.createObjectURL(file));
   }
 
   async function handleSubmit(e) {
@@ -66,17 +46,7 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
     setSaving(true);
     setErrorMsg("");
     try {
-      // The photo endpoint keys off a patient id, so it can only be sent
-      // once the row exists.
-      let patient = await createPatient(form);
-      if (photo) {
-        try {
-          patient = await uploadPatientPhoto(patient.id, photo);
-        } catch {
-          // The patient is already saved — don't lose that over a photo.
-          setErrorMsg("Patient saved, but the photo could not be uploaded.");
-        }
-      }
+      const patient = await createPatient(form);
       onCreated(patient);
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Could not create patient.");
@@ -91,28 +61,6 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
   return (
     <Modal title="Add Patient" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-3">
-        <div className="flex items-center gap-4">
-          <Avatar name={form.name} imageUrl={photoPreview} size="lg" />
-          <div>
-            <button
-              type="button"
-              onClick={() => photoInputRef.current?.click()}
-              className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
-            >
-              <HiOutlineCamera className="h-4 w-4" />
-              {photo ? "Change photo" : "Add photo"}
-            </button>
-            <p className="mt-1 text-[11px] text-slate-400">PNG, JPG or WEBP · up to 2 MB</p>
-          </div>
-          <input
-            ref={photoInputRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            onChange={handlePhotoPick}
-            className="hidden"
-          />
-        </div>
-
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">Name *</label>
           <input required className={inputClass} value={form.name} onChange={update("name")} />
@@ -154,7 +102,22 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Blood Group</label>
-            <input className={inputClass} value={form.blood_group} onChange={update("blood_group")} />
+            {/* A picker, not a text box. Typing this field is how "P+" and
+                "Z+" got into the record — there are eight answers and no
+                reason to let anyone write a ninth. Optional: reception often
+                registers a patient before anybody knows it. */}
+            <select
+              className={inputClass}
+              value={form.blood_group}
+              onChange={update("blood_group")}
+            >
+              <option value="">Not recorded</option>
+              {BLOOD_GROUPS.map((group) => (
+                <option key={group} value={group}>
+                  {group}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
         <div>
