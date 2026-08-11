@@ -13,6 +13,10 @@ import { fetchDoctors, createDoctor } from "../services/doctorService";
 import { fetchDepartments } from "../services/departmentService";
 import { EMAIL_ERROR, EMAIL_HINT, isValidEmail } from "../utils/contact";
 
+// Matches the API's own floor (helpers/search.py): one character comes back
+// as the whole directory, which would read as a search that matched everyone.
+const MIN_SEARCH_LENGTH = 2;
+
 function AddDoctorModal({ departments, onClose, onCreated }) {
   const [form, setForm] = useState({
     name: "",
@@ -202,6 +206,7 @@ export default function Doctors() {
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Doctors</h1>
           <p className="mt-1 text-sm text-slate-500">
             {doctors.length} doctor{doctors.length === 1 ? "" : "s"}
+            {searching && ` matching “${query}”`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -227,12 +232,54 @@ export default function Doctors() {
         </div>
       </div>
 
-      <div className="mt-6">
+      {/* Name, speciality or department. The server matches, so this reaches
+          every doctor rather than only the page already loaded. */}
+      <div className="mt-5 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100 sm:max-w-md">
+        <HiOutlineMagnifyingGlass className="h-4 w-4 shrink-0 text-slate-400" />
+        <input
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          aria-label="Search doctors"
+          placeholder="Search by name, speciality or department…"
+          className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
+        />
+        {searchInput && (
+          <button
+            type="button"
+            onClick={() => setSearchInput("")}
+            aria-label="Clear search"
+            className="shrink-0 rounded-full p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          >
+            <HiOutlineXMark className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {searchInput.trim().length === 1 && (
+        <p className="mt-2 text-xs text-slate-400">
+          Keep typing — at least {MIN_SEARCH_LENGTH} characters.
+        </p>
+      )}
+
+      <div className="mt-5">
         {loading ? (
           <div className="space-y-2 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
             {Array.from({ length: 3 }).map((_, i) => (
               <div key={i} className="h-14 animate-pulse rounded-lg bg-slate-100" />
             ))}
+          </div>
+        ) : doctors.length === 0 && searching ? (
+          <div className="rounded-2xl border border-slate-100 bg-white py-16 text-center shadow-sm">
+            <p className="mx-auto max-w-lg text-sm text-slate-400">
+              No doctor matches “{query}”. Names, specialities and departments
+              are all searched.
+              <button
+                onClick={() => setSearchInput("")}
+                className="ml-1 font-semibold text-brand-600 underline underline-offset-2"
+              >
+                Clear the search
+              </button>
+            </p>
           </div>
         ) : (
           <DoctorsTable doctors={doctors} />
