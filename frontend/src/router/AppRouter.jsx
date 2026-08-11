@@ -17,6 +17,11 @@ import RoleRoute from "../components/RoleRoute";
 // Splitting per screen means each session fetches its own module and nothing
 // else. The routes themselves are unchanged.
 const Landing = lazy(() => import("../pages/Landing"));
+// The two screens a staff member reaches from an email, before they have an
+// account they can sign in to. Lazy like everything else — somebody signing in
+// normally never loads them.
+const ForgotPassword = lazy(() => import("../pages/ForgotPassword"));
+const ResetPassword = lazy(() => import("../pages/ResetPassword"));
 const PrivacyPolicy = lazy(() => import("../pages/legal/PrivacyPolicy"));
 const Terms = lazy(() => import("../pages/legal/Terms"));
 
@@ -188,6 +193,11 @@ export default function AppRouter() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
+          {/* Unauthenticated by necessity: whoever needs these cannot sign in.
+              The single-use token in the URL is the credential, and the API
+              validates it on both screens. */}
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/terms" element={<Terms />} />
 

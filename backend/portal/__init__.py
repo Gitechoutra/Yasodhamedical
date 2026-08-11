@@ -106,10 +106,14 @@ class InitApp:
             ensure_departments,
             ensure_medicines,
             ensure_roles,
+            ensure_usernames,
         )
 
         ensure_roles(app)
         ensure_admin(app)
+        # After the admin exists, so the account this check just created gets
+        # a username in the same startup rather than the next one.
+        ensure_usernames(app)
         ensure_departments(app)
         ensure_medicines(app)
 

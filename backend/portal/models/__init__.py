@@ -1,5 +1,6 @@
 from portal.models.role import Role
 from portal.models.user import User
+from portal.models.password_reset_token import PasswordResetToken
 from portal.models.branch import Branch
 from portal.models.department import Department
 from portal.models.doctor import Doctor
@@ -34,6 +35,7 @@ from portal.models.lab_request import LabMessage, LabRequest
 __all__ = [
     "Role",
     "User",
+    "PasswordResetToken",
     "Branch",
     "Department",
     "Doctor",

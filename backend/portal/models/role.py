@@ -57,6 +57,26 @@ DEFAULT_ROLES = (
 
 ROLE_NAMES = tuple(name for name, _description in DEFAULT_ROLES)
 
+# How a role is written when a person reads it -- in the credentials email, in
+# an audit line. Mirrors ROLE_LABELS in the frontend's StaffFormModal; keep the
+# two in step. `role_label` falls back to title-casing the name, so a role
+# added without a label here still reads sensibly.
+ROLE_LABELS = {
+    "admin": "Administrator",
+    "doctor": "Doctor",
+    "nurse": "Nurse",
+    "receptionist": "Receptionist",
+    "pharmacist": "Pharmacist",
+    "lab_technician": "Lab Technician",
+    "accountant": "Accountant",
+    "other_staff": "Other Staff",
+}
+
+
+def role_label(name):
+    """The human-readable name of a role."""
+    return ROLE_LABELS.get(name) or (name or "").replace("_", " ").title() or "Staff"
+
 # Roles an administrator may create through Staff Management. `admin` is
 # absent: granting administrator is how every other grant is made, so it stays
 # a deliberate database-level action rather than a form field.

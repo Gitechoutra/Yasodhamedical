@@ -6,6 +6,15 @@ from flask import Blueprint, request, send_from_directory
 from flask_jwt_extended import create_access_token, create_refresh_token, get_jwt_identity, jwt_required
 
 from portal.extensions import db
+from portal.helpers import email as mailer
+from portal.helpers.audit import audit
+from portal.helpers.credentials import (
+    MIN_PASSWORD,
+    find_link,
+    issue_link,
+    link_lifetime_minutes,
+    login_url,
+)
 from portal.helpers.response import error, success
 from portal.helpers.uploads import ImageUploadError, delete_image, save_image, upload_dir
 from portal.models.user import User
@@ -16,19 +25,47 @@ AVATARS_SUBDIR = "avatars"
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+PASSWORD_RESET_REQUESTED = "auth.password_reset_requested"
+PASSWORD_RESET_COMPLETED = "auth.password_reset_completed"
+
+
+def _find_by_identifier(identifier):
+    """The account for a username *or* an email address.
+
+    One field on the sign-in form, because making somebody remember which of
+    their two identifiers this particular system wanted is a support call, not
+    a security control. Which one they typed is inferred from the '@'.
+
+    Both comparisons are on the lowercased value, matching how each column is
+    written: emails are lowercased on the way in throughout, and
+    `helpers/credentials` only ever generates a lowercase username.
+    """
+    value = (identifier or "").strip().lower()
+    if not value:
+        return None
+    if "@" in value:
+        return User.query.filter_by(email=value).first()
+    return User.query.filter(db.func.lower(User.username) == value).first()
+
 
 @auth_bp.post("/login")
 def login():
     payload = request.get_json(silent=True) or {}
-    email = (payload.get("email") or "").strip().lower()
+    # `email` is still accepted under its old name: an older frontend build
+    # sitting in somebody's browser cache must keep working across this
+    # deploy, and it only ever sent that key.
+    identifier = payload.get("identifier") or payload.get("username") or payload.get("email")
+    identifier = (identifier or "").strip()
     password = payload.get("password") or ""
 
-    if not email or not password:
-        return error("Email and password are required", status=422)
+    if not identifier or not password:
+        return error("Username or email and password are required", status=422)
 
-    user = User.query.filter_by(email=email).first()
+    user = _find_by_identifier(identifier)
     if not user or not user.check_password(password):
-        return error("Invalid email or password", status=401)
+        # One message for "no such account" and "wrong password", so this
+        # cannot be used to find out who has an account here.
+        return error("Invalid username or password", status=401)
 
     if not user.is_active:
         return error("This account has been deactivated", status=403)
@@ -169,13 +206,227 @@ def change_password():
         # 401 as "session expired" and force-logs-out — but this is just a
         # wrong secondary credential, not an invalid/expired JWT.
         return error("Current password is incorrect", status=422)
-    if len(new_password) < 6:
-        return error("New password must be at least 6 characters", status=422)
+    # MIN_PASSWORD, not the 6 this route used to enforce on its own. The two
+    # ways to set a password — here, and through a reset link — now agree,
+    # which they have to: a rule a user can get around by picking the other
+    # form is not a rule.
+    if len(new_password) < MIN_PASSWORD:
+        return error(
+            f"New password must be at least {MIN_PASSWORD} characters", status=422
+        )
 
     user.set_password(new_password)
     db.session.commit()
 
     return success(message="Password updated")
+
+
+# -- Forgotten passwords -----------------------------------------------------
+#
+# Three routes, deliberately separate:
+#
+#   POST /password/forgot   -- ask for a link (unauthenticated)
+#   GET  /password/reset    -- is this link still good? (unauthenticated)
+#   POST /password/reset    -- spend it and set a password (unauthenticated)
+#
+# The GET exists so the reset page can say "this link has expired, ask for
+# another" before somebody types a password into a form that was never going
+# to work. It reveals only what the holder of the link already knows.
+
+
+@auth_bp.post("/password/forgot")
+def forgot_password():
+    """Emails a single-use reset link, if the identifier matches an account.
+
+    **Always answers the same way.** A different response for a real account
+    than for an invented one turns this route into a way to enumerate the
+    hospital's staff, and an unauthenticated one at that. So: same message,
+    whether the address exists, whether the account is disabled, and whether
+    the mail server accepted the message.
+    """
+    payload = request.get_json(silent=True) or {}
+    identifier = payload.get("identifier") or payload.get("email") or ""
+
+    answer = success(
+        message=(
+            "If that account exists, a reset link is on its way. It expires "
+            "shortly, so use it as soon as it arrives."
+        )
+    )
+
+    user = _find_by_identifier(identifier)
+    # A disabled account is skipped silently. Its holder cannot sign in with a
+    # new password anyway, and sending the mail would tell whoever asked that
+    # the account is real.
+    if not user or not user.is_active:
+        return answer
+
+    _raw, link = issue_link(user, purpose="reset")
+    minutes = link_lifetime_minutes("reset")
+    audit(
+        PASSWORD_RESET_REQUESTED,
+        entity="user",
+        entity_id=user.id,
+        detail=f"Password reset link issued for {user.email}",
+        user_id=user.id,
+    )
+    db.session.commit()
+
+    # After the commit, for the same reason staff creation mails after its
+    # own: SMTP cannot be rolled back.
+    mailer.send_password_reset(user, reset_link=link, link_minutes=minutes)
+    return answer
+
+
+def _needs_current_password(link):
+    """Whether this link's form asks for the password the account has now.
+
+    Yes for an **invite**: the staff member was emailed a temporary password
+    minutes earlier, so they have one to type, and asking for it means setting
+    a password takes both the link *and* the temporary password. A forwarded
+    email, or a link read out of a shoulder-surfed inbox, is then not enough
+    on its own.
+
+    No for a **reset**: somebody who pressed "forgot password" by definition
+    cannot supply their current one. Demanding it there would not be stricter,
+    it would make the flow impossible and leave them locked out for good --
+    which is precisely the situation the flow exists to end.
+
+    So the field is driven by the link, not hardcoded on the form. One screen,
+    two shapes, and neither is weakened to match the other.
+    """
+    return link.purpose == "invite"
+
+
+@auth_bp.get("/password/reset")
+def check_reset_link():
+    """Whether a link is still usable, and who it belongs to.
+
+    Returns the name and username so the page can say "Set a password for
+    Anita Sharma (anita.sharma)" — confirmation for the recipient that the
+    link is theirs, and it discloses nothing to anyone else, since holding the
+    token is already the harder half.
+    """
+    token = request.args.get("token") or ""
+    link = find_link(token)
+
+    if not link or not link.user:
+        return error("This link is not valid. Ask your administrator for a new one.", status=404)
+    if link.used_at:
+        return error(
+            "This link has already been used. If you did not use it, tell your "
+            "administrator immediately.",
+            status=410,
+        )
+    if link.is_expired:
+        return error(
+            "This link has expired. Use “Forgot password” on the sign-in page to "
+            "get a new one.",
+            status=410,
+        )
+    if not link.user.is_active:
+        return error("This account has been deactivated.", status=403)
+
+    return success(
+        {
+            "name": link.user.name,
+            "username": link.user.username,
+            "email": link.user.email,
+            "purpose": link.purpose,
+            "expires_at": link.expires_at.isoformat() + "Z",
+            "min_password": MIN_PASSWORD,
+            # Whether the form should show a "current password" field. True for
+            # an invite, false for a forgotten password -- see
+            # `_needs_current_password` for why the two cannot be the same.
+            "requires_current_password": _needs_current_password(link),
+        }
+    )
+
+
+@auth_bp.post("/password/reset")
+def reset_password():
+    """Spends a link and sets the password the staff member chose.
+
+    Single use is enforced here and nowhere else, so the marking and the new
+    hash are written in one transaction: a crash between them would otherwise
+    leave a spent link that still worked, or a changed password whose link
+    could be replayed.
+
+    An invite link additionally requires the temporary password the same email
+    carried -- see `_needs_current_password`.
+    """
+    payload = request.get_json(silent=True) or {}
+    token = payload.get("token") or ""
+    current_password = payload.get("current_password") or ""
+    new_password = payload.get("password") or payload.get("new_password") or ""
+    confirm = payload.get("confirm_password")
+
+    link = find_link(token)
+    if not link or not link.user:
+        return error("This link is not valid. Ask your administrator for a new one.", status=404)
+    if not link.is_usable:
+        return error(
+            "This link has already been used or has expired. Use “Forgot password” "
+            "on the sign-in page to get a new one.",
+            status=410,
+        )
+    if not link.user.is_active:
+        return error("This account has been deactivated.", status=403)
+
+    user = link.user
+
+    if _needs_current_password(link):
+        if not current_password:
+            return error(
+                "Enter the temporary password from your email", status=422
+            )
+        if not user.check_password(current_password):
+            # The link is deliberately NOT spent here. A mistyped temporary
+            # password is the likeliest thing to happen on this form, and
+            # burning the link over a typo would lock out the very person it
+            # was issued to. Guessing is not a route in either: the temporary
+            # password is twelve random characters, and the link expires.
+            return error(
+                "That temporary password is not correct. Copy it from your "
+                "welcome email exactly — it is case-sensitive.",
+                status=422,
+            )
+
+    if len(new_password) < MIN_PASSWORD:
+        return error(f"Password must be at least {MIN_PASSWORD} characters", status=422)
+    if confirm is not None and confirm != new_password:
+        return error("Those passwords do not match", status=422)
+    if current_password and current_password == new_password:
+        return error(
+            "Your new password must be different from the temporary one", status=422
+        )
+    user.set_password(new_password)
+    link.used_at = datetime.utcnow()
+    # Any other link outstanding for this account dies with it — including the
+    # invite link, if they reset from a "forgot password" mail before using
+    # the one in their welcome email.
+    for other in user.reset_tokens:
+        if other.id != link.id and other.used_at is None:
+            other.used_at = datetime.utcnow()
+
+    audit(
+        PASSWORD_RESET_COMPLETED,
+        entity="user",
+        entity_id=user.id,
+        detail=f"Password set via {link.purpose} link",
+        user_id=user.id,
+    )
+    db.session.commit()
+
+    # Best-effort, and never blocks the response: the password is already
+    # changed, and this is the notification that tells the account's owner if
+    # it wasn't them who changed it.
+    mailer.send_password_changed(user, login_link=login_url())
+
+    return success(
+        {"username": user.username, "email": user.email},
+        message="Password set. You can sign in with it now.",
+    )
 
 
 @auth_bp.post("/refresh")

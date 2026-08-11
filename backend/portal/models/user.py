@@ -10,6 +10,16 @@ class User(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(150), nullable=False)
+    # The sign-in name the hospital issues, derived from the staff member's
+    # own name (sandeep.viswanadh) by helpers/credentials. Nullable because
+    # accounts predating it exist and sign in by email, which still works --
+    # login accepts either. Unique, and MySQL allows any number of NULLs under
+    # a unique index, so "not issued yet" costs nothing.
+    #
+    # Never reused: a username is how a staff member's actions read in the
+    # audit trail, so handing a leaver's name to a new joiner would rewrite
+    # history. helpers/credentials suffixes instead.
+    username = db.Column(db.String(150), nullable=True, unique=True, index=True)
     email = db.Column(db.String(150), nullable=False, unique=True)
     password_hash = db.Column(db.String(255), nullable=False)
     role_id = db.Column(db.Integer, db.ForeignKey("roles.id"), nullable=False)
@@ -60,6 +70,7 @@ class User(db.Model):
         return {
             "id": self.id,
             "name": self.name,
+            "username": self.username,
             "email": self.email,
             "role": self.role.name if self.role else None,
             "avatar_url": self.avatar_url,

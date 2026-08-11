@@ -60,7 +60,16 @@
       "Bash(./venv/Scripts/python.exe -m py_compile portal/routes/staff_routes.py)",
       "Bash(./venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/cdc6d854-eaf1-49ce-8f6f-0690ad1080f9/scratchpad/phone_test.py\")",
       "PowerShell(& \"c:\\\\Users\\\\Mahesh\\\\OneDrive\\\\Desktop\\\\Medical\\\\backend\\\\venv\\\\Scripts\\\\python.exe\" -m py_compile \"c:\\\\Users\\\\Mahesh\\\\OneDrive\\\\Desktop\\\\Medical\\\\backend\\\\portal\\\\routes\\\\patient_routes.py\")",
-      "PowerShell(if \\($?\\) { \"backend OK\" })"
+      "PowerShell(if \\($?\\) { \"backend OK\" })",
+      "Bash(cd /c/Users/Mahesh/OneDrive/Desktop/Medical/backend && ls -la config/ && echo \"=== dev.ini ===\" && sed -e 's/\\\\\\(password *= *\\\\\\).*/\\\\1***/I' -e 's/\\\\\\(key *= *\\\\\\).*/\\\\1***/I' config/dev.ini 2>/dev/null)",
+      "Bash(python -m py_compile portal/helpers/email.py portal/helpers/credentials.py portal/helpers/bootstrap.py portal/models/password_reset_token.py portal/models/user.py portal/models/role.py portal/routes/staff_routes.py portal/routes/auth_routes.py portal/routes/doctor_routes.py portal/routes/nursing_routes.py config/config.py migrations/versions/b8f3c21d90ae_staff_usernames_and_password_reset_tokens.py)",
+      "Bash(venv/Scripts/python.exe -c ' *)",
+      "Bash(venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/1f0e59a2-8766-4048-8f46-469515c0bc2f/scratchpad/flow_check.py\")",
+      "Bash(PYTHONPATH=. venv/Scripts/python.exe -c ' *)",
+      "Bash(PYTHONPATH=. venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/1f0e59a2-8766-4048-8f46-469515c0bc2f/scratchpad/flow_check.py\")",
+      "Bash(venv/Scripts/python.exe -)",
+      "Bash(git status *)",
+      "Bash(PYTHONPATH=. venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/1f0e59a2-8766-4048-8f46-469515c0bc2f/scratchpad/smtp_live_check.py\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\ADMIN\\Downloads\\AI_medical\\backend"

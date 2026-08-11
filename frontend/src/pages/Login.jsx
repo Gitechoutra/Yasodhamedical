@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
-import { HiOutlineEnvelope, HiOutlineLockClosed } from "react-icons/hi2";
+import {
+  HiOutlineEye,
+  HiOutlineEyeSlash,
+  HiOutlineLockClosed,
+  HiOutlineUser,
+} from "react-icons/hi2";
 import Logo from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
 
@@ -8,8 +13,13 @@ export default function Login() {
   const { login, isLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [email, setEmail] = useState("");
+  // Username or email, in one field. Staff are issued a username
+  // (sandeep.viswanadh) and told it in their welcome email, but the address
+  // they were mailed at works just as well — and remembering which of the two
+  // this particular system wanted is not a thing to make anybody do.
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
   const redirectTo = location.state?.from?.pathname || "/dashboard";
@@ -18,7 +28,7 @@ export default function Login() {
     e.preventDefault();
     setErrorMsg("");
     try {
-      const user = await login(email, password);
+      const user = await login(identifier, password);
       // The one sign-in for every role. Nurses, pharmacists and lab
       // technicians have their own module trees; everyone else lands on
       // /dashboard.
@@ -52,30 +62,41 @@ export default function Login() {
         <form onSubmit={handleSubmit} className="mt-7 space-y-4">
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-              Email
+              Username or email
             </label>
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
-              <HiOutlineEnvelope className="h-4.5 w-4.5 text-slate-400" />
+              <HiOutlineUser className="h-4.5 w-4.5 text-slate-400" />
               <input
-                type="email"
+                // Not type="email" any more: the browser's own validation
+                // would reject "sandeep.viswanadh" before the form ever
+                // submitted, with a message about a missing '@'.
+                type="text"
                 required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@yasodhahospitals.com"
+                autoComplete="username"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder="sandeep.viswanadh"
                 className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
               />
             </div>
           </div>
 
           <div>
-            <label className="mb-1.5 block text-xs font-semibold text-slate-600">
-              Password
-            </label>
+            <div className="mb-1.5 flex items-baseline justify-between gap-3">
+              <label className="block text-xs font-semibold text-slate-600">
+                Password
+              </label>
+              <Link
+                to="/forgot-password"
+                className="text-xs font-semibold text-brand-600 transition hover:text-brand-700"
+              >
+                Forgot password?
+              </Link>
+            </div>
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
-              <HiOutlineLockClosed className="h-4.5 w-4.5 text-slate-400" />
+              <HiOutlineLockClosed className="h-4.5 w-4.5 shrink-0 text-slate-400" />
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 required
                 autoComplete="current-password"
                 value={password}
@@ -83,6 +104,20 @@ export default function Login() {
                 placeholder="••••••••"
                 className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-pressed={showPassword}
+                title={showPassword ? "Hide password" : "Show password"}
+                className="shrink-0 text-slate-400 transition hover:text-slate-600"
+              >
+                {showPassword ? (
+                  <HiOutlineEyeSlash className="h-4.5 w-4.5" />
+                ) : (
+                  <HiOutlineEye className="h-4.5 w-4.5" />
+                )}
+              </button>
             </div>
           </div>
 
@@ -102,9 +137,11 @@ export default function Login() {
         </form>
 
         {/* No public sign-up: staff accounts are created by an administrator
-            through Staff Management. */}
+            through Staff Management, which emails the username and a
+            temporary password to the staff member directly. */}
         <p className="mt-6 text-center text-xs text-slate-400">
-          Staff accounts are issued by your hospital administrator.
+          Staff accounts are issued by your hospital administrator, who emails you
+          your username and a temporary password.
         </p>
         <p className="mt-3 text-center text-sm text-slate-500">
           <Link to="/" className="font-semibold text-slate-500 hover:text-slate-700">

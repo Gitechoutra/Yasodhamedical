@@ -201,6 +201,42 @@ def ensure_roles(app):
         return []
 
 
+def ensure_usernames(app):
+    """Gives a username to any account that hasn't got one.
+
+    Accounts arrive by more doors than Staff Management: the demo seeder, the
+    older `POST /doctors` and `POST /nursing/nurses` routes, and every row that
+    existed before usernames did. Rather than teach each of them separately,
+    the invariant is restored here on every start — one place, and one that a
+    restored dump passes through too.
+
+    Sign-in accepts an email address as well, so a missing username is not an
+    outage; it is a staff member who cannot be told "your username is …",
+    which is exactly what the credentials email says.
+
+    Additive like everything else here: an existing username is never
+    rewritten, because it is what the person types every morning.
+    """
+    from portal.helpers.credentials import assign_username
+
+    def work():
+        pending = User.query.filter(
+            db.or_(User.username.is_(None), User.username == "")
+        ).all()
+        named = []
+        for user in pending:
+            # One at a time and flushed as we go: `assign_username` reads the
+            # usernames already taken, and two new joiners called Sunil Kumar
+            # in the same backfill must not both be handed `sunil.kumar`.
+            named.append(f"{user.name} -> {assign_username(user, force=True)}")
+            db.session.flush()
+        if named:
+            db.session.commit()
+        return _report(app, "Username", named, User.query.count())
+
+    return _guarded(app, User, "Username", work)
+
+
 def ensure_admin(app):
     """Creates the default administrator, or rewrites the existing one to match
     the configured credentials.

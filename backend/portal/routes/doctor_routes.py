@@ -2,6 +2,7 @@ from flask import Blueprint, request
 from flask_jwt_extended import jwt_required
 
 from portal.extensions import db
+from portal.helpers.credentials import unique_username
 from portal.helpers.decorators import role_required
 from portal.helpers.response import error, success
 from portal.models.department import Department
@@ -44,7 +45,13 @@ def create_doctor():
 
     doctor_role = Role.query.filter_by(name="doctor").first()
 
-    user = User(name=name, email=email, role_id=doctor_role.id)
+    # The credentials flow proper lives in Staff Management; this older route
+    # still takes a password from the caller. It gets a username all the same,
+    # so an account created here is not the one exception in the staff list —
+    # see helpers/bootstrap.ensure_usernames for the rest of that story.
+    user = User(
+        name=name, email=email, username=unique_username(name, email), role_id=doctor_role.id
+    )
     user.set_password(password)
     db.session.add(user)
     db.session.flush()  # assigns user.id before the Doctor row references it

@@ -67,11 +67,16 @@ const REGISTRATION_LABELS = {
   pharmacist: "Pharmacy license number",
 };
 
+// No password here, and no username either. Both are the server's to decide:
+// the username is derived from the full name (Sandeep Viswanadh ->
+// sandeep.viswanadh, numbered if taken) and the first password is random and
+// emailed to the staff member with a single-use link to replace it. An
+// administrator who could type a password would be an administrator who knows
+// one, which is the thing that flow exists to prevent — so the field is gone
+// rather than hidden.
 const EMPTY = {
   name: "",
   email: "",
-  password: "",
-  confirm_password: "",
   role: "",
   phone: "",
   gender: "",
@@ -154,9 +159,6 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.role]);
 
-  const mismatch =
-    form.confirm_password.length > 0 && form.password !== form.confirm_password;
-
   // Optional, but exact when given: a half-typed number is not "nearly valid",
   // it is a number that would reach the wrong person.
   const phoneIncomplete = form.phone.length > 0 && form.phone.length < PHONE_DIGITS;
@@ -169,10 +171,6 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (mismatch) {
-      setErrorMsg("Those passwords do not match.");
-      return;
-    }
     if (phoneIncomplete) {
       setErrorMsg(`Mobile number must be exactly ${PHONE_DIGITS} digits.`);
       return;
@@ -180,18 +178,17 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
     setSaving(true);
     setErrorMsg("");
     try {
-      const payload = { ...form };
-      // Blank means "leave it" on edit; on create the server requires one.
-      if (editing && !payload.password) {
-        delete payload.password;
-        delete payload.confirm_password;
-      }
       if (editing) {
-        await updateStaff(staff.id, payload);
+        await updateStaff(staff.id, form);
+        onSaved();
       } else {
-        await createStaff(payload);
+        // The created record carries `credentials` and the message written
+        // for the administrator — whether the email went, and the sign-in
+        // details themselves if it didn't. Handed up so the staff list can
+        // show them; there is no second chance to read them.
+        const created = await createStaff(form);
+        onSaved(created);
       }
-      onSaved();
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Could not save this staff member.");
     } finally {
@@ -447,38 +444,6 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className={label}>{editing ? "New password" : "Password *"}</label>
-            <input
-              required={!editing}
-              type="password"
-              minLength={8}
-              autoComplete="new-password"
-              className={input}
-              value={form.password}
-              onChange={update("password")}
-              placeholder={editing ? "Leave blank to keep current" : "At least 8 characters"}
-            />
-          </div>
-          <div>
-            <label className={label}>Confirm password{editing ? "" : " *"}</label>
-            <input
-              required={!editing}
-              type="password"
-              autoComplete="new-password"
-              className={`${input} ${mismatch ? "border-red-300" : ""}`}
-              value={form.confirm_password}
-              onChange={update("confirm_password")}
-            />
-            {mismatch && (
-              <p className="mt-1 text-[11px] font-medium text-red-600">
-                Passwords do not match.
-              </p>
-            )}
-          </div>
-        </div>
-
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input
             type="checkbox"
@@ -509,10 +474,14 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
 
         <button
           type="submit"
-          disabled={saving || mismatch || phoneIncomplete || missing.length > 0}
+          disabled={saving || phoneIncomplete || missing.length > 0}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
-          {saving ? "Saving…" : editing ? "Save changes" : "Create staff account"}
+          {saving
+            ? "Saving…"
+            : editing
+            ? "Save changes"
+            : "Create account & email sign-in details"}
         </button>
       </form>
     </Modal>
