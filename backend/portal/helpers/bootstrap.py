@@ -300,11 +300,19 @@ def ensure_admin(app):
                         "Set SEED_ADMIN_PASSWORD."
                     )
             else:
-                # The existing admin's own address. With syncing off it is not
-                # the configured one, and logging the configured value there
-                # would imply the check had touched the account.
+                # The existing admin's own address and username -- not the
+                # configured ones. With syncing off the two can differ, and
+                # logging the configured value would imply the check had
+                # touched the account.
+                #
+                # Both identifiers, because login accepts either and "the
+                # admin cannot sign in" is nearly always someone typing an
+                # address the account no longer has. One line in the startup
+                # log answers it without opening the database.
                 app.logger.info(
-                    "Admin check: an administrator already exists (%s) -- left untouched",
+                    "Admin check: an administrator already exists -- left untouched. "
+                    "Signs in as '%s' or %s",
+                    admin.username or "(no username yet)",
                     admin.email,
                 )
 
