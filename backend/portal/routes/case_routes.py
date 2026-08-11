@@ -8,7 +8,7 @@ summary and final prescription, and the doctor's sign-off on that final list.
 
 from datetime import datetime
 
-from flask import Blueprint, request
+from flask import Blueprint, current_app, request
 from flask_jwt_extended import get_jwt_identity
 
 from portal.ai import gemini_client
@@ -191,7 +191,11 @@ def close_case(case_id):
             f"{exc} The case is unchanged and can be closed again once the limit clears.",
             status=429,
         )
+    except gemini_client.AIServiceUnavailableError as exc:
+        # Already retried. Same guarantee as a quota refusal: nothing written.
+        return error(f"{exc} The case is unchanged and can be closed again.", status=503)
     except Exception as exc:  # noqa: BLE001 - surface AI failure to the client
+        current_app.logger.exception("Case consolidation failed for case %s", case.id)
         return error(f"AI consolidation failed: {exc}", status=502)
 
     case.status = "closed"

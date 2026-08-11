@@ -12,6 +12,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import Modal from "../components/Modal";
 import { Badge, EmptyState, PageHeader } from "../components/RecordCard";
 import { useAuth } from "../context/AuthContext";
+import { isoDate, formatDay } from "../utils/dates";
 import {
   cancelShift,
   createShift,
@@ -41,32 +42,6 @@ const ROLE_LABELS = {
 
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
-
-/** Today (or today ± offsetDays) as YYYY-MM-DD in the *hospital's* timezone.
- *
- *  Built from the local date parts rather than `toISOString()`, which converts
- *  to UTC first and so returns the wrong day for part of every day: east of
- *  UTC it reads a day behind until the offset passes (05:30 in IST), west of
- *  it a day ahead all evening. A rota is wall-clock local — matching the
- *  storage model — so an administrator rostering the night shift at 2am must
- *  not be handed yesterday's date as the default. */
-function isoDate(offsetDays = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-/** "Mon 11 Aug 2026" — the rota is read by date, so the weekday leads. */
-function formatDay(iso) {
-  const d = new Date(`${iso}T00:00:00`);
-  return d.toLocaleDateString(undefined, {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
 
 /** Groups a flat list into [date, shifts[]] pairs, preserving server order —
  *  the API already sorts by date then start time. */

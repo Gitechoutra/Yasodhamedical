@@ -86,7 +86,11 @@ export default function Dashboard() {
               value={summary.todays_appointments}
               hint="Waiting & in consultation"
               icon={HiOutlineCalendarDays}
-              to="/dashboard/appointments?filter=today"
+              // No filter: the card counts the live queue, so it links to the
+              // queue itself. A `?filter=today` here used to hide anyone
+              // still waiting from an earlier day, leaving the card reading 0
+              // over a page that listed them.
+              to="/dashboard/appointments"
             />
             <StatCard
               label="Awaiting a Doctor"
@@ -106,9 +110,12 @@ export default function Dashboard() {
               <StatCard
                 label="Today's Appointments"
                 value={summary.todays_appointments}
-                hint="Pending & ongoing"
+                hint="Waiting & in consultation"
                 icon={HiOutlineCalendarDays}
-                to="/dashboard/appointments?filter=today"
+                // Links to the whole queue, unfiltered — this is the count of
+                // patients still to be seen, including anyone carried over
+                // from an earlier day.
+                to="/dashboard/appointments"
               />
               <StatCard
                 label="Active Consultations"

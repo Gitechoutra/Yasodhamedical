@@ -35,6 +35,7 @@ const CaseRecord = lazy(() => import("../pages/CaseRecord"));
 const KnowledgeBase = lazy(() => import("../pages/KnowledgeBase"));
 const Prescriptions = lazy(() => import("../pages/Prescriptions"));
 const Doctors = lazy(() => import("../pages/Doctors"));
+const DoctorAvailability = lazy(() => import("../pages/DoctorAvailability"));
 const StaffManagement = lazy(() => import("../pages/StaffManagement"));
 const Departments = lazy(() => import("../pages/Departments"));
 const DepartmentDetail = lazy(() => import("../pages/DepartmentDetail"));
@@ -296,6 +297,11 @@ export default function AppRouter() {
 
               <Route element={<RoleRoute deny={ADMIN_ONLY_DENY} />}>
                 <Route path="doctors" element={<Doctors />} />
+                {/* Who is in today and between what hours. Front desk work —
+                    the API allows admin and reception only, so the roles that
+                    reach this tree but not that endpoint see its error rather
+                    than a blank screen. */}
+                <Route path="doctors/availability" element={<DoctorAvailability />} />
                 <Route path="departments" element={<Departments />} />
                 <Route path="departments/:id" element={<DepartmentDetail />} />
                 <Route path="staff" element={<StaffManagement />} />

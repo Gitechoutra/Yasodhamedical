@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, time, timedelta
 
-from flask import Blueprint, request
+from flask import Blueprint, current_app, request
 from flask_jwt_extended import get_jwt_identity
 
 from portal.ai import gemini_client
@@ -293,11 +293,24 @@ def transcribe_turn(consultation_id):
         # The recording itself is still in the browser's hands — the doctor can
         # press stop again once the limit clears without losing what was said.
         return error(str(exc), status=429)
+    except gemini_client.SilentRecordingError as exc:
+        # A hardware problem, not an AI one. Said plainly, because "no speech
+        # detected" sends a doctor looking for a fault in the conversation.
+        return error(str(exc), status=422)
+    except gemini_client.AIServiceUnavailableError as exc:
+        # The connection dropped, repeatedly. Already retried; the raw socket
+        # error is in the log, and what the doctor gets is what to do about it.
+        return error(str(exc), status=503)
     except Exception as exc:  # noqa: BLE001 - surface transcription failure to the client
+        current_app.logger.exception("Transcription failed for consultation %s", consultation.id)
         return error(f"Transcription failed: {exc}", status=502)
 
     if not text:
-        return error("Could not detect any speech in that recording", status=422)
+        return error(
+            "No speech could be made out in that recording. If the conversation was "
+            "quiet or far from the microphone, move it closer and record again.",
+            status=422,
+        )
 
     message = ConversationMessage(consultation_id=consultation.id, speaker=speaker, message=text)
     db.session.add(message)
@@ -682,7 +695,19 @@ def end_consultation(consultation_id):
             "this consultation again once the limit clears.",
             status=429,
         )
+    except gemini_client.AIServiceUnavailableError as exc:
+        # Same guarantee as a quota refusal: nothing has been written, so the
+        # consultation stays in progress with its transcript intact and End
+        # can simply be pressed again.
+        return error(
+            f"{exc} Your recording is safe — the consultation is still open and can be "
+            "ended again.",
+            status=503,
+        )
     except Exception as exc:  # noqa: BLE001 - surface AI failure to the client
+        current_app.logger.exception(
+            "Summary generation failed for consultation %s", consultation.id
+        )
         return error(f"AI summary generation failed: {exc}", status=502)
 
     consultation.status = "completed"

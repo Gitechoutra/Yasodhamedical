@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { HiOutlinePlus } from "react-icons/hi2";
+import { Link } from "react-router-dom";
+import { HiOutlineClock, HiOutlinePlus } from "react-icons/hi2";
 import Modal from "../components/Modal";
 import DoctorsTable from "../components/DoctorsTable";
 import { useAuth } from "../context/AuthContext";
@@ -162,15 +163,27 @@ export default function Doctors() {
             {doctors.length} doctor{doctors.length === 1 ? "" : "s"}
           </p>
         </div>
-        {canManageDoctors && (
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
+        <div className="flex flex-wrap items-center gap-2">
+          {/* This table says who the doctors are; the front desk also needs to
+              know when they are in. Reception's route into it — the sidebar
+              carries the same link. */}
+          <Link
+            to="/dashboard/doctors/availability"
+            className="flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
           >
-            <HiOutlinePlus className="h-4 w-4" />
-            Add Doctor
-          </button>
-        )}
+            <HiOutlineClock className="h-4 w-4" />
+            Availability
+          </Link>
+          {canManageDoctors && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
+            >
+              <HiOutlinePlus className="h-4 w-4" />
+              Add Doctor
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="mt-6">

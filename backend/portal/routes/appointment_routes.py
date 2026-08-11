@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import datetime
 
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
@@ -24,8 +24,8 @@ from portal.models.patient import Patient
 
 appointment_bp = Blueprint("appointments", __name__)
 
-# What the dashboard's "Today's Appointments" card counts: still on the board,
-# i.e. not yet completed or cancelled.
+# In the queue, and so what the dashboard's queue card counts: still on the
+# board, i.e. not yet completed or cancelled.
 OPEN_STATUSES = ("waiting", "in_progress")
 
 # Off the board for good — nothing can be started from one of these.
@@ -33,13 +33,26 @@ CLOSED_STATUSES = ("completed", "cancelled")
 
 
 def open_appointments_query():
-    """Appointments still on the board.
+    """Appointments still on the board — the one definition of "the queue",
+    shared by the Appointments page and by the dashboard's queue card, so the
+    number on the card always matches the rows behind it.
 
     The status check is the primary rule; the consultation check is a safety
     net. A row whose consultation is already completed must never appear in
     the queue even if its own status was somehow left open — that's the
     "completed patients never remain in Appointments" guarantee, enforced on
     read so no stale row can slip through.
+
+    Deliberately *not* narrowed to appointments raised today. The queue is a
+    work list, not a diary: a patient queued yesterday evening and never
+    called in is still waiting this morning, and a consultation left running
+    overnight is still running. Counting only rows with today's `created_at`
+    hid exactly those patients from the dashboard card while the page it
+    links to still listed them — the card read "0" over a queue that had
+    people in it. An appointment can only ever be raised now or earlier, so
+    "still open" already implies "still today's work"; there is no date
+    window that could include a waiting patient without also including the
+    ones who have been waiting longest.
     """
     return (
         Appointment.query.outerjoin(
@@ -49,17 +62,6 @@ def open_appointments_query():
             Appointment.status.in_(OPEN_STATUSES),
             db.or_(Consultation.id.is_(None), Consultation.status != "completed"),
         )
-    )
-
-
-def todays_open_appointments_query():
-    """Today's appointments that still need someone — the single definition
-    shared by the dashboard count and the Appointments page filter, so the
-    number on the card always matches the rows behind it."""
-    today = datetime.utcnow().date()
-    return open_appointments_query().filter(
-        Appointment.created_at >= datetime.combine(today, time.min),
-        Appointment.created_at <= datetime.combine(today, time.max),
     )
 
 
@@ -73,19 +75,20 @@ def list_appointments():
     one of those up explicitly.
     """
     status = request.args.get("status")
+    # ?filter=today was the dashboard card's link and is still accepted so
+    # old links and bookmarks keep working. It no longer narrows anything:
+    # the queue is every open appointment whatever day it was raised on (see
+    # open_appointments_query), so this resolves to the same live queue.
+    queue_requested = request.args.get("filter") == "today"
 
-    if request.args.get("filter") == "today":
-        # ?filter=today is the dashboard card's link.
-        query = todays_open_appointments_query()
-    elif status:
-        # An explicit status is a lookup, not the queue — it may return
-        # completed/cancelled rows, which the default view never does.
+    if status and not queue_requested:
+        # An explicit status on its own is a lookup, not the queue — it may
+        # return completed/cancelled rows, which the queue never does.
         query = Appointment.query.filter(Appointment.status == status)
     else:
         query = open_appointments_query()
-
-    if status and request.args.get("filter") == "today":
-        query = query.filter(Appointment.status == status)
+        if status:
+            query = query.filter(Appointment.status == status)
 
     doctor = get_current_doctor()
     # Explicit column, not filter_by: the query may already be joined to

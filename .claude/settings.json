@@ -18,7 +18,12 @@
       "Bash(cp \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/15a2830e-da66-47e0-892e-bec278d4d562/scratchpad/auth_probe.mjs\" ./.auth_probe.mjs)",
       "Bash(MSYS_NO_PATHCONV=1 node ./.auth_probe.mjs)",
       "Bash(grep -vE \"^\\\\s*$\")",
-      "Bash(curl -s \"http://localhost:5173/src/config.js\")"
+      "Bash(curl -s \"http://localhost:5173/src/config.js\")",
+      "Bash(./venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/9963afa3-bdce-4b12-b8df-e54597be2d94/scratchpad/probe.py\")",
+      "Bash(./venv/Scripts/python.exe -c \"import google.genai, httpx; print\\(google.genai.__version__\\); print\\(httpx.__version__\\)\")",
+      "Bash(./venv/Scripts/.bin/ffmpeg.exe -version)",
+      "Bash(./venv/Scripts/python.exe -c \"import imageio_ffmpeg;print\\(imageio_ffmpeg.get_ffmpeg_exe\\(\\)\\)\")",
+      "Bash(./venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/9963afa3-bdce-4b12-b8df-e54597be2d94/scratchpad/verify.py\")"
     ]
   }
 }
