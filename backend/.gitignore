@@ -8,5 +8,11 @@ logs/*.log
 .bin/
 uploads/
 test_tone.wav
-migrations/
-uploads/
+
+# NOT migrations/. Every teammate's database is built by `flask db upgrade`,
+# so a migration that stays out of the repository is a schema change nobody
+# else can apply: they pull code that queries a column their database has
+# never been given, and every request touching that table 500s. That is
+# exactly how b8f3c21d90ae (users.username, password_reset_tokens) went
+# missing and broke sign-in for everyone but the machine it was written on.
+# Only the compiled cache is ignored, by the __pycache__ rule above.
