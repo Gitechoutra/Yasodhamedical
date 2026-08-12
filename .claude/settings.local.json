@@ -145,7 +145,10 @@
       "Bash(Select-String -Pattern \"\")",
       "Bash(Select-Object -Skip 189 -First 100)",
       "Bash(echo \"exit:$?\")",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('portal/routes/appointment_routes.py', encoding='utf-8'\\).read\\(\\)\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('portal/routes/appointment_routes.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(npm ls *)",
+      "Read(//d/MedAsta_Yasodha/Yasodhamedical/frontend/src/services/**)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('portal/routes/patient_routes.py', encoding='utf-8'\\).read\\(\\)\\)\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\ADMIN\\Downloads\\AI_medical\\backend",

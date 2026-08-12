@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
   HiOutlineAcademicCap,
@@ -26,6 +26,8 @@ import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import useLiveNursing from "../hooks/useLiveNursing";
 import { fetchNursingSummary } from "../services/nursingService";
+import { fetchNotifications } from "../services/notificationService";
+import { onDashboardChanged } from "../services/socket";
 
 const ALERTS_PATH = "/dashboard/nursing/alerts";
 
@@ -166,23 +168,43 @@ export default function Sidebar() {
   // `/nursing/summary` call the Nursing Care banner already uses, scoped
   // server-side to this doctor's own patients (or, for admin, the whole
   // hospital).
+  //
+  // A newly-assigned patient isn't a nursing escalation — it has no
+  // assignment to hang a ClinicalAlert off — so it doesn't show up in that
+  // summary at all. It's counted in here too (doctor-only, since nobody else
+  // is ever the target of "a patient was assigned to you") so this badge is
+  // the one place a doctor can tell at a glance that something on this page
+  // needs a look, same as the nursing escalations it already covers.
   const [alertCounts, setAlertCounts] = useState({ open: 0, critical: 0 });
   const canSeeAlerts = user?.role !== "receptionist";
+  const isDoctor = user?.role === "doctor";
 
-  const loadAlertCounts = () => {
+  const loadAlertCounts = useCallback(() => {
     if (!canSeeAlerts) return;
-    fetchNursingSummary()
-      .then((summary) =>
+    Promise.all([
+      fetchNursingSummary(),
+      isDoctor
+        ? fetchNotifications({ category: "patient_assignment", unread: true, limit: 100 })
+        : Promise.resolve({ items: [] }),
+    ])
+      .then(([summary, notifications]) =>
         setAlertCounts({
-          open: summary?.open_alerts || 0,
+          open: (summary?.open_alerts || 0) + (notifications?.items?.length || 0),
           critical: summary?.critical_alerts || 0,
         })
       )
       .catch(() => {});
-  };
+  }, [canSeeAlerts, isDoctor]);
 
-  useEffect(loadAlertCounts, [canSeeAlerts]);
+  useEffect(loadAlertCounts, [loadAlertCounts]);
   useLiveNursing(loadAlertCounts);
+  // Patient assignment pings the dashboard channel (create_patient,
+  // reassign_patient), not the nursing one above — it isn't nursing
+  // activity, so it would never otherwise refresh this badge live.
+  useEffect(() => {
+    if (!isDoctor) return undefined;
+    return onDashboardChanged(loadAlertCounts);
+  }, [isDoctor, loadAlertCounts]);
 
   async function handleLogout() {
     await logout();

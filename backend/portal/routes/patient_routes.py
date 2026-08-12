@@ -315,7 +315,7 @@ def create_patient():
             title="New patient assigned to you",
             body=f"{patient.name} was registered and routed to you.",
             category="patient_assignment",
-            link="/dashboard/patients",
+            link=f"/dashboard/patients?patient_id={patient.id}",
             exclude_user_id=get_jwt_identity(),
         )
 
@@ -521,7 +521,7 @@ def reassign_patient(patient_id):
             title="New patient assigned to you",
             body=f"{patient.name} was routed to you.",
             category="patient_assignment",
-            link="/dashboard/patients",
+            link=f"/dashboard/patients?patient_id={patient.id}",
             exclude_user_id=get_jwt_identity(),
         )
 

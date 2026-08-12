@@ -26,6 +26,7 @@ import { canCreateOp, canReassignDoctor, canRegisterPatient } from "../utils/per
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDoctors } from "../services/doctorService";
 import {
+  fetchPatient,
   fetchPatientCounts,
   fetchPatients,
   createPatient,
@@ -313,6 +314,18 @@ export default function Patients() {
   const searchTerm = searchParams.get("search") || "";
   const [searchInput, setSearchInput] = useState(searchTerm);
 
+  // Set by a "New patient assigned to you" notification, which names a
+  // specific patient rather than a search term. That patient may not have
+  // been consulted yet, so the consulted/awaiting split above would hide
+  // them — fetched directly by id instead, bypassing both scope and search.
+  const patientIdParam = searchParams.get("patient_id");
+
+  function clearPatientIdParam() {
+    const params = new URLSearchParams(searchParams);
+    params.delete("patient_id");
+    setSearchParams(params, { replace: true });
+  }
+
   // Arriving from the header search (or the back button) has to move the box,
   // which otherwise keeps whatever was last typed into it.
   useEffect(() => setSearchInput(searchTerm), [searchTerm]);
@@ -334,6 +347,14 @@ export default function Patients() {
   const load = useCallback(
     (silent = false) => {
       if (!silent) setLoading(true);
+      if (patientIdParam) {
+        // Fetched by id so it shows up regardless of which side of the
+        // consulted/awaiting split it's currently on.
+        return fetchPatient(patientIdParam)
+          .then((patient) => setPatients([patient]))
+          .catch(() => setPatients([]))
+          .finally(() => setLoading(false));
+      }
       // A search runs across every patient rather than the open tab. Whoever
       // is being looked for is as likely to be waiting in Appointments as to
       // have been seen, and a name that exists returning "no patients" is
@@ -348,7 +369,7 @@ export default function Patients() {
         })
         .finally(() => setLoading(false));
     },
-    [scope, searching, query]
+    [scope, searching, query, patientIdParam]
   );
 
   // The doctor list backs both the registration form and the re-route picker;
@@ -374,6 +395,7 @@ export default function Patients() {
       const params = new URLSearchParams(searchParams);
       if (next) params.set("search", next);
       else params.delete("search");
+      params.delete("patient_id");
       setSearchParams(params, { replace: true });
     }, 300);
     return () => clearTimeout(id);
@@ -409,12 +431,22 @@ export default function Patients() {
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Patients</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {searching
-              ? `Matching “${query}” — every patient, consulted or not`
-              : isDoctor || scope === "consulted"
-                ? "Patients whose consultation is complete"
-                : "Registered or in Appointments — not yet consulted"}
+            {patientIdParam
+              ? "Viewing a specific patient"
+              : searching
+                ? `Matching “${query}” — every patient, consulted or not`
+                : isDoctor || scope === "consulted"
+                  ? "Patients whose consultation is complete"
+                  : "Registered or in Appointments — not yet consulted"}
           </p>
+          {patientIdParam && (
+            <button
+              onClick={clearPatientIdParam}
+              className="mt-1 text-sm font-semibold text-brand-600 underline underline-offset-2"
+            >
+              ← Back to all patients
+            </button>
+          )}
         </div>
         {canRegister && (
           <button
@@ -465,7 +497,7 @@ export default function Patients() {
           so a tab claiming to be the active filter would be a lie — and a
           match on the other side would look like no match at all. */}
       {!isDoctor && (
-        <div className={`mt-5 flex-wrap gap-2 ${searching ? "hidden" : "flex"}`}>
+        <div className={`mt-5 flex-wrap gap-2 ${searching || patientIdParam ? "hidden" : "flex"}`}>
           {[
             ["consulted", "Consulted", counts?.consulted],
             ["awaiting", "Awaiting consultation", counts?.awaiting],
@@ -494,7 +526,7 @@ export default function Patients() {
         </div>
       )}
 
-      {!isDoctor && scope === "awaiting" && !searching && (
+      {!isDoctor && scope === "awaiting" && !searching && !patientIdParam && (
         <p className="mt-3 flex flex-wrap items-center gap-1.5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
           These patients are still with Appointments. They move to Consulted once the doctor
           completes their consultation.
@@ -539,6 +571,16 @@ export default function Patients() {
                     className="ml-1 font-semibold text-brand-600 underline underline-offset-2"
                   >
                     Clear the search
+                  </button>
+                </>
+              ) : patientIdParam ? (
+                <>
+                  This patient could not be found, or you don&apos;t have access to their record.
+                  <button
+                    onClick={clearPatientIdParam}
+                    className="ml-1 font-semibold text-brand-600 underline underline-offset-2"
+                  >
+                    View all patients
                   </button>
                 </>
               ) : scope === "consulted" ? (
