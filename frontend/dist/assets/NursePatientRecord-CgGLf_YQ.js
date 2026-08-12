@@ -1,0 +1,1 @@
+import{t as e}from"./jsx-runtime-CdArH33I.js";import{Mt as t,Nt as n}from"./index-BlyHw-1A.js";import{t as r}from"./PatientRecord-pDR9TaPO.js";var i=e();function a(){let{id:e}=n(),a=t();return(0,i.jsx)(r,{assignmentId:e,backTo:`Back to my patients`,onBack:()=>a(`/nurse/patients`)})}export{a as default};

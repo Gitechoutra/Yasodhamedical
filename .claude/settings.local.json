@@ -75,7 +75,13 @@
       "Bash(venv/Scripts/python.exe -)",
       "Bash(git status *)",
       "Bash(PYTHONPATH=. venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/1f0e59a2-8766-4048-8f46-469515c0bc2f/scratchpad/smtp_live_check.py\")",
-      "Bash(python -c \"import json; json.load\\(open\\('.claude/settings.local.json'\\)\\); print\\('valid JSON'\\)\")"
+      "Bash(python -c \"import json; json.load\\(open\\('.claude/settings.local.json'\\)\\); print\\('valid JSON'\\)\")",
+      "Bash(sed -n '/def upgrade/,/def downgrade/p' backend/migrations/versions/4666ed7e73fd_initial_migration.py)",
+      "Bash(git checkout *)",
+      "Bash(flask db *)",
+      "Bash(DATABASE_URL=\"mysql+pymysql://root:Revanth%40106003@127.0.0.1:3306/hospital_verify_test?charset=utf8mb4\" flask db upgrade)",
+      "Bash(DATABASE_URL=\"mysql+pymysql://root:Revanth%40106003@127.0.0.1:3306/hospital_verify_test?charset=utf8mb4\" python -m portal.seeds)",
+      "Bash(DATABASE_URL=mysql+pymysql://root:Revanth%40106003@127.0.0.1:3306/hospital_verify_test?charset=utf8mb4 python -c ' *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\ADMIN\\Downloads\\AI_medical\\backend"

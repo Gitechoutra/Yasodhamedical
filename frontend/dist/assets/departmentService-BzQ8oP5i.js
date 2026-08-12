@@ -1,0 +1,1 @@
+import{v as e}from"./index-BlyHw-1A.js";async function t(){return(await e.get(`/departments`)).data.data}async function n(t){return(await e.get(`/departments/${t}`)).data.data}async function r(t){return(await e.post(`/departments`,t)).data.data}export{n,t as r,r as t};
