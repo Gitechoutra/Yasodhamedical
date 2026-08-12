@@ -1,0 +1,1 @@
+import{H as e}from"./index-DdUlkeAy.js";var t=e();function n({status:e}){if(!e)return(0,t.jsx)(`span`,{className:`text-xs text-slate-400`,children:`—`});let n=e===`free`;return(0,t.jsxs)(`span`,{className:`rounded-full px-2.5 py-1 text-xs font-semibold ${n?`bg-emerald-100 text-emerald-700`:`bg-amber-100 text-amber-700`}`,children:[`OP: `,n?`Free`:`Paid`]})}export{n as t};

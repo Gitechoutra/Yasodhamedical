@@ -1,0 +1,1 @@
+import{t as e}from"./api-6PpEqTRX.js";async function t(t=``){return(await e.get(`/prescriptions/medicines`,{params:{q:t}})).data.data}async function n(t={}){return(await e.get(`/prescriptions`,{params:t})).data.data}export{t as n,n as t};

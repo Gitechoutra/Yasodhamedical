@@ -1,0 +1,1 @@
+import{t as e}from"./api-6PpEqTRX.js";async function t(){return(await e.get(`/departments`)).data.data}async function n(t){return(await e.get(`/departments/${t}`)).data.data}async function r(t){return(await e.post(`/departments`,t)).data.data}export{n,t as r,r as t};

@@ -47,11 +47,23 @@ def check(label, condition, detail=""):
 
 
 # -- the test database has to exist before SQLAlchemy can connect to it -------
+#
+# Dropped and recreated rather than emptied with `db.drop_all()`. drop_all only
+# knows the tables the models currently declare, so a table left behind by an
+# older revision of the schema survives it -- and then blocks the run, because
+# its foreign keys still point at tables drop_all is trying to remove. (That is
+# not hypothetical: `registration_requests` did exactly this after its model
+# was deleted.) Recreating the schema makes the starting state depend on the
+# models alone, which is the only state a test run should ever begin from.
 root_url = _build_database_url(_VALUES["DB_NAME"])
 test_name = f"{_VALUES['DB_NAME']}_test"
+# Checked before any DDL runs, not after the app is built: this statement drops
+# a whole database, so the name is verified here rather than trusted.
+assert test_name.endswith("_test"), f"refusing to drop {test_name!r}"
 engine = sa.create_engine(root_url.split("?")[0])
 with engine.connect() as conn:
-    conn.execute(sa.text(f"CREATE DATABASE IF NOT EXISTS `{test_name}` "
+    conn.execute(sa.text(f"DROP DATABASE IF EXISTS `{test_name}`"))
+    conn.execute(sa.text(f"CREATE DATABASE `{test_name}` "
                          "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"))
     conn.commit()
 engine.dispose()
@@ -63,7 +75,6 @@ assert app.config["SQLALCHEMY_DATABASE_URI"].endswith(
 ), "refusing to run outside the test database"
 
 with app.app_context():
-    db.drop_all()
     db.create_all()
     for name, description in DEFAULT_ROLES:
         db.session.add(Role(name=name, description=description))

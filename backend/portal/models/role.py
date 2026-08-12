@@ -84,7 +84,11 @@ STAFF_ROLES = tuple(name for name in ROLE_NAMES if name != "admin")
 
 # Roles that own a dedicated profile table because clinical or pharmacy code
 # joins against it — creating one of these must create that row too, or the
-# account is half-formed (see registration_request for what that costs).
+# account is half-formed. That costs more than it sounds: several scoping rules
+# read "role X with no X profile" as unrestricted, so a doctor account with no
+# doctor row can see every patient rather than none (see
+# `helpers/patient_access.patient_scope`). `staff_routes` creates the account
+# and its profile in one transaction for exactly this reason.
 ROLES_WITH_PROFILE = ("doctor", "nurse", "pharmacist")
 
 

@@ -23,7 +23,6 @@ from portal.models.appointment import Appointment
 from portal.models.report import Report
 from portal.models.notification import Notification
 from portal.models.audit_log import AuditLog
-from portal.models.registration_request import RegistrationRequest
 from portal.models.nursing_assignment import NursingAssignment
 from portal.models.medication_order import MedicationAdministration, MedicationOrder
 from portal.models.patient_observation import PatientObservation
@@ -59,7 +58,6 @@ __all__ = [
     "Report",
     "Notification",
     "AuditLog",
-    "RegistrationRequest",
     "NursingAssignment",
     "MedicationOrder",
     "MedicationAdministration",
