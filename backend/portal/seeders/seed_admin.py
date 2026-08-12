@@ -8,8 +8,8 @@ from portal.models.role import Role
 from portal.models.user import User
  
 DEFAULT_NAME = "Admin"
-DEFAULT_EMAIL = "ramanamuddada@gmail.com"
-DEFAULT_PASSWORD = "Ramana@123"
+DEFAULT_EMAIL = "lingamrevanth@gmail.com"
+DEFAULT_PASSWORD = "Admin@123"
  
 # Spellings of "no" accepted from the environment. Anything else — including
 # an unset or empty value — leaves syncing on, so the documented default
