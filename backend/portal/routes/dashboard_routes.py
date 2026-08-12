@@ -11,10 +11,22 @@ from portal.models.consultation import Consultation
 from portal.models.nursing_assignment import NursingAssignment
 from portal.models.patient import Patient
 from portal.models.report import Report
-from portal.routes.appointment_routes import open_appointments_query
+from portal.routes.appointment_routes import collapse_duplicates, open_appointments_query
 from portal.routes.report_routes import scope_reports
 
 dashboard_bp = Blueprint("dashboard", __name__)
+
+
+def queue_size(query):
+    """How many cards the Appointments page will actually draw for this query.
+
+    Not `.count()`: the page collapses a patient's double-registrations into one
+    card, and a count taken in SQL would include the rows it hides — the card
+    would read "3 OPs" over a queue of two people. The queue is a work list of
+    the patients currently in the building, so loading it to count it is a few
+    rows, not a table scan.
+    """
+    return len(collapse_duplicates(query.all()))
 
 
 @dashboard_bp.get("/summary")
@@ -39,7 +51,10 @@ def summary():
                 "unassigned_patients": Patient.query.filter(
                     Patient.assigned_doctor_id.is_(None)
                 ).count(),
-                "todays_appointments": open_appointments_query().count(),
+                # Counted the same way the Appointments page lists them —
+                # double-registrations collapsed — or the card would read one
+                # higher than the queue it links to.
+                "todays_appointments": queue_size(open_appointments_query()),
                 "todays_registrations": Patient.query.filter(
                     Patient.created_at >= today_start, Patient.created_at <= today_end
                 ).count(),
@@ -97,7 +112,7 @@ def summary():
     return success(
         {
             "scope": "clinical",
-            "todays_appointments": appointments_query.count(),
+            "todays_appointments": queue_size(appointments_query),
             "active_consultations": consultations_query.count(),
             "total_patients": patients_query.count(),
             "reports_generated": reports_query.count(),
