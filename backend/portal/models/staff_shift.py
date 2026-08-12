@@ -1,24 +1,25 @@
-"""One rostered shift: a member of staff, a date, and the hours they work it.
+"""One scheduled shift: a member of staff, a date, and the hours they work it.
 
 This is the hospital's shift *schedule*, and it is deliberately separate from
 the `shift` column on `staff_profiles` and `nurses`. Those record the slot a
 person *normally* works — one value, no date, no history — which is fine as a
-hint on a form and useless as a rota. You cannot ask it who is on tonight, and
-you cannot change next Tuesday without changing every other day too.
+hint on a form and useless as a schedule. You cannot ask it who is on
+tonight, and you cannot change next Tuesday without changing every other day
+too.
 
 A row here answers those questions, so:
 
-  * `user_id` is nullable. An administrator drafts the week's rota first and
-    fills the names in after; an unassigned row is a slot that still needs
+  * `user_id` is nullable. An administrator drafts the week's schedule first
+    and fills the names in after; an unassigned row is a slot that still needs
     someone, which is a real state worth being able to see.
   * cancelling is a status change, not a delete. "Who was meant to be on that
-    night" stays answerable after the rota changes.
+    night" stays answerable after the shift schedule changes.
   * `starts_at`/`ends_at` are stored explicitly rather than derived from the
     slot name, so a one-off short shift does not need a new enum member.
 
 Times are wall-clock local to the hospital. There is one site per deployment
-and a rota is read by people standing in it — storing 22:00 as UTC would make
-a night shift render as a different day for half the year.
+and a schedule is read by people standing in it — storing 22:00 as UTC would
+make a night shift render as a different day for half the year.
 """
 
 from datetime import datetime, time
@@ -26,8 +27,8 @@ from datetime import datetime, time
 from portal.extensions import db
 from portal.helpers.datetime_helper import to_utc_iso
 
-# The named slots a rota is normally built from. `custom` is the escape hatch
-# for a shift that does not fit one, so the enum never blocks a real roster.
+# The named slots a schedule is normally built from. `custom` is the escape
+# hatch for a shift that does not fit one, so the enum never blocks a real one.
 SHIFT_SLOTS = ("morning", "evening", "night", "custom")
 
 # Default hours per slot, applied when the administrator picks a slot and
@@ -50,7 +51,7 @@ class StaffShift(db.Model):
 
     # Null while the slot is still unfilled. ondelete SET NULL rather than
     # CASCADE: removing an account should not silently erase the fact that
-    # somebody was rostered that night.
+    # somebody was scheduled that night.
     user_id = db.Column(
         db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
@@ -71,7 +72,7 @@ class StaffShift(db.Model):
     )
     notes = db.Column(db.String(500), nullable=True)
 
-    # Who rostered it. Always an admin — the routes allow nobody else to write
+    # Who scheduled it. Always an admin — the routes allow nobody else to write
     # — but recorded rather than assumed, because that may not stay true.
     created_by_id = db.Column(
         db.Integer, db.ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -93,8 +94,8 @@ class StaffShift(db.Model):
     branch = db.relationship("Branch")
 
     __table_args__ = (
-        # The two reads this table gets: "the rota between these dates" and
-        # "my shifts". Both are covered by the same composite.
+        # The two reads this table gets: "the schedule between these dates"
+        # and "my shifts". Both are covered by the same composite.
         db.Index("idx_staff_shift_user_date", "user_id", "shift_date"),
         db.Index("idx_staff_shift_date_status", "shift_date", "status"),
     )
@@ -105,7 +106,7 @@ class StaffShift(db.Model):
 
         Stored as an end time earlier than the start rather than as a second
         date: a night shift is one shift, and giving it two dates would make
-        it appear twice on a week's rota.
+        it appear twice on a week's shift schedule.
         """
         return self.ends_at <= self.starts_at
 

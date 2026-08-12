@@ -121,7 +121,7 @@ const NAV_ITEMS = [
     hideFrom: ["doctor", "receptionist"],
   },
   // Everyone sees this entry, but not the same page: admin gets the
-  // hospital rota to manage, every other role gets their own shifts
+  // hospital shift schedule to manage, every other role gets their own shifts
   // read-only. Shifts.jsx decides, so there is no hideFrom here.
   { to: "/dashboard/shifts", label: "Shifts", icon: HiOutlineShiftCalendar },
   { to: "/dashboard/settings", label: "Settings", icon: HiOutlineCog6Tooth },

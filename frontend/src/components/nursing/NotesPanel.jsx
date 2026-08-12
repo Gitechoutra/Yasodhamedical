@@ -121,7 +121,7 @@ export default function NotesPanel({ assignment, canRecord, onChanged }) {
   const [composing, setComposing] = useState(null); // "note" | "handover"
   const [nurses, setNurses] = useState([]);
 
-  // Only the handover form needs the roster, and only a nurse can open it.
+  // Only the handover form needs the shift schedule, and only a nurse can open it.
   useEffect(() => {
     if (composing !== "handover") return;
     fetchNurses()

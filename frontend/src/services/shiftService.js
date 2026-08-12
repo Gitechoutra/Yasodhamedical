@@ -9,7 +9,7 @@ import api from "./api";
  * 403s for anyone but an admin.
  */
 
-/** The rota for a date range. Admin gets the whole hospital's and may filter
+/** The shift schedule for a date range. Admin gets the whole hospital's and may filter
  *  by staff member, role or department; every other role gets their own
  *  shifts whatever they ask for. The response carries `can_manage`. */
 export async function fetchShifts(params = {}) {
@@ -24,7 +24,7 @@ export async function fetchMyShifts(params = {}) {
 }
 
 /** Admin only. Assignable staff, slots and their default hours, departments
- *  and branches — everything the roster form needs. */
+ *  and branches — everything the shift schedule form needs. */
 export async function fetchShiftOptions() {
   const res = await api.get("/shifts/options");
   return res.data.data;
@@ -51,7 +51,7 @@ export async function updateShift(id, payload) {
   return res.data.data;
 }
 
-/** Admin only. Keeps the row so the rota retains its history — the reversible
+/** Admin only. Keeps the row so the shift schedule retains its history — the reversible
  *  alternative to deleting, and what the UI offers first. */
 export async function cancelShift(id) {
   const res = await api.post(`/shifts/${id}/cancel`);

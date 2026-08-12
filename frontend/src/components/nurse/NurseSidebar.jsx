@@ -17,7 +17,7 @@ const NAV_ITEMS = [
   { to: "/nurse", label: "Dashboard", icon: HiOutlineSquares2X2, end: true },
   { to: "/nurse/patients", label: "My Patients", icon: HiOutlineUsers },
   { to: "/nurse/alerts", label: "Alerts", icon: HiOutlineBellAlert },
-  // Read-only. A nurse sees the shifts the administrator rostered them
+  // Read-only. A nurse sees the shifts the administrator scheduled them
   // for and nobody else's.
   { to: "/nurse/shifts", label: "My Shifts", icon: HiOutlineCalendarDays },
   { to: "/nurse/profile", label: "Profile", icon: HiOutlineUserCircle },
@@ -42,8 +42,8 @@ export default function NurseSidebar() {
         </p>
         <p className="mt-0.5 truncate text-sm font-semibold text-slate-800">{user?.name}</p>
         {/* No shift here any more. This showed the single "normal" shift on
-            the nurse profile, which was seeded rather than rostered and so was
-            wrong as often as it was right. The real rota lives on My Shifts. */}
+            the nurse profile, which was seeded rather than scheduled and so was
+            wrong as often as it was right. The real shift schedule lives on My Shifts. */}
         <p className="truncate text-xs text-slate-500">{user?.department || "Ward staff"}</p>
       </div>
 

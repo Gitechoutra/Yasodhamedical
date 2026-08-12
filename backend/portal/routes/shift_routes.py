@@ -1,13 +1,13 @@
 """The staff shift schedule.
 
-One writer, many readers. An administrator builds and maintains the rota;
+One writer, many readers. An administrator builds and maintains the shift schedule;
 every other role can read their own shifts and nothing else. That asymmetry is
 the whole point of the module, so it is enforced in one place rather than
 per-route: `_scope_to_caller` narrows every listing query for a non-admin, and
 every mutating route carries `@role_required("admin")`.
 
 A non-admin asking for someone else's shifts is answered with their own rather
-than a 403. The alternative leaks the roster by inference -- a 403 for
+than a 403. The alternative leaks the shift schedule by inference -- a 403 for
 `?user_id=7` and an empty list for `?user_id=8` tells you which IDs are on
 tonight. Narrowing silently tells you nothing.
 """
@@ -23,6 +23,7 @@ from portal.helpers.broadcast import dashboard_changed
 from portal.helpers.decorators import current_role, role_required
 from portal.helpers.notify import notify
 from portal.helpers.response import error, success
+from portal.helpers.shift_rules import clashing_shift
 from portal.models.branch import Branch
 from portal.models.department import Department
 from portal.models.role import STAFF_ROLES, Role
@@ -37,14 +38,14 @@ SHIFT_ASSIGNED = "shift.assigned"
 SHIFT_CANCELLED = "shift.cancelled"
 SHIFT_DELETED = "shift.deleted"
 
-# A rota request with no dates would otherwise return every shift ever
-# rostered. Two weeks from today is what a schedule screen opens on.
+# A shift schedule request with no dates would otherwise return every shift ever
+# scheduled. Two weeks from today is what a schedule screen opens on.
 DEFAULT_RANGE_DAYS = 14
 MAX_RANGE_DAYS = 366
 MAX_NOTES = 500
 
-# How long a run of days one create request may cover. A rota is built a week
-# or a month at a time; a cap well past that stops a typo in the year turning
+# How long a run of days one create request may cover. A schedule is built a
+# week or a month at a time; a cap well past that stops a typo in the year turning
 # into three hundred rows and three hundred audit entries.
 MAX_CREATE_DAYS = 92
 
@@ -82,11 +83,26 @@ def _parse_time(raw, field):
 
 
 def _resolve_hours(payload, slot, existing=None):
-    """The shift's start and end, from the payload if given and from the
-    slot's defaults otherwise.
+    """The shift's start and end. Returns (starts_at, ends_at, error).
 
-    Returns (starts_at, ends_at, error). A `custom` slot has no defaults, so
-    both times are required for it.
+    Three sources, in this order:
+
+      1. the times in the payload, whenever they are given;
+      2. the shift's current times, but *only* while its slot is unchanged --
+         which is what lets an edit that touches nothing but the notes leave
+         hand-tuned hours alone;
+      3. the new slot's standard hours.
+
+    The order of 2 and 3 is the whole of it. Falling back to the existing
+    times first meant they always won on an edit -- an update is only ever
+    given an `existing` -- so moving a shift from the morning slot to the
+    night one relabelled it and left it running 06:00-14:00, which is the
+    opposite of what picking a slot means.
+
+    A `custom` slot has no standard hours, so on a create both times are
+    required for it; on an edit the shift's current times stand in, since
+    "custom" is a statement about who chooses the hours, not a request to
+    forget them.
     """
     starts_at, err = _parse_time(payload.get("starts_at"), "starts_at")
     if err:
@@ -95,14 +111,11 @@ def _resolve_hours(payload, slot, existing=None):
     if err:
         return None, None, err
 
-    if starts_at is None:
-        starts_at = existing.starts_at if existing else None
-    if ends_at is None:
-        ends_at = existing.ends_at if existing else None
+    keeps_own_hours = existing is not None and (existing.slot == slot or slot not in SLOT_HOURS)
+    if keeps_own_hours:
+        starts_at = starts_at or existing.starts_at
+        ends_at = ends_at or existing.ends_at
 
-    # Falling back to the slot's hours only when nothing else supplied them
-    # means changing a shift's slot re-times it, while editing only its notes
-    # leaves a hand-tuned time alone.
     if slot in SLOT_HOURS:
         default_start, default_end = SLOT_HOURS[slot]
         starts_at = starts_at or default_start
@@ -115,53 +128,9 @@ def _resolve_hours(payload, slot, existing=None):
     return starts_at, ends_at, None
 
 
-def _minutes(t):
-    return t.hour * 60 + t.minute
-
-
-def _overlaps(a_start, a_end, b_start, b_end):
-    """Whether two same-day shifts collide, treating an end at or before the
-    start as running into the next morning."""
-    a0, a1 = _minutes(a_start), _minutes(a_end)
-    b0, b1 = _minutes(b_start), _minutes(b_end)
-    if a1 <= a0:
-        a1 += 24 * 60
-    if b1 <= b0:
-        b1 += 24 * 60
-    return a0 < b1 and b0 < a1
-
-
-def _clashing_shift(user_id, shift_date, starts_at, ends_at, exclude_id=None):
-    """An existing scheduled shift for this person that overlaps the new one.
-
-    Double-booking a nurse is the mistake this table exists to prevent, so it
-    is checked on write rather than left for someone to notice on the ward.
-    """
-    if not user_id:
-        return None
-    query = StaffShift.query.filter(
-        StaffShift.user_id == user_id,
-        StaffShift.status == "scheduled",
-        # A night shift on the previous day can run into this one.
-        StaffShift.shift_date.in_([shift_date, shift_date - timedelta(days=1)]),
-    )
-    if exclude_id:
-        query = query.filter(StaffShift.id != exclude_id)
-
-    for other in query.all():
-        if other.shift_date == shift_date:
-            if _overlaps(starts_at, ends_at, other.starts_at, other.ends_at):
-                return other
-        # The day before only collides if it spills past midnight into this
-        # shift's morning.
-        elif other.crosses_midnight and _minutes(other.ends_at) > _minutes(starts_at):
-            return other
-    return None
-
-
 def _assignable_user(user_id):
     """Returns (user, error_message). Admins are excluded deliberately: this
-    rosters the staff who work shifts, and an administrator account is a
+    schedules the staff who work shifts, and an administrator account is a
     management login, not a slot on the ward."""
     user = db.session.get(User, user_id)
     if not user:
@@ -170,7 +139,7 @@ def _assignable_user(user_id):
         return None, "That staff account is disabled"
     role_name = user.role.name if user.role else None
     if role_name not in STAFF_ROLES:
-        return None, "Only staff accounts can be rostered"
+        return None, "Only staff accounts can be scheduled"
     return user, None
 
 
@@ -235,7 +204,10 @@ def _create_dates(payload):
         return None, "'to_date' cannot be earlier than 'from_date'"
     span = (end - start).days + 1
     if span > MAX_CREATE_DAYS:
-        return None, f"A shift cannot be rostered across more than {MAX_CREATE_DAYS} days at once"
+        return None, (
+            f"A shift cannot be scheduled across more than {MAX_CREATE_DAYS} "
+            "days at once"
+        )
 
     return [start + timedelta(days=offset) for offset in range(span)], None
 
@@ -308,13 +280,13 @@ def _describe(shift, user=_UNSET):
 
 
 def _notify_assigned(user, shifts, actor_id):
-    """Tells a member of staff they have been put on the rota.
+    """Tells a member of staff they have been put on the shift schedule.
 
     Only the person the shifts belong to is told, which is the whole point:
-    the rest of the hospital's roster is none of their business, and a nurse
+    the rest of the hospital's schedule is none of their business, and a nurse
     should not learn from her bell who else is on tonight.
 
-    One notification per assignment rather than per day. Rostering somebody
+    One notification per assignment rather than per day. Scheduling somebody
     across a fortnight is one decision by the administrator and should read as
     one line in that person's bell, not fourteen — and fourteen would push
     every other notification they have off the panel.
@@ -349,7 +321,7 @@ def _notify_assigned(user, shifts, actor_id):
         title=title,
         body=body,
         category="shift",
-        # The staff-facing rota. NotificationMenu.resolveLink points this at
+        # The staff-facing schedule. NotificationMenu.resolveLink points this at
         # whichever module the reader actually lives in — a nurse's own shifts
         # are at /nurse/shifts, and /dashboard would bounce her straight out.
         link="/dashboard/shifts",
@@ -363,7 +335,7 @@ def _notify_assigned(user, shifts, actor_id):
 @shift_bp.get("")
 @jwt_required()
 def list_shifts():
-    """The rota for a date range.
+    """The shift schedule for a date range.
 
     Admin sees everyone and may filter; every other role sees only their own,
     whatever filters they send.
@@ -430,7 +402,7 @@ def my_shifts():
     """The caller's own shifts, for the read-only view every non-admin gets.
 
     Separate from the scoped listing above so a client does not have to know
-    its own user id, and so an admin can see their own roster too rather than
+    its own user id, and so an admin can see their own schedule too rather than
     the whole hospital's.
     """
     start, end, err = _range_from_args()
@@ -458,7 +430,7 @@ def my_shifts():
 @shift_bp.get("/options")
 @role_required("admin")
 def shift_options():
-    """Everything the roster form needs: who can be assigned, and the slots."""
+    """Everything the schedule form needs: who can be assigned, and the slots."""
     users = (
         User.query.join(Role, User.role_id == Role.id)
         .filter(User.is_active.is_(True), Role.name.in_(STAFF_ROLES))
@@ -512,13 +484,13 @@ def get_shift(shift_id):
 @shift_bp.post("")
 @role_required("admin")
 def create_shift():
-    """Rosters a run of days, assigned or left open for someone to be put in
+    """Schedules a run of days, assigned or left open for someone to be put in
     later.
 
     One row is written per day between `from_date` and `to_date` inclusive,
     all sharing the slot, hours, department and notes given once. The dates
-    stay one row each rather than becoming a range column on the table: a rota
-    is read, cancelled and reassigned a day at a time, and a shift that had to
+    stay one row each rather than becoming a range column on the table: a
+    schedule is read, cancelled and reassigned a day at a time, and a shift that had to
     remember it was created alongside four others could not be.
     """
     payload = request.get_json(silent=True) or {}
@@ -546,12 +518,12 @@ def create_shift():
 
     # Every day is checked before any of them is written. A run that half
     # applied would leave the administrator to work out which days landed and
-    # which did not, from a rota that looks deliberate either way.
+    # which did not, from a shift schedule that looks deliberate either way.
     for day in dates:
-        clash = _clashing_shift(user_id, day, fields["starts_at"], fields["ends_at"])
+        clash = clashing_shift(user_id, day, fields["starts_at"], fields["ends_at"])
         if clash:
             return error(
-                f"{user.name} is already rostered {clash.starts_at:%H:%M}-"
+                f"{user.name} is already scheduled {clash.starts_at:%H:%M}-"
                 f"{clash.ends_at:%H:%M} on {clash.shift_date}",
                 status=409,
                 errors={"shift_id": clash.id, "shift_date": day.isoformat()},
@@ -634,7 +606,7 @@ def update_shift(shift_id):
 
     # Only a shift that will actually be worked can clash with another.
     if shift.status == "scheduled":
-        clash = _clashing_shift(
+        clash = clashing_shift(
             target_user_id,
             fields["shift_date"],
             fields["starts_at"],
@@ -643,7 +615,7 @@ def update_shift(shift_id):
         )
         if clash:
             return error(
-                f"{user.name if user else 'That staff member'} is already rostered "
+                f"{user.name if user else 'That staff member'} is already scheduled "
                 f"{clash.starts_at:%H:%M}-{clash.ends_at:%H:%M} on {clash.shift_date}",
                 status=409,
                 errors={"shift_id": clash.id},
@@ -654,7 +626,8 @@ def update_shift(shift_id):
         setattr(shift, key, value)
 
     # The "Assign" button on an unfilled slot lands here, not on create, so
-    # telling people only on create would leave the drafted-then-filled rota —
+    # telling people only on create would leave the drafted-then-filled
+    # schedule —
     # the way an administrator is meant to work — silently unannounced. Only a
     # shift that will actually be worked is worth a notification.
     if reassigned and shift.status == "scheduled":
@@ -675,7 +648,7 @@ def update_shift(shift_id):
 @shift_bp.post("/<int:shift_id>/cancel")
 @role_required("admin")
 def cancel_shift(shift_id):
-    """Cancels without deleting, so the rota keeps its history.
+    """Cancels without deleting, so the shift schedule keeps its history.
 
     This is what the UI offers by default; DELETE is reserved for a row that
     was a mistake in the first place.

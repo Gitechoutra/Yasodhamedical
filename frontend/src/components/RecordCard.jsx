@@ -58,11 +58,23 @@ export function Badge({ tone = "slate", icon: Icon, title, children }) {
 
 /**
  * Three across on a large desktop, two on a tablet, one on a phone.
- * `items-stretch` (the grid default) plus `h-full` on the card is what gives a
- * row equal-height cards without measuring anything.
+ * `items-stretch` (the grid default) is what gives a row equal-height cards
+ * without measuring anything.
+ *
+ * `align="start"` opts out of that, and lists whose cards expand in place need
+ * it: under stretch, opening one card's detail panel grows the whole grid row,
+ * so its neighbours are stretched to match and look like they opened too.
  */
-export function RecordGrid({ children }) {
-  return <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">{children}</div>;
+export function RecordGrid({ align, children }) {
+  return (
+    <div
+      className={`grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3 ${
+        align === "start" ? "items-start" : ""
+      }`}
+    >
+      {children}
+    </div>
+  );
 }
 
 /** Placeholder tiles in the same grid, so loading doesn't reflow the page. */
@@ -77,9 +89,11 @@ export function RecordGridSkeleton({ count = 6 }) {
 }
 
 /**
- * `h-full` plus a column layout is what makes cards in the same row match: the
- * grid stretches every cell, and `RecordCardFooter`'s `mt-auto` pushes the
- * actions to the bottom rather than relying on the content being equally long.
+ * A column layout is what makes cards in the same row match: the grid stretches
+ * every cell by default, and `RecordCardFooter`'s `mt-auto` pushes the actions
+ * to the bottom rather than relying on the content being equally long. No
+ * `h-full` here — on an `items-start` grid a percentage height still resolves
+ * against the grid area, so the card would be stretched back to the row height.
  *
  * `accent` tints the border for a card that needs to stand out (the patient in
  * the room now, the one to call in next) without changing its size.
@@ -94,7 +108,7 @@ export function RecordCard({ accent, children }) {
 
   return (
     <div
-      className={`flex h-full flex-col rounded-2xl border bg-white shadow-sm transition hover:shadow-md ${border}`}
+      className={`flex flex-col rounded-2xl border bg-white shadow-sm transition hover:shadow-md ${border}`}
     >
       {children}
     </div>

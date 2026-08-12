@@ -99,7 +99,7 @@ def _availability_status(windows, now_minute, is_today):
     """What to call this doctor's day: (status, available_from, available_until).
 
     Only today has a "now" to be on either side of. For any other date the
-    honest answer is just whether they are rostered at all.
+    honest answer is just whether they have a shift that day at all.
     """
     if not windows:
         return "off", None, None
@@ -107,7 +107,7 @@ def _availability_status(windows, now_minute, is_today):
         # Windows that start before minute zero are the tail of the previous
         # night's shift; "available from 22:00" would name yesterday evening.
         starts = [w[0] for w in windows if w[0] >= 0]
-        return "rostered", (min(starts) if starts else None), None
+        return "scheduled", (min(starts) if starts else None), None
 
     current = next((w for w in windows if w[0] <= now_minute < w[1]), None)
     if current:
@@ -135,14 +135,14 @@ def _hhmm(minute):
 def doctor_availability():
     """Which doctors are working on a given day, and between what hours.
 
-    Front desk only. The rota itself stays private -- `GET /shifts` still shows
+    The schedule itself stays private -- `GET /shifts` still shows
     a non-admin nothing but their own shifts -- because this answers a narrower
     question: reception needs to know when the doctor they are booking a
-    patient with is in the building, not who else the hospital has rostered.
+    patient with is in the building, not who else the hospital has scheduled.
 
     Times are wall-clock local, as `staff_shifts` stores them, and "now" is the
     server's clock. Both assume the deployment runs in the hospital's timezone,
-    which is the same assumption the rota screen already makes.
+    which is the same assumption the Shifts screen already makes.
     """
     raw_date = (request.args.get("date") or "").strip()
     if raw_date:
@@ -171,16 +171,16 @@ def doctor_availability():
         rows = StaffShift.query.filter(
             StaffShift.user_id.in_(user_ids),
             StaffShift.status == "scheduled",
-            # Yesterday is fetched too: a night shift rostered on it runs into
+            # Yesterday is fetched too: a night shift scheduled on it runs into
             # the morning of the day being asked about.
             StaffShift.shift_date.in_([day, day - timedelta(days=1)]),
         ).all()
         for row in rows:
             shifts_by_user.setdefault(row.user_id, []).append(row)
 
-    # The usual slot from the HR profile. Not a roster -- it is what the
+    # The usual slot from the HR profile. Not a schedule -- it is what the
     # administrator recorded as this doctor's normal shift -- so it is only
-    # ever shown as context for a day they are not rostered on.
+    # ever shown as context for a day they have no shift on.
     usual_by_user = {}
     if user_ids:
         for profile in StaffProfile.query.filter(StaffProfile.user_id.in_(user_ids)).all():
@@ -242,7 +242,7 @@ def doctor_availability():
             # lets it say so.
             "as_of": now.strftime("%H:%M") if is_today else None,
             "on_duty_count": sum(1 for i in items if i["on_duty"]),
-            "rostered_count": sum(1 for i in items if i["shifts"]),
+            "scheduled_count": sum(1 for i in items if i["shifts"]),
             "items": items,
         }
     )

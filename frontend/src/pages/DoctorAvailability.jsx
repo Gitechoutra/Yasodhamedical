@@ -24,8 +24,8 @@ const STATUS = {
   on_duty: { label: "On duty now", tone: "emerald" },
   upcoming: { label: "In later", tone: "brand" },
   finished: { label: "Shift finished", tone: "slate" },
-  rostered: { label: "Working", tone: "brand" },
-  off: { label: "Not rostered", tone: "slate" },
+  scheduled: { label: "Working", tone: "brand" },
+  off: { label: "No shift", tone: "slate" },
 };
 
 const USUAL_SHIFT_LABELS = {
@@ -34,7 +34,7 @@ const USUAL_SHIFT_LABELS = {
   night: "Usually nights",
 };
 
-/** A 24-hour bar with the doctor's rostered hours shaded on it.
+/** A 24-hour bar with the doctor's scheduled hours shaded on it.
  *
  *  The point is comparison: three doctors' bars stacked in a list show who
  *  overlaps and where the gaps are, which a list of "09:00 – 17:00" strings
@@ -73,7 +73,7 @@ function DayBar({ shifts, nowMinute }) {
 /** The hours themselves, spelled out. The bar is for scanning; this is what
  *  gets read aloud to a patient on the phone. */
 function ShiftHours({ shifts }) {
-  if (shifts.length === 0) return <span className="text-sm text-slate-400">No hours rostered</span>;
+  if (shifts.length === 0) return <span className="text-sm text-slate-400">No hours scheduled</span>;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       {shifts.map((s) => (
@@ -179,7 +179,8 @@ function DoctorRow({ doctor, nowMinute }) {
  * When each doctor is in, so the front desk can book a patient with someone
  * who will actually be there.
  *
- * Reads the hospital rota, filtered to doctors. It is not the rota screen:
+ * Reads the hospital shift schedule, filtered to doctors. It is not the
+ * Shifts screen:
  * `/dashboard/shifts` still shows a receptionist nothing but their own shifts,
  * and the API keeps that split — this endpoint answers the narrower question
  * reception has a reason to ask.
@@ -263,7 +264,7 @@ export default function DoctorAvailability() {
       <PageHeader
         icon={HiOutlineClock}
         title="Doctor availability"
-        description="When each doctor is in, taken from the hospital rota. Check here before booking a patient in, so the OP goes to a doctor who will actually be at the desk."
+        description="When each doctor is in, taken from the hospital shift schedule. Check here before booking a patient in, so the OP goes to a doctor who will actually be at the desk."
         action={
           <Link
             to="/dashboard/doctors"
@@ -345,8 +346,8 @@ export default function DoctorAvailability() {
           "Loading…"
         ) : (
           <>
-            {formatDay(date)} · {data?.rostered_count || 0} of {items.length} doctor
-            {items.length === 1 ? "" : "s"} rostered
+            {formatDay(date)} · {data?.scheduled_count || 0} of {items.length} doctor
+            {items.length === 1 ? "" : "s"} scheduled
             {data?.is_today && (
               <>
                 {" · "}
@@ -380,10 +381,10 @@ export default function DoctorAvailability() {
         )}
       </div>
 
-      {!loading && items.length > 0 && data?.rostered_count === 0 && (
+      {!loading && items.length > 0 && data?.scheduled_count === 0 && (
         <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-700">
-          Nobody is rostered on {formatDay(date)}. Shifts are set by the hospital
-          administrator — ask them to roster this day if that looks wrong.
+          Nobody has a shift on {formatDay(date)}. Shifts are set by the hospital
+          administrator — ask them to schedule this day if that looks wrong.
         </p>
       )}
     </div>

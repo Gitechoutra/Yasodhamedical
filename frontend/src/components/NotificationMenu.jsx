@@ -123,9 +123,9 @@ export function resolveLink(link, role) {
   if (labRequest && role !== "lab_technician") {
     return `/dashboard/lab/${labRequest[1]}`;
   }
-  // The rota is the same screen in all four trees, so a shift notification is
+  // The shift schedule is the same screen in all four trees, so a shift notification is
   // stored with one link and pointed at the reader's own module here. Without
-  // this a rostered nurse taps "You have a new shift" and lands back on her
+  // this a scheduled nurse taps "You have a new shift" and lands back on her
   // dashboard, which is the one place the shift is not.
   if (link === "/dashboard/shifts" && MODULE_HOME[role]) {
     return `${MODULE_HOME[role]}/shifts`;

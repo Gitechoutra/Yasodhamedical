@@ -206,7 +206,7 @@ export default function Consultations() {
               : "No completed consultations yet. They appear here once a doctor ends one — consultations still in progress stay in Appointments."}
           </EmptyState>
         ) : (
-          <RecordGrid>
+          <RecordGrid align="start">
             {visible.map((c) => (
               <ConsultationCard
                 key={c.id}

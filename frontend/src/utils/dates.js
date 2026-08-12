@@ -1,7 +1,7 @@
 /**
  * Calendar dates as the hospital reads them.
  *
- * Everything here is wall-clock local on purpose. The rota and the doctor
+ * Everything here is wall-clock local on purpose. The shift schedule and the doctor
  * availability screens both store and compare plain `YYYY-MM-DD` days, and a
  * day is whatever day it is in the building — not in UTC.
  */
@@ -11,8 +11,8 @@
  *  Built from the local date parts rather than `toISOString()`, which converts
  *  to UTC first and so returns the wrong day for part of every day: east of
  *  UTC it reads a day behind until the offset passes (05:30 in IST), west of
- *  it a day ahead all evening. A rota is wall-clock local — matching the
- *  storage model — so an administrator rostering the night shift at 2am must
+ *  it a day ahead all evening. A shift schedule is wall-clock local — matching the
+ *  storage model — so an administrator scheduling the night shift at 2am must
  *  not be handed yesterday's date as the default. */
 export function isoDate(offsetDays = 0) {
   const d = new Date();

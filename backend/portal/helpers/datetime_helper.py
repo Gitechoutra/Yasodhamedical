@@ -28,7 +28,7 @@ def local_day_bounds(offset_days=0):
     still yesterday's date until the offset passes (05:30 in IST), so a
     window built from it drops the first five and a half hours of every
     working day — a patient registered at 6am does not count as registered
-    today. The hospital's day is wall-clock local, matching how the rota and
+    today. The hospital's day is wall-clock local, matching how shifts and
     every other date the staff read are built, so the bounds are taken from
     the local date and shifted back into UTC for the comparison.
     """

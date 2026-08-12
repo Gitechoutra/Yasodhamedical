@@ -39,7 +39,7 @@ function DoctorTodayNote({ doctor }) {
         ? [`Not in yet — starts at ${doctor.available_from} today.`, "bg-brand-50 text-brand-700"]
         : doctor.status === "finished"
           ? ["Today's shift has finished.", "bg-amber-50 text-amber-700"]
-          : ["Not rostered today.", "bg-amber-50 text-amber-700"];
+          : ["No shift scheduled today.", "bg-amber-50 text-amber-700"];
 
   return (
     <p className={`mt-1 flex flex-wrap items-center gap-x-2 rounded-lg px-3 py-2 text-xs font-semibold ${tone}`}>
@@ -60,9 +60,9 @@ function CreateOpModal({ patients, preselectedPatientId, onClose, onCreated }) {
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  // Today's rota for every doctor, fetched once when the modal opens rather
+  // Today's shift schedule for every doctor, fetched once when the modal opens rather
   // than per patient selection — the list is small and the receptionist
-  // changes the patient dropdown far more often than the rota changes.
+  // changes the patient dropdown far more often than the shift schedule changes.
   const [availability, setAvailability] = useState([]);
 
   useEffect(() => {

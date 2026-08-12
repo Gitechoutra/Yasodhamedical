@@ -56,7 +56,7 @@ DOCTORS = [
 # (name, email, password, department, employee_no, shift)
 #
 # The trailing shift is no longer seeded onto the nurse profile — shifts are
-# rostered by an administrator on the shift schedule, per date, and a seeded
+# scheduled by an administrator on the shift schedule, per date, and a seeded
 # "normal" shift was a fact nobody had entered and nobody could rely on. The
 # value is kept in this table only so the tuples still describe the intent
 # behind each demo account.
@@ -504,7 +504,7 @@ def seed_nurses(departments):
             db.session.commit()
 
         if not Nurse.query.filter_by(user_id=user.id).first():
-            # No `shift=`: a nurse starts with no rostered shift at all, and
+            # No `shift=`: a nurse starts with no scheduled shift at all, and
             # gets one only when an administrator schedules it.
             db.session.add(
                 Nurse(

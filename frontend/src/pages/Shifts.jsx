@@ -31,7 +31,7 @@ const SLOT_TONES = {
 };
 
 // The slot names as a person reads them. The stored values are lower-case
-// enum members ("morning"); a rota is not the place to show a database value.
+// enum members ("morning"); a shift schedule is not the place to show a database value.
 // There is no `afternoon` slot — the hospital runs three eight-hour turns and
 // `evening` is the 14:00 one, so its hours are spelled out below rather than
 // left to be inferred from the name.
@@ -203,7 +203,7 @@ function MyShifts() {
       <PageHeader
         icon={HiOutlineCalendarDays}
         title="My shifts"
-        description="The shifts the hospital administrator has rostered you for. Contact them if something here looks wrong — shifts are managed centrally."
+        description="The shifts the hospital administrator has scheduled you for. Contact them if something here looks wrong — shifts are managed centrally."
       />
 
       <div className="mt-5">
@@ -227,7 +227,7 @@ function MyShifts() {
           ))
         ) : shifts.length === 0 ? (
           <EmptyState icon={HiOutlineCalendarDays}>
-            You have no shifts rostered in this period.
+            You have no shifts scheduled in this period.
           </EmptyState>
         ) : (
           grouped.map(([day, rows]) => (
@@ -246,8 +246,8 @@ function MyShifts() {
                     }`}
                   >
                     {/* Deliberately just the shift: its type, its window and
-                        whatever the roster note says. The department and the
-                        staff badges belong to the administrator's rota, where
+                        whatever the shift schedule note says. The department and the
+                        staff badges belong to the administrator's shift schedule, where
                         a row has to be told apart from everyone else's — here
                         every row is already this person's own. */}
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -343,7 +343,7 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
     return map;
   }, [options.staff]);
 
-  // A nurse is rostered to a ward, not to a department — the department list
+  // A nurse is scheduled to a ward, not to a department — the department list
   // is the doctors' specialities and means nothing against a nursing shift.
   // Hiding the field is not enough on its own: an admin can pick a department
   // and then switch the assignee to a nurse, so the value is dropped on save
@@ -377,8 +377,8 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
       payload.to_date = form.to_date;
     }
     // Only on edit: creating always starts a shift scheduled, and sending a
-    // status on create would offer a "roster it already cancelled" that means
-    // nothing. On edit this is what puts a cancelled shift back on the rota.
+    // status on create would offer a "schedule it already cancelled" that means
+    // nothing. On edit this is what puts a cancelled shift back on the shift schedule.
     if (editing) payload.status = form.status;
     try {
       const saved = editing
@@ -427,7 +427,7 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
 
         {/* A run of days, not one. The same person works the same slot across
             a week or a month, and making the administrator reopen this form
-            for each of those days is how a rota ends up with holes in it.
+            for each of those days is how a shift schedule ends up with holes in it.
             Editing narrows back to a single date: a range there would have to
             answer what happens to the row already on screen. */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -497,7 +497,7 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
 
         {/* What pressing the button will actually do. One form producing
             thirty rows is worth stating before the fact rather than leaving
-            the administrator to count them on the rota afterwards. */}
+            the administrator to count them on the shift schedule afterwards. */}
         {!editing && days > 0 && (
           <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
             Adds <span className="font-semibold text-slate-900">{days}</span>{" "}
@@ -530,9 +530,9 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
           </div>
         )}
 
-        {/* Edit only. Cancelling is done from the rota, but putting a shift
+        {/* Edit only. Cancelling is done from the shift schedule, but putting a shift
             back is only possible here — without this a cancelled shift could
-            never return to the rota, and deleting it (the only other way out)
+            never return to the shift schedule, and deleting it (the only other way out)
             destroys the history that cancelling exists to keep. */}
         {editing && (
           <div>
@@ -543,7 +543,7 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
             </select>
             {shift?.status === "cancelled" && form.status === "scheduled" && (
               <p className="mt-1 text-xs text-slate-500">
-                Saving will put this shift back on the rota.
+                Saving will put this shift back on the shift schedule.
               </p>
             )}
           </div>
@@ -582,7 +582,7 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
   );
 }
 
-/** The administrator's rota: create, assign, edit, cancel and delete. */
+/** The administrator's shift schedule: create, assign, edit, cancel and delete. */
 function ShiftManager() {
   const [range, setRange] = useState({ from: isoDate(0), to: isoDate(14) });
   const [filters, setFilters] = useState({ role: "all", user_id: "", status: "all" });
@@ -605,7 +605,7 @@ function ShiftManager() {
         setShifts(data.items || []);
         setErrorMsg("");
       })
-      .catch((err) => setErrorMsg(err.response?.data?.message || "Could not load the rota."))
+      .catch((err) => setErrorMsg(err.response?.data?.message || "Could not load the shift schedule."))
       .finally(() => setLoading(false));
   }, [range.from, range.to, filters.role, filters.user_id, filters.status]);
 
@@ -616,7 +616,7 @@ function ShiftManager() {
   useEffect(() => {
     fetchShiftOptions()
       .then(setOptions)
-      .catch(() => setErrorMsg("Could not load the roster options."));
+      .catch(() => setErrorMsg("Could not load the shift options."));
   }, []);
 
   async function handleConfirm() {
@@ -638,9 +638,9 @@ function ShiftManager() {
   const grouped = useMemo(() => groupByDate(shifts), [shifts]);
   const unassigned = shifts.filter((s) => !s.assigned && s.status === "scheduled").length;
   // Whether anything other than the date window is narrowing the list. An
-  // empty rota and a rota filtered down to nothing look identical, and saying
-  // "no shifts rostered" for the second reads as though the save failed — the
-  // filters persist across a save, so rostering a nurse while filtered to
+  // empty shift schedule and a shift schedule filtered down to nothing look identical, and saying
+  // "no shifts scheduled" for the second reads as though the save failed — the
+  // filters persist across a save, so scheduling a nurse while filtered to
   // doctors makes a shift that really was stored appear not to exist.
   const filtered = filters.role !== "all" || filters.user_id || filters.status !== "all";
 
@@ -649,7 +649,7 @@ function ShiftManager() {
       <PageHeader
         icon={HiOutlineCalendarDays}
         title="Staff shifts"
-        description="The hospital rota. Every shift a doctor, nurse, receptionist or pharmacist works is created and assigned here — staff see only their own and cannot change them."
+        description="The hospital shift schedule. Every shift a doctor, nurse, receptionist or pharmacist works is created and assigned here — staff see only their own and cannot change them."
         action={
           <button
             onClick={() => setEditing("new")}
@@ -738,10 +738,10 @@ function ShiftManager() {
                 >
                   Clear filters
                 </button>{" "}
-                to see the whole rota.
+                to see the whole shift schedule.
               </>
             ) : (
-              "No shifts rostered for this period. Use “Add a Shift” to add one."
+              "No shifts scheduled for this period. Use “Add a Shift” to add one."
             )}
           </EmptyState>
         ) : (
@@ -842,8 +842,8 @@ function ShiftManager() {
           title={confirming.action === "cancel" ? "Cancel this shift?" : "Delete this shift?"}
           message={
             confirming.action === "cancel"
-              ? "It stays on the rota marked cancelled, so the record of who was meant to work it survives. You can put it back to scheduled by editing it."
-              : "This removes the shift outright. Cancel it instead if you want the rota to keep a record of it."
+              ? "It stays on the schedule marked cancelled, so the record of who was meant to work it survives. You can put it back to scheduled by editing it."
+              : "This removes the shift outright. Cancel it instead if you want the schedule to keep a record of it."
           }
           confirmLabel={confirming.action === "cancel" ? "Cancel shift" : "Delete"}
           // "Cancel" as the dismiss label next to a "Cancel shift" button

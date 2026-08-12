@@ -41,17 +41,6 @@ function TextOrDash({ value }) {
   return value ? <p className="whitespace-pre-line">{value}</p> : <p className="text-slate-400">—</p>;
 }
 
-function AdviceList({ items }) {
-  if (!items?.length) return <p className="text-slate-400">—</p>;
-  return (
-    <ul className="list-disc space-y-0.5 pl-4">
-      {items.map((item, i) => (
-        <li key={i}>{item}</li>
-      ))}
-    </ul>
-  );
-}
-
 /** One prescribed medicine, stacked rather than tabulated — the card is a
  *  third of a row wide, so a four-column table could only be read sideways. */
 function MedicineRow({ medicine }) {
@@ -159,12 +148,6 @@ export default function ConsultationCard({ consultation, onDownloadReport, downl
                 </Section>
                 <Section title="Consultation notes">
                   <TextOrDash value={summary.summary} />
-                </Section>
-                <Section title="Follow-up advice">
-                  <AdviceList items={summary.follow_up_advice} />
-                </Section>
-                <Section title="Lifestyle advice">
-                  <AdviceList items={summary.lifestyle_advice} />
                 </Section>
               </div>
             )}

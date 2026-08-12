@@ -21,7 +21,7 @@ class Notification(db.Model):
             # A doctor prescribed something the catalogue lacks, and the
             # pharmacy is the only party who can close that gap.
             "pharmacy",
-            # The administrator put this person on the rota. Its own category
+            # The administrator gave this person a shift. Its own category
             # rather than "system" because it is the one notification that
             # tells somebody where to be, and it should not sit behind the
             # same grey icon as a password notice.

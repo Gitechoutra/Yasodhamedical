@@ -262,7 +262,7 @@ export default function AppRouter() {
               <Route path="appointments" element={<Appointments />} />
               <Route path="settings" element={<Settings />} />
               <Route path="profile" element={<Profile />} />
-              {/* Admin sees the whole rota and manages it; every other
+              {/* Admin sees the whole schedule and manages it; every other
                   role sees only their own shifts. Shifts.jsx picks the
                   screen, and the API enforces the same split. */}
               <Route path="shifts" element={<Shifts />} />
