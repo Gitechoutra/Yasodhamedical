@@ -1,1 +1,0 @@
-function e(e=0){let t=new Date;t.setDate(t.getDate()+e);let n=e=>String(e).padStart(2,`0`);return`${t.getFullYear()}-${n(t.getMonth()+1)}-${n(t.getDate())}`}function t(e){return new Date(`${e}T00:00:00`).toLocaleDateString(void 0,{weekday:`short`,day:`numeric`,month:`short`,year:`numeric`})}export{e as n,t};
