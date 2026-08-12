@@ -7,6 +7,7 @@ import {
   HiOutlineChatBubbleLeftRight,
   HiOutlineClock,
   HiOutlineDocumentChartBar,
+  HiOutlineExclamationTriangle,
   HiOutlineHeart,
   HiOutlineInformationCircle,
   HiOutlineXMark,
@@ -36,6 +37,18 @@ const CATEGORY_ICONS = {
   system: HiOutlineInformationCircle,
 };
 
+// A critical nursing alert (nursing_routes._raise_alert) prefixes its title
+// with this emoji — the only signal that survives from `ClinicalAlert.severity`
+// onto the notification, which otherwise carries no structured severity at
+// all. Reused here rather than adding a column: a routine "dose logged" or
+// "note added" nursing notification must not get the same urgent treatment,
+// so something has to tell them apart.
+const CRITICAL_ALERT_PREFIX = "🚨";
+
+function isCriticalAlert(notification) {
+  return Boolean(notification?.title?.startsWith(CRITICAL_ALERT_PREFIX));
+}
+
 /**
  * Where each role's own copy of a shared screen lives.
  *
@@ -63,12 +76,20 @@ function timeAgo(iso) {
 }
 
 function Toast({ notification, onDismiss, onClick }) {
+  const critical = isCriticalAlert(notification);
+
+  // A critical alert stays until someone actually looks at it — the whole
+  // complaint this is fixing is a doctor missing one among routine pings
+  // that vanish after three seconds on their own.
   useEffect(() => {
+    if (critical) return undefined;
     const t = setTimeout(onDismiss, TOAST_DURATION_MS);
     return () => clearTimeout(t);
-  }, [onDismiss]);
+  }, [onDismiss, critical]);
 
-  const Icon = CATEGORY_ICONS[notification.category] || CATEGORY_ICONS.system;
+  const Icon = critical
+    ? HiOutlineExclamationTriangle
+    : CATEGORY_ICONS[notification.category] || CATEGORY_ICONS.system;
 
   return (
     <motion.div
@@ -77,17 +98,29 @@ function Toast({ notification, onDismiss, onClick }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, x: 48, scale: 0.95, transition: { duration: 0.18 } }}
       transition={{ duration: 0.25, ease: "easeOut" }}
-      className="pointer-events-auto flex w-full items-start gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-2xl shadow-slate-900/10"
+      className={`pointer-events-auto flex w-full items-start gap-3 rounded-2xl border p-4 shadow-2xl ${
+        critical
+          ? "border-red-200 bg-red-50 shadow-red-900/10"
+          : "border-slate-100 bg-white shadow-slate-900/10"
+      }`}
     >
       <button
         onClick={onClick}
         className="flex min-w-0 flex-1 items-start gap-3 text-left"
       >
-        <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-brand-600">
+        <span
+          className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full ${
+            critical ? "bg-red-100 text-red-600" : "bg-brand-100 text-brand-600"
+          }`}
+        >
           <Icon className="h-4 w-4" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold text-slate-900">
+          <span
+            className={`block truncate text-sm font-semibold ${
+              critical ? "text-red-900" : "text-slate-900"
+            }`}
+          >
             {notification.title}
           </span>
           {notification.body && (
@@ -307,22 +340,39 @@ export default function NotificationMenu() {
                 </p>
               ) : (
                 items.map((n) => {
-                  const Icon = CATEGORY_ICONS[n.category] || CATEGORY_ICONS.system;
+                  const critical = isCriticalAlert(n);
+                  const Icon = critical
+                    ? HiOutlineExclamationTriangle
+                    : CATEGORY_ICONS[n.category] || CATEGORY_ICONS.system;
                   return (
                     <button
                       key={n.id}
                       onClick={() => handleOpenNotification(n)}
-                      className="flex w-full items-start gap-3 border-b border-slate-50 bg-brand-50/50 px-4 py-3 text-left transition hover:bg-slate-50"
+                      className={`flex w-full items-start gap-3 border-b border-slate-50 px-4 py-3 text-left transition hover:bg-slate-50 ${
+                        critical ? "bg-red-50" : "bg-brand-50/50"
+                      }`}
                     >
-                      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-100 text-brand-600">
+                      <span
+                        className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full ${
+                          critical ? "bg-red-100 text-red-600" : "bg-brand-100 text-brand-600"
+                        }`}
+                      >
                         <Icon className="h-4 w-4" />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
-                          <span className="truncate text-sm font-semibold text-slate-900">
+                          <span
+                            className={`truncate text-sm font-semibold ${
+                              critical ? "text-red-900" : "text-slate-900"
+                            }`}
+                          >
                             {n.title}
                           </span>
-                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
+                          <span
+                            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                              critical ? "bg-red-500" : "bg-brand-500"
+                            }`}
+                          />
                         </span>
                         {n.body && (
                           <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">

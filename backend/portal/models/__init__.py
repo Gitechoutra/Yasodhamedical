@@ -20,10 +20,10 @@ from portal.models.generated_prescription import GeneratedPrescription
 from portal.models.clinical_precedent import ClinicalPrecedent
 from portal.models.custom_medicine_request import CustomMedicineRequest
 from portal.models.appointment import Appointment
+from portal.models.emergency_case import EmergencyCase
 from portal.models.report import Report
 from portal.models.notification import Notification
 from portal.models.audit_log import AuditLog
-from portal.models.registration_request import RegistrationRequest
 from portal.models.nursing_assignment import NursingAssignment
 from portal.models.medication_order import MedicationAdministration, MedicationOrder
 from portal.models.patient_observation import PatientObservation
@@ -56,10 +56,10 @@ __all__ = [
     "ClinicalPrecedent",
     "CustomMedicineRequest",
     "Appointment",
+    "EmergencyCase",
     "Report",
     "Notification",
     "AuditLog",
-    "RegistrationRequest",
     "NursingAssignment",
     "MedicationOrder",
     "MedicationAdministration",

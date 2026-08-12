@@ -75,6 +75,10 @@ class User(db.Model):
             "role": self.role.name if self.role else None,
             "avatar_url": self.avatar_url,
             "is_active": self.is_active,
+            # The Doctor row's own id, not the department it sits in — an
+            # Emergency Case is claimed by doctor id, so the client needs this
+            # to tell "mine" from "someone else's" without a second lookup.
+            "doctor_id": self.doctor_profile.id if self.doctor_profile else None,
             "specialization": (
                 self.doctor_profile.specialization if self.doctor_profile else None
             ),

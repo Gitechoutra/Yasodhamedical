@@ -34,6 +34,17 @@ SURGERY_CLEARED = "surgery.cleared"
 SURGERY_COMPLETED = "surgery.completed"
 PATIENT_DISCHARGED = "surgery.discharged"
 APPOINTMENT_CREATED = "appointment.created"
+# The parallel emergency workflow, kept in its own namespace even though
+# claiming/resolving overlaps in spirit with the OP queue above -- "who
+# claimed this emergency, and when was it resolved" has to be answerable on
+# its own, without reading it out of the appointment trail.
+EMERGENCY_CASE_CREATED = "emergency.created"
+EMERGENCY_CASE_CLAIMED = "emergency.claimed"
+EMERGENCY_CASE_UPDATED = "emergency.updated"
+EMERGENCY_CASE_LINKED = "emergency.linked_appointment"
+EMERGENCY_CASE_RESOLVED = "emergency.resolved"
+EMERGENCY_CASE_REOPENED = "emergency.reopened"
+EMERGENCY_CASE_CANCELLED = "emergency.cancelled"
 CONSULTATION_STARTED = "consultation.started"
 CONSULTATION_ENDED = "consultation.ended"
 CONSULTATION_RESUMED = "consultation.resumed"

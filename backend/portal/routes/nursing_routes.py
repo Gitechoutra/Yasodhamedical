@@ -58,6 +58,7 @@ from portal.models.clinical_alert import (
 )
 from portal.models.consultation import Consultation
 from portal.models.department import Department
+from portal.models.emergency_case import EmergencyCase
 from portal.models.medication_order import (
     ADMIN_STATUSES,
     ROUTES,
@@ -334,10 +335,17 @@ def create_assignment():
     if not can_access_patient(patient, doctor):
         return error("This patient is assigned to another doctor", status=403)
 
-    # Nursing care is the post-operative watch, so it is offered for surgery
-    # cases only. Enforced here and not just hidden in the UI: the rule is the
-    # point, and a hidden button is not a rule.
-    if not patient.is_surgical:
+    # Nursing care is normally the post-operative watch, so it is offered for
+    # surgery cases only. Enforced here and not just hidden in the UI: the
+    # rule is the point, and a hidden button is not a rule. The one other
+    # door in is an open Emergency Case — ICU/observation care that never
+    # goes anywhere near the surgical pathway still needs a nurse assigned
+    # immediately, not after someone marks a surgery that isn't happening.
+    has_open_emergency = (
+        EmergencyCase.query.filter_by(patient_id=patient.id, status="in_progress").first()
+        is not None
+    )
+    if not patient.is_surgical and not has_open_emergency:
         return error(
             f"A nurse is assigned for surgery cases only. Mark {patient.name}'s case "
             "as requiring surgery first.",

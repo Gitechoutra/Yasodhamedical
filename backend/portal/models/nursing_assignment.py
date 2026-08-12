@@ -13,7 +13,7 @@ from portal.extensions import db
 from portal.models.types import PRECISE_DATETIME, PRECISE_TIMESTAMP
 from portal.helpers.datetime_helper import to_utc_iso
 
-CARE_TYPES = ("observation", "post_surgery", "post_procedure", "recovery")
+CARE_TYPES = ("observation", "post_surgery", "post_procedure", "recovery", "icu")
 ASSIGNMENT_STATUSES = ("active", "completed", "cancelled")
 
 

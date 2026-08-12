@@ -1,11 +1,10 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from portal.extensions import db
 from portal.helpers.auth_helper import get_current_doctor
-from portal.helpers.audit import APPOINTMENT_CREATED, audit
 from portal.helpers.case_helper import (
     attach_to_case,
     case_for_new_session,
@@ -14,12 +13,21 @@ from portal.helpers.case_helper import (
 )
 from portal.helpers.broadcast import dashboard_changed
 from portal.helpers.decorators import role_required
-from portal.helpers.notify import department_doctor_user_ids, notify
 from portal.helpers.patient_access import can_access_patient, patient_scope
+# The duplicate window and the OP-raising rules live in queue_helper, shared
+# with patient registration. Re-exported here because this module is where
+# they were first defined and other code imports them from it.
+from portal.helpers.queue_helper import (  # noqa: F401
+    DUPLICATE_WINDOW_MINUTES,
+    op_department_for,
+    raise_op,
+    recent_duplicate_for,
+)
 from portal.helpers.response import error, success
 from portal.models.appointment import Appointment
 from portal.models.consultation import Consultation
 from portal.models.department import Department
+from portal.models.emergency_case import EmergencyCase
 from portal.models.patient import Patient
 
 appointment_bp = Blueprint("appointments", __name__)
@@ -30,16 +38,6 @@ OPEN_STATUSES = ("waiting", "in_progress")
 
 # Off the board for good — nothing can be started from one of these.
 CLOSED_STATUSES = ("completed", "cancelled")
-
-# How close together two OPs for the same patient have to be before the second
-# one is treated as a double-registration rather than a second visit.
-#
-# Nobody walks in, is seen, walks out and walks back in inside ten minutes. What
-# does happen is the desk pressing "Create OP" twice, or two receptionists
-# registering the same arrival — and every one of those becomes its own card in
-# the doctor's queue, with the same patient, the same name, the same ID and only
-# the clock to tell them apart. The doctor then has to guess which one to call.
-DUPLICATE_WINDOW_MINUTES = 10
 
 
 def collapse_duplicates(appointments):
@@ -74,27 +72,6 @@ def collapse_duplicates(appointments):
         last_kept[appointment.patient_id] = created
 
     return [a for a in appointments if a.id in kept_ids]
-
-
-def recent_duplicate_for(patient_id, within_minutes=DUPLICATE_WINDOW_MINUTES, now=None):
-    """The patient's own OP raised in the last few minutes, if there is one.
-
-    Cancelled rows are deliberately not counted. Cancelling is how the desk
-    undoes a registration it got wrong, and treating the row it just withdrew as
-    a duplicate would leave it unable to raise the corrected one for ten
-    minutes. A completed row *is* counted: the patient has already been seen, so
-    a second OP that soon is a double-registration of the same visit.
-    """
-    cutoff = (now or datetime.utcnow()) - timedelta(minutes=within_minutes)
-    return (
-        Appointment.query.filter(
-            Appointment.patient_id == patient_id,
-            Appointment.status != "cancelled",
-            Appointment.created_at >= cutoff,
-        )
-        .order_by(Appointment.created_at.desc())
-        .first()
-    )
 
 
 def open_appointments_query():
@@ -232,77 +209,47 @@ def create_appointment():
     if not department:
         return error("Department not found", status=404)
 
-    # An OP can only ever be queued to the patient's assigned doctor's own
-    # department — start_appointment later requires both a department match
-    # AND can_access_patient (assigned_doctor_id == doctor.id), so an OP
-    # created against any other department could never be started by anyone.
-    if not patient.assigned_doctor_id:
-        return error("Assign a doctor to this patient before creating an OP", status=422)
-    assigned_department_id = patient.assigned_doctor.department_id
-    if not assigned_department_id:
-        return error("This patient's assigned doctor has no department set", status=422)
-    if assigned_department_id != department.id:
+    # This route takes the department explicitly, so the one thing it has to
+    # check for itself is that the caller named the right one. Everything after
+    # that -- which department an OP actually belongs in, the duplicate window,
+    # the billing rule, who gets notified -- is `raise_op`, shared with
+    # registration so the two ways of raising an OP cannot drift apart.
+    assigned_department, failure = op_department_for(patient)
+    if failure:
+        return failure
+    if assigned_department.id != department.id:
+        doctor = patient.assigned_doctor
         return error(
-            f"This patient is assigned to Dr. {patient.assigned_doctor.user.name if patient.assigned_doctor.user else 'their doctor'} "
-            f"in {patient.assigned_doctor.department.name} — the OP must be created in that department",
+            f"This patient is assigned to Dr. {doctor.user.name if doctor.user else 'their doctor'} "
+            f"in {assigned_department.name} — the OP must be created in that department",
             status=422,
         )
 
-    now = datetime.utcnow()
+    appointment, failure = raise_op(
+        patient,
+        reason=payload.get("reason"),
+        actor_user_id=get_jwt_identity(),
+    )
+    if failure:
+        return failure
 
-    # Refused before anything is written, and in particular before the billing
-    # block below — that one moves `last_registered_at` forward, which would
-    # make the duplicate look like a genuine follow-up and bill the patient's
-    # *next* real visit as free.
-    duplicate = recent_duplicate_for(patient.id, now=now)
-    if duplicate:
-        minutes = max(1, int((now - duplicate.created_at).total_seconds() // 60))
-        return error(
-            f"{patient.name} was already queued {minutes} minute{'' if minutes == 1 else 's'} "
-            f"ago and is still on today's list. Use that OP rather than raising a second one — "
-            f"cancel it first if it was raised in error.",
-            status=409,
-            # The row to look at, so the desk can be sent straight to it
-            # instead of being told to go and find it.
-            errors={"appointment_id": duplicate.id, "status": duplicate.status},
+    # An emergency case for this patient with no OP linked yet gets this one
+    # automatically — the "OP raised later" step of the emergency workflow,
+    # so the full history stays connected without reception having to
+    # remember a separate linking step. Most recent unlinked case, in case
+    # more than one somehow exists.
+    open_emergency = (
+        EmergencyCase.query.filter(
+            EmergencyCase.patient_id == patient_id,
+            EmergencyCase.linked_appointment_id.is_(None),
+            EmergencyCase.status != "cancelled",
         )
-
-    # OP billing rule: first-ever OP for this patient is always paid. A
-    # returning patient's new OP is free if it's within 15 days of their
-    # last one (follow-up), otherwise it's a fresh paid registration.
-    if patient.last_registered_at is None:
-        patient.op_status = "paid"
-    else:
-        days_since_last_visit = (now - patient.last_registered_at).days
-        patient.op_status = "free" if days_since_last_visit <= 15 else "paid"
-    patient.last_registered_at = now
-
-    appointment = Appointment(
-        patient_id=patient_id,
-        department_id=department_id,
-        reason=payload.get("reason") or None,
-        status="waiting",
+        .order_by(EmergencyCase.id.desc())
+        .first()
     )
-    db.session.add(appointment)
+    if open_emergency:
+        open_emergency.linked_appointment_id = appointment.id
 
-    # Every doctor in the department gets pinged — the appointment is queued
-    # to the department, not to one of them, so whoever is free picks it up.
-    notify(
-        department_doctor_user_ids(department_id),
-        title="New patient in your queue",
-        body=f"{patient.name} is waiting in {department.name}.",
-        category="appointment",
-        link="/dashboard/appointments",
-        exclude_user_id=get_jwt_identity(),
-    )
-
-    db.session.flush()  # assigns appointment.id for the audit row
-    audit(
-        APPOINTMENT_CREATED,
-        entity="appointment",
-        entity_id=appointment.id,
-        detail=f"{patient.name} queued for {department.name} ({patient.op_status or 'unbilled'})",
-    )
     db.session.commit()
     dashboard_changed("appointment_created")
 

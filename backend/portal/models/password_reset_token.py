@@ -57,6 +57,20 @@ class PasswordResetToken(db.Model):
         "reset_tokens", cascade="all, delete-orphan", passive_deletes=True
     ))
 
+    __table_args__ = (
+        # Covers "this account's links that have not been spent" --
+        # `helpers/credentials.issue_link` filters on exactly (user_id,
+        # used_at IS NULL) before superseding them.
+        #
+        # Created by migration b8f3c21d90ae but never declared here, which made
+        # every `flask db migrate` propose dropping it: autogenerate compares
+        # the database against the models, and an index only one side knows
+        # about reads as one to remove. Declaring it is what makes the two
+        # agree -- the same fix, for the same reason, as `retired_at` on
+        # `clinical_precedents`.
+        db.Index("idx_reset_token_user", "user_id", "used_at"),
+    )
+
     @property
     def is_expired(self):
         # utcnow, matching how expires_at was written. Everything else in this

@@ -23,7 +23,8 @@ deployment.
 AI_medical/
 ├── backend/        Flask API (see backend/README below)
 ├── frontend/        React + Vite + Tailwind app
-├── database/        schema.sql (reference DDL, mirrors backend/portal/models)
+├── database/        schema.sql (generated snapshot of the built schema) and
+│                    archive/ (dumps of tables dropped from the live schema)
 └── documentation/    setup notes
 ```
 
@@ -56,21 +57,31 @@ reads it, or `config/prod.ini` when `APP_ENV=production`; any single value
 can be overridden by an environment variable of the name documented in
 `dev.ini.example`, so a server never needs the file on disk.
 
-Seeded logins:
-- Admin: `admin@yasodhahospitals.com` / `Admin@123`
-- Doctor: `sandeep.viswanadh@yasodhahospitals.com` / `Doctor@123`
-- Nurse: `lakshmi.rao@yasodhahospitals.com` / `Nurse@123`
+The one seeded login is the administrator:
 
-The seeder creates reference data: roles, the default admin account, and the
-default medicine master data (the clinical formulary and the pharmacy brand
-catalogue, in `portal/seeders/seed_medicines.py`) — every developer gets the
-same medicines after `git pull` without inserting them by hand. Re-running
-`python -m portal.seeds` is always safe: existing rows, including any
-medicine a developer added or edited manually, are left untouched. It
-deliberately does not create patients: a patient with no assigned doctor is
-invisible to every doctor (see `portal/helpers/patient_access.py`), so demo
-rows only ever showed up as clutter. Register patients through the front desk
-instead.
+- Admin: `goddumahesh2@gmail.com` (or the username `admin`) / `Admin@123`
+
+Override it with `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` / `SEED_ADMIN_NAME`
+before the first run — see `portal/seeders/seed_admin.py`, which also brings an
+existing admin back in step with those values on every start.
+
+**No doctor or nurse account is seeded.** Create staff through Staff
+Management once signed in as the admin; each new account is emailed a
+temporary password and a single-use link to set their own.
+
+The seeder creates reference data: roles, the default admin account, the
+departments, and the default medicine master data (the clinical formulary and
+the pharmacy brand catalogue, in `portal/seeders/seed_medicines.py`) — every
+developer gets the same medicines after `git pull` without inserting them by
+hand. Re-running `python -m portal.seeds` is always safe: existing rows,
+including any medicine a developer added or edited manually, are left
+untouched. It deliberately does not create patients: a patient with no
+assigned doctor is invisible to every doctor (see
+`portal/helpers/patient_access.py`), so demo rows only ever showed up as
+clutter. Register patients through the front desk instead.
+
+`portal/seeders/seed_core.py` still holds demo staff, patients and stock if
+sample content is ever wanted; it is run by hand, never automatically.
 
 ### 3. Frontend
 
@@ -92,6 +103,26 @@ npm run dev                     # http://localhost:5173
 4. You should land on `/dashboard` showing the doctor's name and live
    (currently zero/seed-level) counts pulled from MySQL — not hardcoded
    numbers.
+
+## Tests
+
+```bash
+cd backend
+python tests/test_flows.py     # every module, end to end, all seven roles
+python tests/test_shifts.py    # the shift module in depth
+```
+
+Both run against `<DB_NAME>_test`, which they drop and rebuild from the models
+on every run, and both refuse to start if the configured URL is not the test
+one — they cannot reach live patient records. Neither needs pytest; plain
+asserts and a pass/fail tally, so a fresh checkout can run them with nothing
+installed beyond the application's own requirements.
+
+`test_flows.py` follows a hospital day in order — registration, the OP queue,
+the consultation and its prescription, the case, the surgical pathway, the
+nursing hand-off, the lab, the pharmacy, staff administration — and asserts
+the authorization boundary at each step, which is where the module's rules
+actually live.
 
 ## Nursing module
 

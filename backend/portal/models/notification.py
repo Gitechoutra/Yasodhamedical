@@ -18,6 +18,12 @@ class Notification(db.Model):
             "consultation",
             "report",
             "nursing",
+            # A doctor's own patient list changed -- registered to them, or
+            # routed to them by reception. Its own category rather than
+            # "appointment": those are queue events, this is "you now have a
+            # patient you didn't a moment ago," and the Alerts page reads it
+            # out separately for exactly that reason.
+            "patient_assignment",
             # A doctor prescribed something the catalogue lacks, and the
             # pharmacy is the only party who can close that gap.
             "pharmacy",

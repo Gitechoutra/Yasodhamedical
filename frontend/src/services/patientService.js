@@ -27,6 +27,13 @@ export async function fetchPatientCounts() {
   return res.data.data;
 }
 
+/** One patient record, full detail — for a page that already knows the id
+ * (an Emergency Case, a nursing record) rather than browsing the list. */
+export async function fetchPatient(patientId) {
+  const res = await api.get(`/patients/${patientId}`);
+  return res.data.data;
+}
+
 export async function createPatient(payload) {
   const res = await api.post("/patients", payload);
   return res.data.data;

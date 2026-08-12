@@ -2,7 +2,7 @@ import os
 from datetime import date, datetime
 
 from flask import Blueprint, request, send_from_directory
-from flask_jwt_extended import get_jwt, jwt_required
+from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 
 from portal.extensions import db
 from portal.helpers.audit import (
@@ -22,6 +22,7 @@ from portal.helpers.contact import normalize_email, normalize_phone
 from portal.helpers.decorators import FRONT_DESK_ROLES, role_required
 from portal.helpers.notify import notify
 from portal.helpers.patient_access import can_access_patient, scope_patients
+from portal.helpers.queue_helper import raise_op
 from portal.helpers.response import error, success
 from portal.helpers.search import id_from_term, matches_all, terms_from
 from portal.helpers.surgery import refresh_surgery_stages
@@ -29,6 +30,7 @@ from portal.helpers.uploads import ImageUploadError, delete_image, save_image, u
 from portal.models.appointment import Appointment
 from portal.models.consultation import Consultation
 from portal.models.doctor import Doctor
+from portal.models.emergency_case import EmergencyCase
 from portal.models.nursing_assignment import NursingAssignment
 from portal.models.patient import MAX_OBSERVATION_DAYS, Patient, normalize_blood_group
 from portal.models.patient_case import PatientCase
@@ -65,12 +67,17 @@ def _parse_dob(raw):
 
 
 def _resolve_assigned_doctor(payload):
-    """Returns (doctor_id, error_message).
+    """Returns (doctor, error_message).
 
     Always explicit: registration is reception's, and picking the treating
     doctor is the routing decision that registration exists to make. Nothing
     infers it, because the only caller who could be inferred from -- a doctor
     -- cannot reach this route.
+
+    The department is checked here rather than left to `raise_op` below, so a
+    doctor who has none is refused before any row is written -- the desk is
+    told what is wrong with their choice instead of having the registration
+    fail halfway through.
     """
     raw = payload.get("assigned_doctor_id")
     if raw in (None, ""):
@@ -79,7 +86,13 @@ def _resolve_assigned_doctor(payload):
     doctor = Doctor.query.get(raw)
     if not doctor:
         return None, "Assigned doctor not found"
-    return doctor.id, None
+    if not doctor.department_id:
+        return None, (
+            f"Dr. {doctor.user.name if doctor.user else 'that doctor'} has no department "
+            "set, so there is no queue to admit this patient into. Set their department "
+            "in Staff Management, or choose another doctor."
+        )
+    return doctor, None
 
 
 PATIENT_SCOPES = ("consulted", "awaiting", "all")
@@ -239,6 +252,17 @@ def create_patient():
     (`update_patient`) and re-routing one (`reassign_patient`) stay open to
     admin, because unsticking a bad record is administration. Creating one is
     not.
+
+    **Registering a patient also raises their OP.** Somebody arriving at the
+    front desk is arriving to be seen, so the registration and the queue entry
+    are one act rather than two screens -- the desk used to have to remember to
+    go to Appointments afterwards, and a patient whose second step was
+    forgotten sat in the record visible to nobody, in no queue, waiting for a
+    doctor who had never been told they were there.
+
+    Both are written in one transaction, so a patient is never created without
+    the OP that admits them: if the queue entry cannot be raised, the
+    registration is refused rather than half-done.
     """
     payload = request.get_json(silent=True) or {}
     name = (payload.get("name") or "").strip()
@@ -249,7 +273,7 @@ def create_patient():
     if dob_error:
         return error(dob_error, status=422)
 
-    assigned_doctor_id, doctor_error = _resolve_assigned_doctor(payload)
+    doctor, doctor_error = _resolve_assigned_doctor(payload)
     if doctor_error:
         return error(doctor_error, status=422)
 
@@ -276,20 +300,62 @@ def create_patient():
         blood_group=blood_group,
         allergies=payload.get("allergies") or None,
         medical_history=payload.get("medical_history") or None,
-        assigned_doctor_id=assigned_doctor_id,
+        assigned_doctor_id=doctor.id,
     )
     db.session.add(patient)
     db.session.flush()  # assigns patient.id so the audit row can reference it
+
+    # The one place a doctor learns a patient exists before they go looking
+    # for one -- there was no notification of any kind here before, so a new
+    # patient sat invisible on the doctor's list until they happened to check
+    # it themselves.
+    if patient.assigned_doctor and patient.assigned_doctor.user_id:
+        notify(
+            [patient.assigned_doctor.user_id],
+            title="New patient assigned to you",
+            body=f"{patient.name} was registered and routed to you.",
+            category="patient_assignment",
+            link=f"/dashboard/patients?patient_id={patient.id}",
+            exclude_user_id=get_jwt_identity(),
+        )
+
     audit(
         PATIENT_CREATED,
         entity="patient",
         entity_id=patient.id,
         detail=f"Registered {patient.name}",
     )
+
+    # The queue entry, in the same transaction. `raise_op` derives the
+    # department from the doctor just chosen, bills the OP (a first-ever
+    # registration is always paid) and notifies that department's doctors.
+    appointment, failure = raise_op(
+        patient,
+        reason=payload.get("reason"),
+        actor_user_id=get_jwt_identity(),
+    )
+    if failure:
+        # Nothing is committed, so the patient row goes with it. Rolled back
+        # explicitly rather than left to the session teardown, so the next
+        # request on this connection does not inherit a dirty session.
+        db.session.rollback()
+        return failure
+
     db.session.commit()
     dashboard_changed("patient_created")
 
-    return success(patient.to_dict(), message="Patient created", status=201)
+    data = patient.to_dict()
+    # The OP is returned alongside the patient because the caller just created
+    # both -- the front desk needs the queue entry it was given, and having it
+    # here saves the page a second request to find the row it already caused.
+    data["appointment"] = appointment.to_dict()
+
+    department_name = data["appointment"]["department"] or "the"
+    return success(
+        data,
+        message=f"{patient.name} registered and added to the {department_name} queue",
+        status=201,
+    )
 
 
 # What the front desk collects at registration, and may therefore correct
@@ -298,6 +364,39 @@ def create_patient():
 EDITABLE_FIELDS = ("name", "gender", "phone", "email", "blood_group", "allergies", "medical_history")
 
 GENDERS = ("male", "female", "other")
+
+# Who may write to a patient's registration -- the demographics and the photo.
+#
+# An allowlist, not "everyone except nurses". The blocklist this replaces named
+# the one role anybody had thought about, so every role added since -- the
+# pharmacist, the lab technician, the accountant -- fell through it and could
+# rewrite any patient's name, phone, blood group or allergies. None of them
+# reach this screen in the UI, which is why it went unnoticed: the check was
+# the only thing standing between a stale token and the whole patient table.
+#
+# The front desk typed these details in, and the treating doctor owns the
+# clinical record, so those are the two that may correct them. Anybody else is
+# refused by not being named here, which is the point -- a role added tomorrow
+# gets no access until somebody decides it should.
+PATIENT_EDIT_ROLES = FRONT_DESK_ROLES + ("doctor",)
+
+
+def _may_edit_patient():
+    """The refusal for a caller who may not write to a registration, or None.
+
+    Nurses get their own message because they are the one role with a real
+    reason to be on the patient's record and a real reason to be told why this
+    particular action is not theirs.
+    """
+    role = get_jwt().get("role")
+    if role in PATIENT_EDIT_ROLES:
+        return None
+    if role == "nurse":
+        return error("Nurses cannot edit patient registration details", status=403)
+    return error(
+        "Only the front desk or the treating doctor can change a patient's details",
+        status=403,
+    )
 
 
 @patient_bp.patch("/<int:patient_id>")
@@ -318,9 +417,11 @@ def update_patient(patient_id):
     doctor = get_current_doctor()
     if doctor and not can_access_patient(patient, doctor):
         return error("Patient not found", status=404)
-    # A nurse works from the record the doctor set; they don't edit demographics.
-    if get_jwt().get("role") == "nurse":
-        return error("Nurses cannot edit patient registration details", status=403)
+    # A nurse works from the record the doctor set; they don't edit demographics,
+    # and neither does anybody outside PATIENT_EDIT_ROLES.
+    refusal = _may_edit_patient()
+    if refusal:
+        return refusal
 
     payload = request.get_json(silent=True) or {}
 
@@ -413,6 +514,17 @@ def reassign_patient(patient_id):
         return error("Assigned doctor not found", status=404)
 
     patient.assigned_doctor_id = doctor.id
+
+    if doctor.user_id:
+        notify(
+            [doctor.user_id],
+            title="New patient assigned to you",
+            body=f"{patient.name} was routed to you.",
+            category="patient_assignment",
+            link=f"/dashboard/patients?patient_id={patient.id}",
+            exclude_user_id=get_jwt_identity(),
+        )
+
     audit(
         PATIENT_REASSIGNED,
         entity="patient",
@@ -432,13 +544,16 @@ def delete_patient(patient_id):
     duplicate, or a walk-in entered against the wrong person.
 
     Front-desk work, and only ever for a patient with nothing clinical on
-    file. A consultation, a case or a nursing record is a medical record: it
-    is what the hospital is answerable for later, so a patient who has one is
-    refused here rather than quietly taking their history down with them.
-    Correct such a record, or leave it — deleting is not the tool.
+    file. A consultation, a case, a nursing record or an emergency case with
+    something actually recorded on it is a medical record: it is what the
+    hospital is answerable for later, so a patient who has one is refused
+    here rather than quietly taking their history down with them. Correct
+    such a record, or leave it — deleting is not the tool.
 
     Queue entries are not records in that sense. An OP raised for a patient
-    who is being deleted has no consultation behind it, so it goes with them.
+    who is being deleted has no consultation behind it, so it goes with
+    them — and so does an emergency case nobody ever claimed, or claimed and
+    cancelled before anything was written on it.
     """
     patient = Patient.query.get(patient_id)
     if not patient:
@@ -451,6 +566,21 @@ def delete_patient(patient_id):
         blockers.append("case records")
     if NursingAssignment.query.filter_by(patient_id=patient.id).count():
         blockers.append("nursing records")
+    # An emergency case with nothing recorded on it yet (never claimed, or
+    # cancelled as a mistaken registration before a doctor ever assessed the
+    # patient) is a queue entry like an Appointment, not a clinical record --
+    # removed the same way, below. One with assessment notes, treatment notes
+    # or a decision on file is the doctor's account of what happened, and is
+    # a medical record exactly like a Consultation.
+    if EmergencyCase.query.filter(
+        EmergencyCase.patient_id == patient.id,
+        db.or_(
+            EmergencyCase.assessment_notes.isnot(None),
+            EmergencyCase.treatment_notes.isnot(None),
+            EmergencyCase.decision.isnot(None),
+        ),
+    ).count():
+        blockers.append("emergency case records")
     if blockers:
         return error(
             f"{patient.name} has {' and '.join(blockers)} and cannot be deleted. "
@@ -466,6 +596,9 @@ def delete_patient(patient_id):
     # a consultation, which is refused above), so removing them keeps the
     # queue from pointing at a patient who no longer exists.
     Appointment.query.filter_by(patient_id=patient.id).delete(synchronize_session=False)
+    # Same reasoning for an emergency case with nothing recorded on it --
+    # the blockers above already refused anything that does.
+    EmergencyCase.query.filter_by(patient_id=patient.id).delete(synchronize_session=False)
 
     audit(
         PATIENT_DELETED,
@@ -727,9 +860,15 @@ def discharge_patient(patient_id):
 @patient_bp.post("/<int:patient_id>/photo")
 @jwt_required()
 def upload_patient_photo(patient_id):
+    """Sets the patient's photo. Same writers as the rest of the registration —
+    a photo identifies the person at the counter, so replacing it is the same
+    kind of act as changing their name."""
     patient = Patient.query.get(patient_id)
     if not patient or not can_access_patient(patient, get_current_doctor()):
         return error("Patient not found", status=404)
+    refusal = _may_edit_patient()
+    if refusal:
+        return refusal
 
     try:
         filename = save_image(request.files.get("photo"), PHOTOS_SUBDIR)
@@ -751,6 +890,9 @@ def delete_patient_photo(patient_id):
     patient = Patient.query.get(patient_id)
     if not patient or not can_access_patient(patient, get_current_doctor()):
         return error("Patient not found", status=404)
+    refusal = _may_edit_patient()
+    if refusal:
+        return refusal
 
     previous = patient.photo_path
     patient.photo_path = None

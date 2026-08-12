@@ -26,6 +26,7 @@ import { canCreateOp, canReassignDoctor, canRegisterPatient } from "../utils/per
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDoctors } from "../services/doctorService";
 import {
+  fetchPatient,
   fetchPatientCounts,
   fetchPatients,
   createPatient,
@@ -52,6 +53,10 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
     allergies: "",
     medical_history: "",
     assigned_doctor_id: "",
+    // Registering also raises the patient's OP, so the reason they have come
+    // in is collected here rather than on a second screen — it is what the
+    // doctor reads on the queue card before calling them through.
+    reason: "",
   });
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -205,8 +210,25 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
             ))}
           </select>
           <p className="mt-1 text-[11px] text-slate-400">
-            Only this doctor will be able to see this patient.
+            Only this doctor will be able to see this patient. Saving also puts
+            them in this doctor&apos;s queue — no separate OP needed.
           </p>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-slate-600">
+            Reason for visit
+          </label>
+          {/* Goes onto the OP this registration raises, which is what the
+              doctor sees on the queue card. Same field, same wording as the
+              Create OP form on Appointments. */}
+          <textarea
+            className={inputClass}
+            rows={2}
+            value={form.reason}
+            onChange={update("reason")}
+            placeholder="e.g. Chest pain since this morning"
+          />
         </div>
 
         <div>
@@ -226,7 +248,7 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
           disabled={saving || phoneIncomplete || emailInvalid}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
-          {saving ? "Saving…" : "Add Patient"}
+          {saving ? "Saving…" : "Register & Add to Queue"}
         </button>
       </form>
     </Modal>
@@ -260,6 +282,13 @@ export default function Patients() {
   // Removing a registration is front-desk work — the same pair the server
   // allows on the delete route. A doctor or nurse never sees the button.
   const canDeletePatient = user?.role === "receptionist" || user?.role === "admin";
+  // A doctor can neither raise an OP nor reassign one, so an "awaiting"
+  // patient with no appointment yet is not actionable here — and one who does
+  // have an appointment already shows up as a normal card in Appointments.
+  // The tab, and the banner pointing at Appointments, would just be a second
+  // copy of that same queue with nothing new to do from it. Front desk and
+  // admin keep both: they need this list to know who still needs an OP.
+  const isDoctor = user?.role === "doctor";
 
   const [patients, setPatients] = useState([]);
   const [counts, setCounts] = useState(null);
@@ -285,9 +314,30 @@ export default function Patients() {
   const searchTerm = searchParams.get("search") || "";
   const [searchInput, setSearchInput] = useState(searchTerm);
 
+  // Set by a "New patient assigned to you" notification, which names a
+  // specific patient rather than a search term. That patient may not have
+  // been consulted yet, so the consulted/awaiting split above would hide
+  // them — fetched directly by id instead, bypassing both scope and search.
+  const patientIdParam = searchParams.get("patient_id");
+
+  function clearPatientIdParam() {
+    const params = new URLSearchParams(searchParams);
+    params.delete("patient_id");
+    setSearchParams(params, { replace: true });
+  }
+
   // Arriving from the header search (or the back button) has to move the box,
   // which otherwise keeps whatever was last typed into it.
   useEffect(() => setSearchInput(searchTerm), [searchTerm]);
+
+  // The registration confirmation clears itself. It reports something that has
+  // already happened, so leaving it on screen would have it still claiming a
+  // patient was "just added" several patients later.
+  useEffect(() => {
+    if (!successMsg) return undefined;
+    const timer = setTimeout(() => setSuccessMsg(""), 6000);
+    return () => clearTimeout(timer);
+  }, [successMsg]);
 
   const query = searchTerm.trim();
   // Same floor as the API, which stops narrowing below it — one character
@@ -297,6 +347,14 @@ export default function Patients() {
   const load = useCallback(
     (silent = false) => {
       if (!silent) setLoading(true);
+      if (patientIdParam) {
+        // Fetched by id so it shows up regardless of which side of the
+        // consulted/awaiting split it's currently on.
+        return fetchPatient(patientIdParam)
+          .then((patient) => setPatients([patient]))
+          .catch(() => setPatients([]))
+          .finally(() => setLoading(false));
+      }
       // A search runs across every patient rather than the open tab. Whoever
       // is being looked for is as likely to be waiting in Appointments as to
       // have been seen, and a name that exists returning "no patients" is
@@ -311,7 +369,7 @@ export default function Patients() {
         })
         .finally(() => setLoading(false));
     },
-    [scope, searching, query]
+    [scope, searching, query, patientIdParam]
   );
 
   // The doctor list backs both the registration form and the re-route picker;
@@ -337,6 +395,7 @@ export default function Patients() {
       const params = new URLSearchParams(searchParams);
       if (next) params.set("search", next);
       else params.delete("search");
+      params.delete("patient_id");
       setSearchParams(params, { replace: true });
     }, 300);
     return () => clearTimeout(id);
@@ -372,12 +431,22 @@ export default function Patients() {
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Patients</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {searching
-              ? `Matching “${query}” — every patient, consulted or not`
-              : scope === "consulted"
-                ? "Patients whose consultation is complete"
-                : "Registered or in Appointments — not yet consulted"}
+            {patientIdParam
+              ? "Viewing a specific patient"
+              : searching
+                ? `Matching “${query}” — every patient, consulted or not`
+                : isDoctor || scope === "consulted"
+                  ? "Patients whose consultation is complete"
+                  : "Registered or in Appointments — not yet consulted"}
           </p>
+          {patientIdParam && (
+            <button
+              onClick={clearPatientIdParam}
+              className="mt-1 text-sm font-semibold text-brand-600 underline underline-offset-2"
+            >
+              ← Back to all patients
+            </button>
+          )}
         </div>
         {canRegister && (
           <button
@@ -427,35 +496,37 @@ export default function Patients() {
           Hidden while searching: the search deliberately crosses both sides,
           so a tab claiming to be the active filter would be a lie — and a
           match on the other side would look like no match at all. */}
-      <div className={`mt-5 flex-wrap gap-2 ${searching ? "hidden" : "flex"}`}>
-        {[
-          ["consulted", "Consulted", counts?.consulted],
-          ["awaiting", "Awaiting consultation", counts?.awaiting],
-        ].map(([value, label, count]) => (
-          <button
-            key={value}
-            onClick={() => setScope(value)}
-            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-              scope === value
-                ? "bg-brand-600 text-white shadow-md"
-                : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            {label}
-            {count != null && (
-              <span
-                className={`ml-2 rounded-full px-1.5 py-0.5 text-[11px] ${
-                  scope === value ? "bg-white/20" : "bg-slate-100 text-slate-500"
-                }`}
-              >
-                {count}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      {!isDoctor && (
+        <div className={`mt-5 flex-wrap gap-2 ${searching || patientIdParam ? "hidden" : "flex"}`}>
+          {[
+            ["consulted", "Consulted", counts?.consulted],
+            ["awaiting", "Awaiting consultation", counts?.awaiting],
+          ].map(([value, label, count]) => (
+            <button
+              key={value}
+              onClick={() => setScope(value)}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                scope === value
+                  ? "bg-brand-600 text-white shadow-md"
+                  : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              {label}
+              {count != null && (
+                <span
+                  className={`ml-2 rounded-full px-1.5 py-0.5 text-[11px] ${
+                    scope === value ? "bg-white/20" : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {scope === "awaiting" && !searching && (
+      {!isDoctor && scope === "awaiting" && !searching && !patientIdParam && (
         <p className="mt-3 flex flex-wrap items-center gap-1.5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
           These patients are still with Appointments. They move to Consulted once the doctor
           completes their consultation.
@@ -500,6 +571,16 @@ export default function Patients() {
                     className="ml-1 font-semibold text-brand-600 underline underline-offset-2"
                   >
                     Clear the search
+                  </button>
+                </>
+              ) : patientIdParam ? (
+                <>
+                  This patient could not be found, or you don&apos;t have access to their record.
+                  <button
+                    onClick={clearPatientIdParam}
+                    className="ml-1 font-semibold text-brand-600 underline underline-offset-2"
+                  >
+                    View all patients
                   </button>
                 </>
               ) : scope === "consulted" ? (
@@ -549,8 +630,19 @@ export default function Patients() {
         <AddPatientModal
           doctors={doctors}
           onClose={() => setShowAddModal(false)}
-          onCreated={() => {
+          onCreated={(created) => {
             setShowAddModal(false);
+            // Registering also raised the patient's OP, so say which queue they
+            // went into. Without it the desk has no confirmation that the half
+            // of the action they can't see from this page actually happened,
+            // and the habit of going to Appointments to "finish the job" — the
+            // step this change removes — is exactly what would persist.
+            const department = created?.appointment?.department;
+            setSuccessMsg(
+              department
+                ? `${created.name} registered and added to the ${department} queue.`
+                : `${created?.name || "Patient"} registered.`
+            );
             // A patient who has just been registered has no completed
             // consultation, so they belong to Awaiting. Switching to that tab
             // means the person who registered them sees them, instead of

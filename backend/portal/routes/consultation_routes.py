@@ -6,7 +6,7 @@ from flask_jwt_extended import get_jwt_identity
 
 from portal.ai import gemini_client
 from portal.extensions import db, socketio
-from portal.helpers.auth_helper import get_current_doctor
+from portal.helpers.auth_helper import get_current_doctor, get_current_nurse
 from portal.helpers import custom_medicines, knowledge_base
 from portal.helpers.audit import (
     CONSULTATION_ENDED,
@@ -43,6 +43,7 @@ from portal.models.consultation_summary import ConsultationSummary
 from portal.models.conversation_message import ConversationMessage
 from portal.models.generated_prescription import GeneratedPrescription
 from portal.models.medication_order import ROUTES
+from portal.models.nursing_assignment import NursingAssignment
 from portal.models.patient import Patient
 from portal.websocket.consultation_socket import consultation_room
 
@@ -256,11 +257,48 @@ def _room_payload(consultation, can_manage=None):
     return data
 
 
+def _may_view_consultation(consultation):
+    """Whether this caller may read one specific consultation.
+
+    `list_consultations` has always narrowed a doctor to their own work, but
+    this route did not narrow anyone — so a doctor who could not see another
+    doctor's consultation in the list could still open it by walking the id,
+    and read the transcript, the diagnosis and the prescription inside. The
+    two now answer the same question the same way.
+
+    The rules are the ones the rest of the app already runs on:
+
+      * a doctor  — the module-wide patient rule (`can_access_patient`), which
+        is what `start_consultation` checks before creating one of these
+      * a nurse   — only a patient actually handed to them, the same scope
+        `helpers/nursing_access` applies to the record hanging off it
+      * admin     — everything, which is the oversight the room's `can_manage`
+        flag was already written for
+    """
+    doctor = get_current_doctor()
+    if doctor:
+        return can_access_patient(consultation.patient, doctor)
+
+    nurse = get_current_nurse()
+    if nurse:
+        return bool(
+            NursingAssignment.query.filter_by(
+                patient_id=consultation.patient_id, nurse_id=nurse.id
+            ).first()
+        )
+
+    return True
+
+
 @consultation_bp.get("/<int:consultation_id>")
 @clinical_only
 def get_consultation(consultation_id):
     consultation = Consultation.query.get(consultation_id)
     if not consultation:
+        return error("Consultation not found", status=404)
+    if not _may_view_consultation(consultation):
+        # 404, not 403, for the reason `get_patient` gives: confirming the
+        # record exists would leak that another doctor has one by this id.
         return error("Consultation not found", status=404)
     return success(_room_payload(consultation))
 
