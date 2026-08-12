@@ -31,6 +31,7 @@ from portal.helpers.audit import audit
 from portal.helpers.broadcast import dashboard_changed
 from portal.helpers.decorators import current_role, role_required
 from portal.helpers.notify import notify
+from portal.helpers.patient_access import has_active_emergency_claim
 from portal.helpers.response import error, success
 from portal.helpers.uploads import upload_dir
 from portal.models.consultation import Consultation
@@ -365,11 +366,17 @@ def create_request():
         return error("That patient does not exist", status=404)
 
     # A doctor may only order for a patient who is actually theirs — the same
-    # rule every other patient-facing route applies.
+    # rule every other patient-facing route applies. An on-duty doctor
+    # treating this patient through a claimed Emergency Case counts too, same
+    # as `can_access_patient` — see `helpers/patient_access`.
     caller = _caller()
     if _is_doctor():
         doctor_profile = caller.doctor_profile if caller else None
-        if doctor_profile and patient.assigned_doctor_id != doctor_profile.id:
+        if (
+            doctor_profile
+            and patient.assigned_doctor_id != doctor_profile.id
+            and not has_active_emergency_claim(patient.id, doctor_profile.id)
+        ):
             return error("That patient is not assigned to you", status=403)
 
     test_name = _text(payload, "test_name", 200)

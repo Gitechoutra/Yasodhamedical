@@ -39,6 +39,9 @@ const BADGE_TONES = {
   brand: "bg-brand-50 text-brand-700",
   slate: "bg-slate-100 text-slate-600",
   slateSolid: "bg-slate-200 text-slate-700",
+  // Critical-severity emergencies only — nothing else in the app is this
+  // urgent, which is the point of reserving a colour for it.
+  red: "bg-red-100 text-red-700",
 };
 
 /** One status pill. Same size and weight everywhere, so a row of them lines up. */

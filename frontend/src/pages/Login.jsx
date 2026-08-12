@@ -8,7 +8,6 @@ import {
 } from "react-icons/hi2";
 import Logo from "../components/Logo";
 import { useAuth } from "../context/AuthContext";
-import { EMAIL_ERROR, isValidEmail, looksLikeEmail } from "../utils/contact";
 
 export default function Login() {
   const { login, isLoading } = useAuth();
@@ -25,18 +24,19 @@ export default function Login() {
 
   const redirectTo = location.state?.from?.pathname || "/dashboard";
 
-  // Only checked once they have typed an '@'. A username has no domain to be
-  // wrong about, and holding "sandeep.viswanadh" to the email rule would lock
-  // out the identifier the welcome email actually tells staff to use.
-  const emailInvalid = looksLikeEmail(identifier) && !isValidEmail(identifier);
+  // No email-shape or domain check here on purpose. `EMAIL_DOMAINS` (see
+  // utils/contact.js) constrains what a NEW address may be when the hospital
+  // is the one creating the record — a patient, a staff account. Signing in
+  // is the opposite case: this is somebody's own account, already created,
+  // and `_find_by_identifier` on the server looks it up by exact email or
+  // username with no domain opinion of its own. A domain check here could
+  // only ever reject a real, working login — which is exactly what it did.
+  // The `required` attribute on the input is the only validation this field
+  // needs.
 
   async function handleSubmit(e) {
     e.preventDefault();
     setErrorMsg("");
-    if (emailInvalid) {
-      setErrorMsg(`${EMAIL_ERROR} You can also sign in with your username.`);
-      return;
-    }
     try {
       const user = await login(identifier, password);
       // The one sign-in for every role. Nurses, pharmacists and lab
@@ -89,11 +89,6 @@ export default function Login() {
                 className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
               />
             </div>
-            {emailInvalid && (
-              <p className="mt-1.5 text-xs text-red-600">
-                {EMAIL_ERROR} You can also sign in with your username.
-              </p>
-            )}
           </div>
 
           <div>

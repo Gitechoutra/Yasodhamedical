@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import {
   HiOutlineAcademicCap,
@@ -17,10 +18,16 @@ import {
   HiOutlineCalendarDays as HiOutlineShiftCalendar,
   HiOutlineCog6Tooth,
   HiOutlineArrowRightOnRectangle,
+  HiOutlineExclamationTriangle,
+  HiOutlineBellAlert,
 } from "react-icons/hi2";
 import Logo from "./Logo";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
+import useLiveNursing from "../hooks/useLiveNursing";
+import { fetchNursingSummary } from "../services/nursingService";
+
+const ALERTS_PATH = "/dashboard/nursing/alerts";
 
 // `hideFrom` keeps a nav item out of a role's sidebar.
 //
@@ -35,6 +42,14 @@ const NAV_ITEMS = [
   { to: "/dashboard", label: "Dashboard", icon: HiOutlineSquares2X2, end: true },
   { to: "/dashboard/patients", label: "Patients", icon: HiOutlineUsers },
   { to: "/dashboard/appointments", label: "Appointments", icon: HiOutlineCalendarDays },
+  // Same visibility as Appointments: reception logs a case, a doctor treats
+  // it, admin monitors — nobody with this sidebar is locked out of the board
+  // itself, only out of the actions the page gates per role.
+  {
+    to: "/dashboard/emergency",
+    label: "Emergency Cases",
+    icon: HiOutlineExclamationTriangle,
+  },
   {
     to: "/dashboard/consultations",
     label: "Consultations",
@@ -55,6 +70,19 @@ const NAV_ITEMS = [
     to: "/dashboard/nursing",
     label: "Nursing Care",
     icon: HiOutlineHeart,
+    hideFrom: ["receptionist"],
+  },
+  // A nurse-raised alert used to reach a doctor only through the bell icon's
+  // notification list — easy to miss among routine "dose logged" pings, and
+  // buried further behind a banner on the Nursing Care page that only
+  // appears once there's already something waiting. This is its own
+  // standing entry so checking it does not depend on noticing something
+  // else first, with a live count so a doctor can tell at a glance whether
+  // anything actually needs them right now.
+  {
+    to: ALERTS_PATH,
+    label: "Alerts",
+    icon: HiOutlineBellAlert,
     hideFrom: ["receptionist"],
   },
   {
@@ -133,6 +161,29 @@ export default function Sidebar() {
 
   const navItems = NAV_ITEMS.filter(({ hideFrom }) => !hideFrom?.includes(user?.role));
 
+  // Open/critical alert counts for the badge on the Alerts entry. Reception
+  // never sees that entry, so there's nothing to fetch for them — the same
+  // `/nursing/summary` call the Nursing Care banner already uses, scoped
+  // server-side to this doctor's own patients (or, for admin, the whole
+  // hospital).
+  const [alertCounts, setAlertCounts] = useState({ open: 0, critical: 0 });
+  const canSeeAlerts = user?.role !== "receptionist";
+
+  const loadAlertCounts = () => {
+    if (!canSeeAlerts) return;
+    fetchNursingSummary()
+      .then((summary) =>
+        setAlertCounts({
+          open: summary?.open_alerts || 0,
+          critical: summary?.critical_alerts || 0,
+        })
+      )
+      .catch(() => {});
+  };
+
+  useEffect(loadAlertCounts, [canSeeAlerts]);
+  useLiveNursing(loadAlertCounts);
+
   async function handleLogout() {
     await logout();
     navigate("/login", { replace: true });
@@ -143,23 +194,35 @@ export default function Sidebar() {
       <Logo className="px-2" />
 
       <nav className="mt-8 flex-1 space-y-1 overflow-y-auto">
-        {navItems.map(({ to, label, icon: Icon, end }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
-                isActive
-                  ? "bg-brand-50 text-brand-700"
-                  : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
-              }`
-            }
-          >
-            <Icon className="h-5 w-5" />
-            {label}
-          </NavLink>
-        ))}
+        {navItems.map(({ to, label, icon: Icon, end }) => {
+          const badgeCount = to === ALERTS_PATH ? alertCounts.open : 0;
+          return (
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              className={({ isActive }) =>
+                `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                  isActive
+                    ? "bg-brand-50 text-brand-700"
+                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                }`
+              }
+            >
+              <Icon className="h-5 w-5" />
+              <span className="flex-1">{label}</span>
+              {badgeCount > 0 && (
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-bold text-white ${
+                    alertCounts.critical > 0 ? "bg-red-500" : "bg-amber-500"
+                  }`}
+                >
+                  {badgeCount > 9 ? "9+" : badgeCount}
+                </span>
+              )}
+            </NavLink>
+          );
+        })}
       </nav>
 
       <button

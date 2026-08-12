@@ -24,6 +24,9 @@ def list_notifications():
     query = Notification.query.filter_by(user_id=user_id)
     if request.args.get("unread") == "true":
         query = query.filter_by(is_read=False)
+    category = request.args.get("category")
+    if category:
+        query = query.filter_by(category=category)
 
     items = query.order_by(Notification.created_at.desc(), Notification.id.desc()).limit(limit).all()
     unread_count = Notification.query.filter_by(user_id=user_id, is_read=False).count()

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { HiOutlineCheckCircle } from "react-icons/hi2";
+import { HiOutlineCheckCircle, HiOutlineUserPlus } from "react-icons/hi2";
 import {
   AlertStatusBadge,
   SeverityBadge,
@@ -9,6 +9,8 @@ import {
 import { useAuth } from "../../context/AuthContext";
 import useLiveNursing from "../../hooks/useLiveNursing";
 import { fetchAlerts } from "../../services/nursingService";
+import { fetchNotifications, markNotificationRead } from "../../services/notificationService";
+import { onDashboardChanged } from "../../services/socket";
 
 const FILTERS = [
   { key: "open", label: "Open" },
@@ -32,6 +34,13 @@ export default function NurseAlerts({ basePath = "/nurse/patients", title = "Ale
   const [errorMsg, setErrorMsg] = useState("");
 
   const isNurse = user?.role === "nurse";
+  // A patient registered or routed to a doctor isn't a nursing escalation —
+  // it has no assignment to hang a ClinicalAlert off — so it's kept as its
+  // own list, sourced from the notification it already sends, rather than
+  // forced into the alert model above. Doctor-only: nobody else is ever the
+  // target of "a patient was assigned to you".
+  const isDoctor = user?.role === "doctor";
+  const [patientNotifications, setPatientNotifications] = useState([]);
 
   const load = useCallback(
     (silent = false) => {
@@ -47,11 +56,45 @@ export default function NurseAlerts({ basePath = "/nurse/patients", title = "Ale
     [status]
   );
 
+  const loadPatientNotifications = useCallback(() => {
+    if (!isDoctor) return undefined;
+    // Not filtered to unread: a doctor scanning this list is checking who
+    // was recently added, not clearing a to-do list -- a patient assigned
+    // yesterday should still be here today, just below whoever is newest.
+    // The server already orders newest-first, so a fresh arrival appears at
+    // the top without this doing any sorting of its own.
+    return fetchNotifications({ category: "patient_assignment", limit: 20 })
+      .then(({ items }) => setPatientNotifications(items))
+      .catch(() => {});
+  }, [isDoctor]);
+
   useEffect(() => {
     load();
   }, [load]);
 
+  useEffect(() => {
+    loadPatientNotifications();
+  }, [loadPatientNotifications]);
+
+  // Patient assignment pings the dashboard channel (create_patient,
+  // reassign_patient), not the nursing one below -- it isn't nursing
+  // activity, so it would never otherwise refresh this list live.
+  useEffect(() => {
+    if (!isDoctor) return undefined;
+    return onDashboardChanged(() => loadPatientNotifications());
+  }, [isDoctor, loadPatientNotifications]);
+
   useLiveNursing(load);
+
+  // Opening one reads it, same as the bell menu — but it stays in this list
+  // either way. Only the "new" dot goes away; a doctor scrolling back
+  // through who was recently assigned needs the row still there.
+  function handleOpenPatientNotification(id) {
+    setPatientNotifications((rows) =>
+      rows.map((r) => (r.id === id ? { ...r, is_read: true } : r))
+    );
+    markNotificationRead(id).catch(() => {});
+  }
 
   return (
     <div>
@@ -81,6 +124,34 @@ export default function NurseAlerts({ basePath = "/nurse/patients", title = "Ale
         </div>
       </div>
 
+      {isDoctor && patientNotifications.length > 0 && (
+        <div className="mt-6 space-y-2">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+            <HiOutlineUserPlus className="h-4 w-4" />
+            New patients assigned to you
+          </h2>
+          {patientNotifications.map((n) => (
+            <Link
+              key={n.id}
+              to={n.link || "/dashboard/patients"}
+              onClick={() => handleOpenPatientNotification(n.id)}
+              className={`flex items-start gap-3 rounded-2xl border p-4 shadow-sm transition hover:shadow-md ${
+                n.is_read ? "border-slate-100 bg-white" : "border-brand-200 bg-brand-50/60"
+              }`}
+            >
+              {!n.is_read && (
+                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-brand-500" title="New" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-slate-800">{n.title}</p>
+                <p className="text-sm text-slate-600">{n.body}</p>
+                <p className="mt-1 text-xs text-slate-400">{formatWhen(n.created_at)}</p>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+
       {errorMsg && (
         <p className="mt-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{errorMsg}</p>
       )}
@@ -92,12 +163,17 @@ export default function NurseAlerts({ basePath = "/nurse/patients", title = "Ale
           ))}
         </div>
       ) : alerts.length === 0 ? (
-        <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center">
-          <HiOutlineCheckCircle className="mx-auto h-8 w-8 text-emerald-400" />
-          <p className="mt-2 text-sm font-medium text-slate-600">
-            {status === "open" ? "Nothing needs attention." : "No alerts in this view."}
-          </p>
-        </div>
+        // Silent when the patient-assignment list above already has
+        // something on screen — "nothing needs attention" would contradict
+        // it — but still a proper empty state the rest of the time.
+        !(isDoctor && patientNotifications.length > 0) && (
+          <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center">
+            <HiOutlineCheckCircle className="mx-auto h-8 w-8 text-emerald-400" />
+            <p className="mt-2 text-sm font-medium text-slate-600">
+              {status === "open" ? "Nothing needs attention." : "No alerts in this view."}
+            </p>
+          </div>
+        )
       ) : (
         <div className="mt-6 space-y-3">
           {alerts.map((alert) => (

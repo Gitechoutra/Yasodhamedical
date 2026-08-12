@@ -7,6 +7,7 @@ const CARE_TYPES = [
   { value: "post_surgery", label: "Post-surgery" },
   { value: "post_procedure", label: "Post-procedure" },
   { value: "recovery", label: "Recovery" },
+  { value: "icu", label: "ICU" },
 ];
 
 const inputClass =
@@ -17,12 +18,12 @@ const labelClass = "mb-1 block text-xs font-semibold text-slate-600";
 const DEFAULT_OBSERVATION_DAYS = 3;
 
 /**
- * The hand-off: a doctor names the nurse who will watch this patient through
- * the post-operative observation period.
+ * The hand-off: a doctor names the nurse who will watch this patient.
  *
- * Only ever reached for a surgery case — the API refuses the assignment
- * outright for a patient nobody has marked as needing surgery, so the modal
- * assumes it and defaults the care type accordingly.
+ * Reached from a surgery case (the API refuses the assignment for a patient
+ * nobody has marked as needing surgery — this modal defaults the care type
+ * for that path) or from an open Emergency Case with no surgery involved at
+ * all (`defaultCareType` overrides that default for ICU/observation care).
  *
  * `consultationId` is optional but worth passing — with it the prescription is
  * carried straight into the nurse's medication schedule instead of being
@@ -33,6 +34,7 @@ export default function AssignNurseModal({
   patientName,
   consultationId = null,
   defaultPlan = "",
+  defaultCareType = "post_surgery",
   observationDays = DEFAULT_OBSERVATION_DAYS,
   onClose,
   onAssigned,
@@ -40,7 +42,7 @@ export default function AssignNurseModal({
   const [nurses, setNurses] = useState([]);
   const [form, setForm] = useState({
     nurse_id: "",
-    care_type: "post_surgery",
+    care_type: defaultCareType,
     observation_days: observationDays || DEFAULT_OBSERVATION_DAYS,
     treatment_plan: defaultPlan,
     care_instructions: "",

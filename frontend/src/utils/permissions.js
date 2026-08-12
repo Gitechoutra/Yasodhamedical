@@ -62,3 +62,33 @@ export function canReassignDoctor(role) {
 export function canRunConsultation(role) {
   return role === "doctor";
 }
+
+/**
+ * Logging an Emergency Case. Front desk only, same as `canCreateOp` — this
+ * is intake work, and admin stays out of it for the same reason it stays out
+ * of raising an OP: it monitors the emergency board, it does not admit onto
+ * it.
+ */
+export function canCreateEmergencyCase(role) {
+  return role === "receptionist";
+}
+
+/**
+ * Claiming, assessing and resolving an Emergency Case. Doctors only, same
+ * separation as `canRunConsultation` — admin can watch a case move through
+ * the board but never treats one.
+ */
+export function canTreatEmergencyCase(role) {
+  return role === "doctor";
+}
+
+/**
+ * Administrative corrections on an Emergency Case that aren't treatment —
+ * linking an OP that already exists, withdrawing a mis-registered case.
+ * Wider than `canCreateEmergencyCase` on purpose, mirroring
+ * `canReassignDoctor`: admin has to be able to fix a case reception got
+ * wrong, the same way it can fix a mis-routed patient.
+ */
+export function canManageEmergencyCase(role) {
+  return role === "receptionist" || role === "admin";
+}

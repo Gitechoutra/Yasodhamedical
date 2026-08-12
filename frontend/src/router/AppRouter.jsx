@@ -28,6 +28,8 @@ const Terms = lazy(() => import("../pages/legal/Terms"));
 const Dashboard = lazy(() => import("../pages/Dashboard"));
 const Patients = lazy(() => import("../pages/Patients"));
 const Appointments = lazy(() => import("../pages/Appointments"));
+const EmergencyCases = lazy(() => import("../pages/EmergencyCases"));
+const EmergencyCaseDetail = lazy(() => import("../pages/EmergencyCaseDetail"));
 const Consultations = lazy(() => import("../pages/Consultations"));
 const ConsultationRoom = lazy(() => import("../pages/ConsultationRoom"));
 const Cases = lazy(() => import("../pages/Cases"));
@@ -260,6 +262,11 @@ export default function AppRouter() {
               <Route index element={<Dashboard />} />
               <Route path="patients" element={<Patients />} />
               <Route path="appointments" element={<Appointments />} />
+              {/* Same tree as Appointments, unwrapped by either RoleRoute:
+                  reception, doctor and admin all need to see the board, just
+                  with different actions gated inside the page itself. */}
+              <Route path="emergency" element={<EmergencyCases />} />
+              <Route path="emergency/:id" element={<EmergencyCaseDetail />} />
               <Route path="settings" element={<Settings />} />
               <Route path="profile" element={<Profile />} />
               {/* Admin sees the whole schedule and manages it; every other

@@ -2,7 +2,7 @@ import os
 from datetime import date, datetime
 
 from flask import Blueprint, request, send_from_directory
-from flask_jwt_extended import get_jwt, jwt_required
+from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 
 from portal.extensions import db
 from portal.helpers.audit import (
@@ -29,6 +29,7 @@ from portal.helpers.uploads import ImageUploadError, delete_image, save_image, u
 from portal.models.appointment import Appointment
 from portal.models.consultation import Consultation
 from portal.models.doctor import Doctor
+from portal.models.emergency_case import EmergencyCase
 from portal.models.nursing_assignment import NursingAssignment
 from portal.models.patient import MAX_OBSERVATION_DAYS, Patient, normalize_blood_group
 from portal.models.patient_case import PatientCase
@@ -280,6 +281,21 @@ def create_patient():
     )
     db.session.add(patient)
     db.session.flush()  # assigns patient.id so the audit row can reference it
+
+    # The one place a doctor learns a patient exists before they go looking
+    # for one -- there was no notification of any kind here before, so a new
+    # patient sat invisible on the doctor's list until they happened to check
+    # it themselves.
+    if patient.assigned_doctor and patient.assigned_doctor.user_id:
+        notify(
+            [patient.assigned_doctor.user_id],
+            title="New patient assigned to you",
+            body=f"{patient.name} was registered and routed to you.",
+            category="patient_assignment",
+            link="/dashboard/patients",
+            exclude_user_id=get_jwt_identity(),
+        )
+
     audit(
         PATIENT_CREATED,
         entity="patient",
@@ -413,6 +429,17 @@ def reassign_patient(patient_id):
         return error("Assigned doctor not found", status=404)
 
     patient.assigned_doctor_id = doctor.id
+
+    if doctor.user_id:
+        notify(
+            [doctor.user_id],
+            title="New patient assigned to you",
+            body=f"{patient.name} was routed to you.",
+            category="patient_assignment",
+            link="/dashboard/patients",
+            exclude_user_id=get_jwt_identity(),
+        )
+
     audit(
         PATIENT_REASSIGNED,
         entity="patient",
@@ -432,13 +459,16 @@ def delete_patient(patient_id):
     duplicate, or a walk-in entered against the wrong person.
 
     Front-desk work, and only ever for a patient with nothing clinical on
-    file. A consultation, a case or a nursing record is a medical record: it
-    is what the hospital is answerable for later, so a patient who has one is
-    refused here rather than quietly taking their history down with them.
-    Correct such a record, or leave it — deleting is not the tool.
+    file. A consultation, a case, a nursing record or an emergency case with
+    something actually recorded on it is a medical record: it is what the
+    hospital is answerable for later, so a patient who has one is refused
+    here rather than quietly taking their history down with them. Correct
+    such a record, or leave it — deleting is not the tool.
 
     Queue entries are not records in that sense. An OP raised for a patient
-    who is being deleted has no consultation behind it, so it goes with them.
+    who is being deleted has no consultation behind it, so it goes with
+    them — and so does an emergency case nobody ever claimed, or claimed and
+    cancelled before anything was written on it.
     """
     patient = Patient.query.get(patient_id)
     if not patient:
@@ -451,6 +481,21 @@ def delete_patient(patient_id):
         blockers.append("case records")
     if NursingAssignment.query.filter_by(patient_id=patient.id).count():
         blockers.append("nursing records")
+    # An emergency case with nothing recorded on it yet (never claimed, or
+    # cancelled as a mistaken registration before a doctor ever assessed the
+    # patient) is a queue entry like an Appointment, not a clinical record --
+    # removed the same way, below. One with assessment notes, treatment notes
+    # or a decision on file is the doctor's account of what happened, and is
+    # a medical record exactly like a Consultation.
+    if EmergencyCase.query.filter(
+        EmergencyCase.patient_id == patient.id,
+        db.or_(
+            EmergencyCase.assessment_notes.isnot(None),
+            EmergencyCase.treatment_notes.isnot(None),
+            EmergencyCase.decision.isnot(None),
+        ),
+    ).count():
+        blockers.append("emergency case records")
     if blockers:
         return error(
             f"{patient.name} has {' and '.join(blockers)} and cannot be deleted. "
@@ -466,6 +511,9 @@ def delete_patient(patient_id):
     # a consultation, which is refused above), so removing them keeps the
     # queue from pointing at a patient who no longer exists.
     Appointment.query.filter_by(patient_id=patient.id).delete(synchronize_session=False)
+    # Same reasoning for an emergency case with nothing recorded on it --
+    # the blockers above already refused anything that does.
+    EmergencyCase.query.filter_by(patient_id=patient.id).delete(synchronize_session=False)
 
     audit(
         PATIENT_DELETED,

@@ -20,6 +20,7 @@ from portal.helpers.response import error, success
 from portal.models.appointment import Appointment
 from portal.models.consultation import Consultation
 from portal.models.department import Department
+from portal.models.emergency_case import EmergencyCase
 from portal.models.patient import Patient
 
 appointment_bp = Blueprint("appointments", __name__)
@@ -297,6 +298,24 @@ def create_appointment():
     )
 
     db.session.flush()  # assigns appointment.id for the audit row
+
+    # An emergency case for this patient with no OP linked yet gets this one
+    # automatically — the "OP raised later" step of the emergency workflow,
+    # so the full history stays connected without reception having to
+    # remember a separate linking step. Most recent unlinked case, in case
+    # more than one somehow exists.
+    open_emergency = (
+        EmergencyCase.query.filter(
+            EmergencyCase.patient_id == patient_id,
+            EmergencyCase.linked_appointment_id.is_(None),
+            EmergencyCase.status != "cancelled",
+        )
+        .order_by(EmergencyCase.id.desc())
+        .first()
+    )
+    if open_emergency:
+        open_emergency.linked_appointment_id = appointment.id
+
     audit(
         APPOINTMENT_CREATED,
         entity="appointment",

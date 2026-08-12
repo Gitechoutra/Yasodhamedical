@@ -1,7 +1,10 @@
 import api from "./api";
 
-export async function fetchNotifications(limit = 20) {
-  const res = await api.get("/notifications", { params: { limit } });
+export async function fetchNotifications({ limit = 20, category, unread } = {}) {
+  const params = { limit };
+  if (category) params.category = category;
+  if (unread) params.unread = "true";
+  const res = await api.get("/notifications", { params });
   return res.data.data; // { items, unread_count }
 }
 
