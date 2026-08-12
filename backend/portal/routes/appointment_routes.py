@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from flask import Blueprint, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
@@ -30,6 +30,71 @@ OPEN_STATUSES = ("waiting", "in_progress")
 
 # Off the board for good — nothing can be started from one of these.
 CLOSED_STATUSES = ("completed", "cancelled")
+
+# How close together two OPs for the same patient have to be before the second
+# one is treated as a double-registration rather than a second visit.
+#
+# Nobody walks in, is seen, walks out and walks back in inside ten minutes. What
+# does happen is the desk pressing "Create OP" twice, or two receptionists
+# registering the same arrival — and every one of those becomes its own card in
+# the doctor's queue, with the same patient, the same name, the same ID and only
+# the clock to tell them apart. The doctor then has to guess which one to call.
+DUPLICATE_WINDOW_MINUTES = 10
+
+
+def collapse_duplicates(appointments):
+    """Drops same-patient rows raised within `DUPLICATE_WINDOW_MINUTES` of the
+    one being kept, preserving the caller's ordering.
+
+    The refusal in `create_appointment` stops new ones being written; this is
+    what keeps the pairs already in the database out of the queue, and it is
+    applied on read so no migration has to guess which of two historic rows was
+    the real registration.
+
+    Which row survives: the one in consultation if there is one — that is the
+    visit actually happening — otherwise the earliest, which is the patient's
+    real place in the queue and the position the desk gave them. Deciding that
+    here rather than trusting the incoming order means the dashboard's count and
+    the page's rows collapse identically.
+    """
+    window = DUPLICATE_WINDOW_MINUTES * 60
+    ranked = sorted(
+        appointments,
+        key=lambda a: (a.status != "in_progress", a.created_at or datetime.min),
+    )
+
+    kept_ids = set()
+    last_kept = {}  # patient_id -> created_at of the row kept for them
+    for appointment in ranked:
+        created = appointment.created_at or datetime.min
+        previous = last_kept.get(appointment.patient_id)
+        if previous is not None and abs((created - previous).total_seconds()) < window:
+            continue
+        kept_ids.add(appointment.id)
+        last_kept[appointment.patient_id] = created
+
+    return [a for a in appointments if a.id in kept_ids]
+
+
+def recent_duplicate_for(patient_id, within_minutes=DUPLICATE_WINDOW_MINUTES, now=None):
+    """The patient's own OP raised in the last few minutes, if there is one.
+
+    Cancelled rows are deliberately not counted. Cancelling is how the desk
+    undoes a registration it got wrong, and treating the row it just withdrew as
+    a duplicate would leave it unable to raise the corrected one for ten
+    minutes. A completed row *is* counted: the patient has already been seen, so
+    a second OP that soon is a double-registration of the same visit.
+    """
+    cutoff = (now or datetime.utcnow()) - timedelta(minutes=within_minutes)
+    return (
+        Appointment.query.filter(
+            Appointment.patient_id == patient_id,
+            Appointment.status != "cancelled",
+            Appointment.created_at >= cutoff,
+        )
+        .order_by(Appointment.created_at.desc())
+        .first()
+    )
 
 
 def open_appointments_query():
@@ -81,7 +146,8 @@ def list_appointments():
     # open_appointments_query), so this resolves to the same live queue.
     queue_requested = request.args.get("filter") == "today"
 
-    if status and not queue_requested:
+    is_lookup = bool(status) and not queue_requested
+    if is_lookup:
         # An explicit status on its own is a lookup, not the queue — it may
         # return completed/cancelled rows, which the queue never does.
         query = Appointment.query.filter(Appointment.status == status)
@@ -112,6 +178,12 @@ def list_appointments():
         db.case((Appointment.status == "in_progress", 0), else_=1),
         Appointment.created_at.asc(),
     ).all()
+
+    # The queue shows one card per patient; a lookup is left whole, because
+    # asking for every completed appointment and being handed a filtered
+    # history would be a different thing than what was asked for.
+    if not is_lookup:
+        appointments = collapse_duplicates(appointments)
 
     # Queue numbers count the waiting only, so "Queue #1" always means next up.
     queue_position = 0
@@ -176,10 +248,28 @@ def create_appointment():
             status=422,
         )
 
+    now = datetime.utcnow()
+
+    # Refused before anything is written, and in particular before the billing
+    # block below — that one moves `last_registered_at` forward, which would
+    # make the duplicate look like a genuine follow-up and bill the patient's
+    # *next* real visit as free.
+    duplicate = recent_duplicate_for(patient.id, now=now)
+    if duplicate:
+        minutes = max(1, int((now - duplicate.created_at).total_seconds() // 60))
+        return error(
+            f"{patient.name} was already queued {minutes} minute{'' if minutes == 1 else 's'} "
+            f"ago and is still on today's list. Use that OP rather than raising a second one — "
+            f"cancel it first if it was raised in error.",
+            status=409,
+            # The row to look at, so the desk can be sent straight to it
+            # instead of being told to go and find it.
+            errors={"appointment_id": duplicate.id, "status": duplicate.status},
+        )
+
     # OP billing rule: first-ever OP for this patient is always paid. A
     # returning patient's new OP is free if it's within 15 days of their
     # last one (follow-up), otherwise it's a fresh paid registration.
-    now = datetime.utcnow()
     if patient.last_registered_at is None:
         patient.op_status = "paid"
     else:

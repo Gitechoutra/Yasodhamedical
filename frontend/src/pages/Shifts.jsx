@@ -10,7 +10,7 @@ import {
 import Avatar from "../components/Avatar";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Modal from "../components/Modal";
-import { Badge, EmptyState, PageHeader } from "../components/RecordCard";
+import { Badge, EmptyState, PageHeader, RecordGrid } from "../components/RecordCard";
 import { useAuth } from "../context/AuthContext";
 import { isoDate, formatDay } from "../utils/dates";
 import {
@@ -195,7 +195,6 @@ function MyShifts() {
     };
   }, [range.from, range.to]);
 
-  const grouped = useMemo(() => groupByDate(shifts), [shifts]);
   const scheduled = shifts.filter((s) => s.status === "scheduled").length;
 
   return (
@@ -220,55 +219,57 @@ function MyShifts() {
           : `${scheduled} shift${scheduled === 1 ? "" : "s"} in this period`}
       </p>
 
-      <div className="mt-3 space-y-5">
+      {/* Three across on a desktop, two on a tablet, one on a phone — the same
+          grid the record lists use, so a month of shifts is a few rows rather
+          than a column of full-width bars nobody scrolls to the end of.
+          `align="start"` keeps a card the height of its own contents: a shift
+          carrying a note must not stretch the two beside it to match.
+
+          No date headings here, unlike the administrator's schedule: each card
+          already spells out the day it starts and the day it ends, and a
+          heading per shift would put every card on a row of its own again. */}
+      <div className="mt-3">
         {loading ? (
-          Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-24 animate-pulse rounded-2xl bg-slate-100" />
-          ))
+          <RecordGrid align="start">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="h-32 animate-pulse rounded-2xl bg-slate-100" />
+            ))}
+          </RecordGrid>
         ) : shifts.length === 0 ? (
           <EmptyState icon={HiOutlineCalendarDays}>
             You have no shifts scheduled in this period.
           </EmptyState>
         ) : (
-          grouped.map(([day, rows]) => (
-            <div key={day}>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                {formatDay(day)}
-              </p>
-              <div className="mt-2 space-y-2">
-                {rows.map((shift) => (
-                  <div
-                    key={shift.id}
-                    className={`rounded-2xl border bg-white p-4 shadow-sm ${
-                      shift.status === "cancelled"
-                        ? "border-slate-100 opacity-60"
-                        : "border-slate-100"
-                    }`}
-                  >
-                    {/* Deliberately just the shift: its type, its window and
-                        whatever the shift schedule note says. The department and the
-                        staff badges belong to the administrator's shift schedule, where
-                        a row has to be told apart from everyone else's — here
-                        every row is already this person's own. */}
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <ShiftWindow shift={shift} />
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge tone={SLOT_TONES[shift.slot] || "slate"}>
-                          {SLOT_LABELS[shift.slot] || shift.slot}
-                        </Badge>
-                        {shift.status === "cancelled" && <Badge tone="amber">Cancelled</Badge>}
-                      </div>
-                    </div>
-                    {shift.notes && (
-                      <p className="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-500">
-                        {shift.notes}
-                      </p>
-                    )}
-                  </div>
-                ))}
+          <RecordGrid align="start">
+            {shifts.map((shift) => (
+              <div
+                key={shift.id}
+                className={`rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition hover:shadow-md ${
+                  shift.status === "cancelled" ? "opacity-60" : ""
+                }`}
+              >
+                {/* Deliberately just the shift: its type, its window and
+                    whatever the shift schedule note says. The department and the
+                    staff badges belong to the administrator's shift schedule, where
+                    a row has to be told apart from everyone else's — here
+                    every row is already this person's own. */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone={SLOT_TONES[shift.slot] || "slate"}>
+                    {SLOT_LABELS[shift.slot] || shift.slot}
+                  </Badge>
+                  {shift.status === "cancelled" && <Badge tone="amber">Cancelled</Badge>}
+                </div>
+                <div className="mt-3">
+                  <ShiftWindow shift={shift} />
+                </div>
+                {shift.notes && (
+                  <p className="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-500">
+                    {shift.notes}
+                  </p>
+                )}
               </div>
-            </div>
-          ))
+            ))}
+          </RecordGrid>
         )}
       </div>
     </div>
@@ -301,8 +302,6 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
     slot: shift?.slot || "morning",
     starts_at: shift?.starts_at || options.slot_hours?.morning?.starts_at || "06:00",
     ends_at: shift?.ends_at || options.slot_hours?.morning?.ends_at || "14:00",
-    department_id: shift?.department_id ? String(shift.department_id) : "",
-    notes: shift?.notes || "",
     status: shift?.status || "scheduled",
   }));
   const [saving, setSaving] = useState(false);
@@ -313,8 +312,8 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
   }
 
   // Moving the start past the end drags the end with it. Leaving them crossed
-  // would mean the form's own count says "0 shifts" and the button is dead
-  // until the admin works out which of the two fields to fix.
+  // would mean the range covers no days at all and the button is dead until the
+  // admin works out which of the two fields to fix.
   function handleFromDate(e) {
     const from_date = e.target.value;
     setForm((f) => ({
@@ -337,36 +336,25 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
     }));
   }
 
-  const staffById = useMemo(() => {
-    const map = new Map();
-    for (const s of options.staff || []) map.set(String(s.id), s);
-    return map;
-  }, [options.staff]);
-
-  // A nurse is scheduled to a ward, not to a department — the department list
-  // is the doctors' specialities and means nothing against a nursing shift.
-  // Hiding the field is not enough on its own: an admin can pick a department
-  // and then switch the assignee to a nurse, so the value is dropped on save
-  // too rather than travelling up from a control nobody can see.
-  const assigneeIsNurse = staffById.get(form.user_id)?.role === "nurse";
-
-  // How many rows this form will write. Editing always touches exactly the one
-  // it opened on, whatever `to_date` happens to still hold.
+  // How many rows this form will write. Not shown anywhere — it is only what
+  // decides whether the button can be pressed, so a backwards range is refused
+  // before it reaches the server. Editing always touches exactly the one row it
+  // opened on, whatever `to_date` happens to still hold.
   const days = editing ? 1 : dayspan(form.from_date, form.to_date);
-  const assignee = staffById.get(form.user_id);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setSaving(true);
     setErrorMsg("");
+    // Department and notes are deliberately absent, not sent empty: the API
+    // only writes a field when its key is present, so leaving them out keeps
+    // whatever an existing shift already carries instead of clearing it on
+    // every edit made through this form.
     const payload = {
       user_id: form.user_id ? Number(form.user_id) : null,
       slot: form.slot,
       starts_at: form.starts_at,
       ends_at: form.ends_at,
-      department_id:
-        assigneeIsNurse || !form.department_id ? null : Number(form.department_id),
-      notes: form.notes,
     };
     // A create spans a window and the server writes one shift per day in it;
     // an edit moves the single row it opened on.
@@ -407,12 +395,20 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
       <form onSubmit={handleSubmit} className="space-y-3">
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">
-            Assign to
+            Assign to *
           </label>
-          <select className={inputClass} value={form.user_id} onChange={update("user_id")}>
-            {/* An unfilled slot is a real state — an administrator drafts the
-                week first and puts names to it after. */}
-            <option value="">Leave unassigned</option>
+          <select
+            required
+            className={inputClass}
+            value={form.user_id}
+            onChange={update("user_id")}
+          >
+            {/* A shift belongs to somebody. The placeholder is disabled rather
+                than a selectable "nobody": it is what an untouched form shows,
+                not an answer the admin can leave in place. */}
+            <option value="" disabled>
+              Select a staff member
+            </option>
             {staffByRole.map(([role, people]) => (
               <optgroup key={role} label={ROLE_LABELS[role] || role}>
                 {people.map((p) => (
@@ -495,41 +491,6 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
           </div>
         </div>
 
-        {/* What pressing the button will actually do. One form producing
-            thirty rows is worth stating before the fact rather than leaving
-            the administrator to count them on the shift schedule afterwards. */}
-        {!editing && days > 0 && (
-          <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            Adds <span className="font-semibold text-slate-900">{days}</span>{" "}
-            {SLOT_LABELS[form.slot]?.toLowerCase() || form.slot} shift
-            {days === 1 ? "" : "s"}, {form.starts_at}–{form.ends_at}
-            {days === 1 ? " on " : ", one on each day from "}
-            {formatDay(form.from_date)}
-            {days === 1 ? "" : ` to ${formatDay(form.to_date)}`}.
-            {assignee
-              ? ` ${assignee.name} will be notified.`
-              : " Nobody is assigned yet, so no one is notified."}
-          </p>
-        )}
-
-        {!assigneeIsNurse && (
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Department</label>
-            <select
-              className={inputClass}
-              value={form.department_id}
-              onChange={update("department_id")}
-            >
-              <option value="">No department</option>
-              {(options.departments || []).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
         {/* Edit only. Cancelling is done from the shift schedule, but putting a shift
             back is only possible here — without this a cancelled shift could
             never return to the shift schedule, and deleting it (the only other way out)
@@ -549,33 +510,16 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
           </div>
         )}
 
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600">Notes</label>
-          <textarea
-            rows={2}
-            className={inputClass}
-            value={form.notes}
-            onChange={update("notes")}
-            placeholder="e.g. Ward B cover"
-          />
-        </div>
-
         {errorMsg && (
           <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">{errorMsg}</p>
         )}
 
         <button
           type="submit"
-          disabled={saving || days === 0}
+          disabled={saving || days === 0 || !form.user_id}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
-          {saving
-            ? "Saving…"
-            : editing
-              ? "Save changes"
-              : days > 1
-                ? `Add ${days} shifts`
-                : "Add shift"}
+          {saving ? "Saving…" : editing ? "Save changes" : "Add shift"}
         </button>
       </form>
     </Modal>

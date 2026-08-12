@@ -17,6 +17,23 @@ import { fetchDoctorAvailability } from "../services/doctorService";
 import { fetchPatients } from "../services/patientService";
 import { canCreateOp, canRunConsultation } from "../utils/permissions";
 
+// Mirrors DUPLICATE_WINDOW_MINUTES in the API. Two OPs for the same patient
+// this close together are one arrival registered twice, not two visits.
+const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
+
+/** The patient's own OP raised in the last ten minutes, if the queue has one. */
+function recentOpFor(appointments, patientId) {
+  if (!patientId) return null;
+  const now = Date.now();
+  return (
+    appointments.find((a) => {
+      if (String(a.patient_id) !== String(patientId)) return false;
+      const created = new Date(a.created_at).getTime();
+      return Number.isFinite(created) && now - created < DUPLICATE_WINDOW_MS;
+    }) || null
+  );
+}
+
 /**
  * Whether the doctor this OP will go to is actually in today.
  *
@@ -55,7 +72,7 @@ function DoctorTodayNote({ doctor }) {
   );
 }
 
-function CreateOpModal({ patients, preselectedPatientId, onClose, onCreated }) {
+function CreateOpModal({ patients, appointments, preselectedPatientId, onClose, onCreated }) {
   const [patientId, setPatientId] = useState(preselectedPatientId || "");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
@@ -87,9 +104,16 @@ function CreateOpModal({ patients, preselectedPatientId, onClose, onCreated }) {
     ? availability.find((d) => d.id === assignedDoctor.id)
     : null;
 
+  // The same refusal the API makes, made here so the receptionist sees it
+  // while they are still looking at the patient they picked — the button
+  // going dead with the reason next to it beats submitting and being told no.
+  // The server is still the one that decides: this queue is a snapshot, and
+  // another receptionist may have registered the same arrival since it loaded.
+  const duplicateOf = recentOpFor(appointments, patientId);
+
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!departmentId) return;
+    if (!departmentId || duplicateOf) return;
     setSaving(true);
     setErrorMsg("");
     try {
@@ -160,11 +184,22 @@ function CreateOpModal({ patients, preselectedPatientId, onClose, onCreated }) {
           />
         </div>
 
+        {duplicateOf && (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+            {patient?.name} was queued in the last ten minutes and is
+            {duplicateOf.status === "in_progress"
+              ? " already in consultation"
+              : " still waiting to be called in"}
+            . Raising another OP would put the same patient in the queue twice — cancel the
+            existing one first if it was raised by mistake.
+          </p>
+        )}
+
         {errorMsg && <p className="text-sm text-red-600">{errorMsg}</p>}
 
         <button
           type="submit"
-          disabled={saving || !departmentId}
+          disabled={saving || !departmentId || Boolean(duplicateOf)}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
           {saving ? "Creating…" : "Create OP"}
@@ -341,6 +376,7 @@ export default function Appointments() {
       {showModal && canScheduleAppointments && (
         <CreateOpModal
           patients={patients}
+          appointments={appointments}
           preselectedPatientId={searchParams.get("patient_id")}
           onClose={closeModal}
           onCreated={() => {
