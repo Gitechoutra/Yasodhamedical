@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  HiOutlineEnvelope,
   HiOutlineMagnifyingGlass,
   HiOutlinePencilSquare,
   HiOutlinePlus,
@@ -8,11 +9,13 @@ import {
 } from "react-icons/hi2";
 import Avatar from "../components/Avatar";
 import ConfirmDialog from "../components/ConfirmDialog";
+import CredentialsNotice from "../components/staff/CredentialsNotice";
 import StaffFormModal, { ROLE_LABELS } from "../components/staff/StaffFormModal";
 import {
   deleteStaff,
   fetchStaff,
   fetchStaffOptions,
+  resendStaffCredentials,
   setStaffStatus,
 } from "../services/staffService";
 
@@ -32,7 +35,12 @@ export default function StaffManagement() {
   const [errorMsg, setErrorMsg] = useState("");
   const [editing, setEditing] = useState(null); // staff object, or "new"
   const [confirming, setConfirming] = useState(null);
+  const [resending, setResending] = useState(null);
   const [busyId, setBusyId] = useState(null);
+  // The result of the last account creation or credential resend. Shown once
+  // and then gone: when the email could not be delivered this holds the only
+  // copy of that person's temporary password.
+  const [notice, setNotice] = useState(null);
 
   const load = useCallback(
     (silent = false) => {
@@ -71,6 +79,26 @@ export default function StaffManagement() {
     }
   }
 
+  /** Issues a fresh password and link and emails them again. Whatever was
+   *  sent before stops working, so this is behind a confirmation. */
+  async function resend(member) {
+    setBusyId(member.id);
+    setErrorMsg("");
+    try {
+      const result = await resendStaffCredentials(member.id);
+      setResending(null);
+      setNotice(result);
+      await load(true);
+    } catch (err) {
+      setResending(null);
+      setErrorMsg(
+        err.response?.data?.message || "Could not reissue that account's sign-in details."
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function remove(member) {
     setBusyId(member.id);
     setErrorMsg("");
@@ -94,8 +122,8 @@ export default function StaffManagement() {
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Staff</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {data.total} accounts · {data.active} active. Staff sign in with their email
-            and password.
+            {data.total} accounts · {data.active} active. Each staff member gets their
+            own login and signs in with their username or email.
           </p>
         </div>
         <button
@@ -157,6 +185,8 @@ export default function StaffManagement() {
         <p className="mt-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{errorMsg}</p>
       )}
 
+      <CredentialsNotice notice={notice} onDismiss={() => setNotice(null)} />
+
       {loading ? (
         <div className="mt-6 space-y-2">
           {Array.from({ length: 5 }).map((_, i) => (
@@ -194,8 +224,20 @@ export default function StaffManagement() {
                       <Avatar name={m.name} imageUrl={m.avatar_url} size="sm" />
                       <div className="min-w-0">
                         <p className="truncate font-semibold text-slate-800">{m.name}</p>
+                        {/* The username, not the designation, sits under the
+                            name: it is what this person types every morning
+                            and what an administrator is asked for on the
+                            phone. The designation follows it. */}
                         <p className="truncate text-xs text-slate-400">
-                          {m.profile?.designation || m.profile?.employee_code || "—"}
+                          {m.username ? (
+                            <span className="font-mono text-slate-500">{m.username}</span>
+                          ) : null}
+                          {m.username && (m.profile?.designation || m.profile?.employee_code)
+                            ? " · "
+                            : ""}
+                          {m.profile?.designation ||
+                            m.profile?.employee_code ||
+                            (m.username ? "" : "—")}
                         </p>
                       </div>
                     </div>
@@ -235,6 +277,23 @@ export default function StaffManagement() {
                         <HiOutlinePencilSquare className="h-3.5 w-3.5" />
                         Edit
                       </button>
+                      {/* The replacement for an admin-set password: the way
+                          to help somebody who never got their email or is
+                          locked out. Hidden for a disabled account, which the
+                          server refuses anyway — mailing working credentials
+                          to somebody whose access was withdrawn is the
+                          opposite of what disabling it meant. */}
+                      {m.is_active && (
+                        <button
+                          onClick={() => setResending(m)}
+                          disabled={busyId === m.id}
+                          title="Email new sign-in details — the current password stops working"
+                          className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100 disabled:opacity-50"
+                        >
+                          <HiOutlineEnvelope className="h-3.5 w-3.5" />
+                          Resend
+                        </button>
+                      )}
                       {/* Deletion is offered only when nothing depends on the
                           account. The server refuses regardless — this just
                           avoids presenting an action that always fails. */}
@@ -262,10 +321,24 @@ export default function StaffManagement() {
           staff={editing === "new" ? null : editing}
           options={options}
           onClose={() => setEditing(null)}
-          onSaved={() => {
+          onSaved={(created) => {
             setEditing(null);
+            // Only a creation hands anything back; an edit resolves undefined
+            // and must not clear a notice the admin is still reading.
+            if (created?.credentials) setNotice(created);
             load(true);
           }}
+        />
+      )}
+
+      {resending && (
+        <ConfirmDialog
+          title={`Email new sign-in details to ${resending.name}?`}
+          message={`A new temporary password and a single-use link will be sent to ${resending.email}. Their current password stops working immediately, as does any link already sent to them.`}
+          confirmLabel="Send new details"
+          busy={busyId === resending.id}
+          onCancel={() => setResending(null)}
+          onConfirm={() => resend(resending)}
         />
       )}
 

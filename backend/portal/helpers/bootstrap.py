@@ -201,6 +201,42 @@ def ensure_roles(app):
         return []
 
 
+def ensure_usernames(app):
+    """Gives a username to any account that hasn't got one.
+
+    Accounts arrive by more doors than Staff Management: the demo seeder, the
+    older `POST /doctors` and `POST /nursing/nurses` routes, and every row that
+    existed before usernames did. Rather than teach each of them separately,
+    the invariant is restored here on every start — one place, and one that a
+    restored dump passes through too.
+
+    Sign-in accepts an email address as well, so a missing username is not an
+    outage; it is a staff member who cannot be told "your username is …",
+    which is exactly what the credentials email says.
+
+    Additive like everything else here: an existing username is never
+    rewritten, because it is what the person types every morning.
+    """
+    from portal.helpers.credentials import assign_username
+
+    def work():
+        pending = User.query.filter(
+            db.or_(User.username.is_(None), User.username == "")
+        ).all()
+        named = []
+        for user in pending:
+            # One at a time and flushed as we go: `assign_username` reads the
+            # usernames already taken, and two new joiners called Sunil Kumar
+            # in the same backfill must not both be handed `sunil.kumar`.
+            named.append(f"{user.name} -> {assign_username(user, force=True)}")
+            db.session.flush()
+        if named:
+            db.session.commit()
+        return _report(app, "Username", named, User.query.count())
+
+    return _guarded(app, User, "Username", work)
+
+
 def ensure_admin(app):
     """Creates the default administrator, or rewrites the existing one to match
     the configured credentials.
@@ -264,11 +300,19 @@ def ensure_admin(app):
                         "Set SEED_ADMIN_PASSWORD."
                     )
             else:
-                # The existing admin's own address. With syncing off it is not
-                # the configured one, and logging the configured value there
-                # would imply the check had touched the account.
+                # The existing admin's own address and username -- not the
+                # configured ones. With syncing off the two can differ, and
+                # logging the configured value would imply the check had
+                # touched the account.
+                #
+                # Both identifiers, because login accepts either and "the
+                # admin cannot sign in" is nearly always someone typing an
+                # address the account no longer has. One line in the startup
+                # log answers it without opening the database.
                 app.logger.info(
-                    "Admin check: an administrator already exists (%s) -- left untouched",
+                    "Admin check: an administrator already exists -- left untouched. "
+                    "Signs in as '%s' or %s",
+                    admin.username or "(no username yet)",
                     admin.email,
                 )
 

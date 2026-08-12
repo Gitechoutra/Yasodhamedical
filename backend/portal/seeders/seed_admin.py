@@ -1,62 +1,25 @@
-"""Seeds the default administrator login, and keeps it in step afterwards.
 
-The one account that cannot be created through the application: Staff
-Management deliberately refuses to grant the `admin` role (see
-`models/role.STAFF_ROLES`), because granting administrator is how every other
-grant is made. So the first admin has to come from outside the app.
 
-The credentials are read from the environment, falling back to the documented
-development defaults. That fallback is a convenience for a local checkout, not
-a deployment story — see the warning both callers emit when it is in use.
-
-    SEED_ADMIN_NAME      default: Admin
-    SEED_ADMIN_EMAIL     default: ramanamuddada@gmail.com
-    SEED_ADMIN_PASSWORD  default: Admin@123
-    SEED_ADMIN_SYNC      default: true
-
-These describe the administrator account, not merely the one to create when
-there is nobody to sign in as: changing a value here and restarting rewrites
-the existing account to match, which is how the administrator's credentials
-are meant to be changed. Exactly one admin row is ever involved — the account
-is moved, never duplicated.
-
-That authority cuts both ways, and it is worth being plain about it. Because
-the configuration wins at every start, a password the administrator changes
-*inside* the application is reverted the next time the server boots, and the
-default password above is a working login for as long as it stays configured
-rather than only until first sign-in. Set `SEED_ADMIN_SYNC=false` to give that
-up and pin the account instead: nothing here will then touch an admin that
-already exists, and the credentials become the application's business alone.
-
-Two callers share `ensure_admin_account` so the credentials and the rule are
-defined in exactly one place:
-
-  * `portal/seeds.py`   -- the explicit `python -m portal.seeds` command
-  * `helpers/bootstrap` -- the automatic check on every application start
-
-Which is why the function below neither prints nor logs: the CLI wants stdout,
-the boot path wants the application log, and each formats its own.
-"""
-
+ 
 import os
-
+ 
 from portal.extensions import db
 from portal.models.role import Role
 from portal.models.user import User
-
+ 
 DEFAULT_NAME = "Admin"
-DEFAULT_EMAIL = "goddumahesh123@gmail.com"
+DEFAULT_EMAIL = "lingamrevanth@gmail.com"
 DEFAULT_PASSWORD = "Admin@123"
-
+ 
 # Spellings of "no" accepted from the environment. Anything else — including
 # an unset or empty value — leaves syncing on, so the documented default
 # behavior does not depend on remembering to set anything.
 _FALSEY = {"0", "false", "no", "off"}
-
-
+ 
+ 
 def admin_credentials():
     """The configured administrator details.
-
+ 
     Returns (name, email, password, is_default_password). The last one is what
     lets a caller warn about shipping the documented password.
     """
@@ -64,23 +27,23 @@ def admin_credentials():
     email = ((os.environ.get("SEED_ADMIN_EMAIL") or "").strip() or DEFAULT_EMAIL).lower()
     password = os.environ.get("SEED_ADMIN_PASSWORD") or DEFAULT_PASSWORD
     return name, email, password, password == DEFAULT_PASSWORD
-
-
+ 
+ 
 def sync_enabled():
     """Whether an existing administrator is rewritten to match the config."""
     return (os.environ.get("SEED_ADMIN_SYNC") or "").strip().lower() not in _FALSEY
-
-
+ 
+ 
 def _apply_configured_credentials(admin, name, email, password):
     """Rewrites `admin` to match the configuration. Returns what changed.
-
+ 
     The returned list names the fields actually written — empty when the
     account already agreed with the configuration, which is the common case on
     a restart and the reason this does not commit unconditionally.
     """
     if not sync_enabled():
         return []
-
+ 
     # `users.email` is unique, so a clash is reported before anything is
     # written rather than left to surface as an IntegrityError on commit.
     if admin.email != email:
@@ -91,64 +54,64 @@ def _apply_configured_credentials(admin, name, email, password):
                 f"belongs to a {clash.role.name if clash.role else 'non-admin'} "
                 "account. Set SEED_ADMIN_EMAIL to a different address."
             )
-
+ 
     changes = []
-
+ 
     if admin.name != name:
         admin.name = name
         changes.append("name")
-
+ 
     if admin.email != email:
         admin.email = email
         changes.append("email")
-
+ 
     # Asked of the stored hash rather than replaced outright: the hash is
     # salted, so rewriting it every boot would churn `updated_at` and report a
     # password change on every restart even when nothing moved.
     if not admin.check_password(password):
         admin.set_password(password)
         changes.append("password")
-
+ 
     if changes:
         db.session.commit()
-
+ 
     return changes
-
-
+ 
+ 
 def ensure_admin_account():
     """Creates the default administrator, or brings the existing one in step
     with the configured credentials.
-
+ 
     Returns (user, created, changes). `changes` names the fields rewritten on
     an account that already existed, and is empty both when nothing moved and
     whenever `created` is True.
-
+ 
     The account is found by "is there an admin", not "does this email exist".
     Those differ the moment the configured address changes, and matching on
     email got that case badly wrong: it read a renamed admin as an absent one
     and created a *second* account beside theirs, holding the default password
     from the repository. Finding the admin by role is what makes a changed
     email an update to one row instead of two rows to choose between.
-
+ 
     `is_active` is never written. A disabled admin is one somebody deliberately
     switched off, and neither creating a replacement beside it nor quietly
     re-enabling it may follow from restarting the server — that would turn "can
     restart the server" into "can regain admin".
-
+ 
     Raises RuntimeError if the `admin` role is missing, which is a caller
     ordering mistake: roles have to be seeded first. Also raises if the
     configured email belongs to somebody else, in either direction — creating
     the account or moving it.
     """
     name, email, password, _is_default = admin_credentials()
-
+ 
     admin_role = Role.query.filter_by(name="admin").first()
     if not admin_role:
         # Say so plainly rather than failing on a NoneType attribute below.
         raise RuntimeError(
             "The 'admin' role does not exist. Run the roles seeder before this one."
         )
-
+ 
     # Oldest first, so the account reported back is stable across restarts
     # rather than whichever row the database happened to return.
     existing = (
@@ -158,7 +121,7 @@ def ensure_admin_account():
         return existing, False, _apply_configured_credentials(
             existing, name, email, password
         )
-
+ 
     # No administrator anywhere — but the configured email could still be in
     # use by some other role, and `users.email` is unique. Report that rather
     # than letting it surface as an IntegrityError at boot.
@@ -169,20 +132,20 @@ def ensure_admin_account():
             f"a {clash.role.name if clash.role else 'non-admin'} account. "
             "Set SEED_ADMIN_EMAIL to a different address."
         )
-
+ 
     admin = User(name=name, email=email, role_id=admin_role.id)
     admin.set_password(password)
     db.session.add(admin)
     db.session.commit()
     return admin, True, []
-
-
+ 
+ 
 def run():
     """The `python -m portal.seeds` entry point. Reports to stdout."""
     _name, _email, _password, is_default_password = admin_credentials()
-
+ 
     admin, created, changes = ensure_admin_account()
-
+ 
     if created:
         print(f"  Admin       -> created {admin.email}")
         if is_default_password:
@@ -191,7 +154,7 @@ def run():
                 "Set SEED_ADMIN_PASSWORD, or change it after first sign-in."
             )
         return admin
-
+ 
     if changes:
         print(f"  Admin       -> updated {admin.email} ({', '.join(changes)})")
         if is_default_password and "password" in changes:
@@ -201,10 +164,12 @@ def run():
             )
     else:
         print(f"  Admin       -> an administrator already exists ({admin.email}), left untouched")
-
+ 
     if not admin.is_active:
         print(
             "                 NOTE: that account is disabled. Re-enable it in the "
             "database if you are locked out."
         )
     return admin
+ 
+ 

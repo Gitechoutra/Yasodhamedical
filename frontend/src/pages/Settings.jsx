@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import Avatar from "../components/Avatar";
+import PasswordInput from "../components/PasswordInput";
 import { useAuth } from "../context/AuthContext";
-import { changePassword } from "../services/authService";
+import { MIN_PASSWORD, changePassword } from "../services/authService";
 
 function Field({ label, value }) {
   return (
@@ -72,6 +73,10 @@ export default function Settings() {
           <Avatar name={user?.name} imageUrl={user?.avatar_url} size="lg" />
           <div className="grid flex-1 grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Name" value={user?.name} />
+            {/* The name they sign in with. Issued by the hospital and mailed
+                to them once, which makes "what was my username again?" a
+                question this page should answer. */}
+            <Field label="Username" value={user?.username} />
             <Field label="Email" value={user?.email} />
             <Field label="Role" value={user?.role} />
             {user?.department && <Field label="Department" value={user.department} />}
@@ -86,9 +91,9 @@ export default function Settings() {
             <label className="mb-1 block text-xs font-semibold text-slate-600">
               Current Password
             </label>
-            <input
-              type="password"
+            <PasswordInput
               required
+              autoComplete="current-password"
               className={inputClass}
               value={currentPassword}
               onChange={(e) => setCurrentPassword(e.target.value)}
@@ -98,10 +103,14 @@ export default function Settings() {
             <label className="mb-1 block text-xs font-semibold text-slate-600">
               New Password
             </label>
-            <input
-              type="password"
+            <PasswordInput
               required
-              minLength={6}
+              // Matches MIN_PASSWORD on the server. Kept in step deliberately:
+              // a form that accepts seven characters and an API that rejects
+              // them makes the user find out by failing.
+              minLength={MIN_PASSWORD}
+              placeholder={`At least ${MIN_PASSWORD} characters`}
+              autoComplete="new-password"
               className={inputClass}
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
@@ -111,10 +120,10 @@ export default function Settings() {
             <label className="mb-1 block text-xs font-semibold text-slate-600">
               Confirm New Password
             </label>
-            <input
-              type="password"
+            <PasswordInput
               required
-              minLength={6}
+              minLength={MIN_PASSWORD}
+              autoComplete="new-password"
               className={inputClass}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}

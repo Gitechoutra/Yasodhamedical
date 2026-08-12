@@ -33,7 +33,7 @@ GENDERS = ("male", "female", "other")
 # Suggested per role by the UI, stored as free text. A hospital that calls the
 # grade something else should not need a migration to say so.
 DESIGNATIONS = {
-    "doctor": ("Junior Doctor", "Senior Doctor", "Consultant"),
+    "doctor": ("Intern", "Junior Doctor", "Senior Doctor", "Consultant"),
     "nurse": ("Junior Nurse", "Senior Nurse"),
     "receptionist": ("Front Desk Executive", "Senior Receptionist"),
     "pharmacist": ("Pharmacist", "Chief Pharmacist"),

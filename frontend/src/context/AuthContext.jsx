@@ -54,11 +54,13 @@ export function AuthProvider({ children }) {
     }
   }, [user]);
 
-  async function login(email, password) {
+  /** `identifier` is a username or an email address — one field on the form,
+   *  and the server tells them apart. */
+  async function login(identifier, password) {
     setIsLoading(true);
     try {
       const { access_token, refresh_token, user: loggedInUser } = await loginRequest(
-        email,
+        identifier,
         password
       );
       localStorage.setItem("yasodha_access_token", access_token);

@@ -18,17 +18,19 @@ from portal.helpers.audit import (
 )
 from portal.helpers.auth_helper import get_current_doctor
 from portal.helpers.broadcast import dashboard_changed, nursing_changed
+from portal.helpers.contact import normalize_email, normalize_phone
 from portal.helpers.decorators import FRONT_DESK_ROLES, role_required
 from portal.helpers.notify import notify
 from portal.helpers.patient_access import can_access_patient, scope_patients
 from portal.helpers.response import error, success
+from portal.helpers.search import id_from_term, matches_all, terms_from
 from portal.helpers.surgery import refresh_surgery_stages
 from portal.helpers.uploads import ImageUploadError, delete_image, save_image, upload_dir
 from portal.models.appointment import Appointment
 from portal.models.consultation import Consultation
 from portal.models.doctor import Doctor
 from portal.models.nursing_assignment import NursingAssignment
-from portal.models.patient import MAX_OBSERVATION_DAYS, Patient
+from portal.models.patient import MAX_OBSERVATION_DAYS, Patient, normalize_blood_group
 from portal.models.patient_case import PatientCase
 
 patient_bp = Blueprint("patients", __name__)
@@ -62,16 +64,16 @@ def _parse_dob(raw):
     return parsed, None
 
 
-def _resolve_assigned_doctor(payload, current_doctor):
+def _resolve_assigned_doctor(payload):
     """Returns (doctor_id, error_message).
 
-    Front desk must name the doctor; a doctor registering a patient during
-    their own consultation is assigning to themselves, so it's implied.
+    Always explicit: registration is reception's, and picking the treating
+    doctor is the routing decision that registration exists to make. Nothing
+    infers it, because the only caller who could be inferred from -- a doctor
+    -- cannot reach this route.
     """
     raw = payload.get("assigned_doctor_id")
     if raw in (None, ""):
-        if current_doctor:
-            return current_doctor.id, None
         return None, "assigned_doctor_id is required — choose the doctor for this patient"
 
     doctor = Doctor.query.get(raw)
@@ -103,6 +105,32 @@ def _has_completed_consultation():
     )
 
 
+def patient_search_filter(raw):
+    """`?search=` as a filter over the patient table, or None if nothing typed.
+
+    The fields somebody actually has to hand when they are looking for a
+    patient: the name, the code on their card, the number they gave at the
+    desk, their address. Deliberately *not* the medical history or the
+    allergies -- searching "arjun" must not return a stranger whose notes
+    happen to mention an Arjun.
+    """
+    terms = terms_from(raw)
+    if not terms:
+        return None
+
+    def by_id(term):
+        # "PAT0004", "pat4" and a bare "4" all mean the same record. A ten
+        # digit string is a phone number and is left to the column above.
+        patient_id = id_from_term(term, "pat")
+        return [Patient.id == patient_id] if patient_id else []
+
+    return matches_all(
+        terms,
+        (Patient.name, Patient.phone, Patient.email),
+        extra=by_id,
+    )
+
+
 @patient_bp.get("")
 @jwt_required()
 def list_patients():
@@ -122,6 +150,10 @@ def list_patients():
 
     A patient is never in both `consulted` and `awaiting`: an open appointment
     moves them back to awaiting until that consultation is finished too.
+
+    `?search=` narrows any of the three by name, patient code, phone or email.
+    It never widens the caller's reach: the scoping below runs regardless, so a
+    doctor searching finds only among their own patients.
     """
     scope = request.args.get("scope", "consulted")
     if scope not in PATIENT_SCOPES:
@@ -129,6 +161,10 @@ def list_patients():
         return error(f"scope must be one of: {allowed}", status=422)
 
     query = scope_patients(Patient.query, get_current_doctor())
+
+    search = patient_search_filter(request.args.get("search"))
+    if search is not None:
+        query = query.filter(search)
 
     if scope == "consulted":
         query = query.filter(
@@ -188,8 +224,22 @@ def get_patient(patient_id):
 
 
 @patient_bp.post("")
-@jwt_required()
+@role_required("receptionist")
 def create_patient():
+    """Registers a patient. Reception only -- not admin, not the doctor.
+
+    A patient enters the hospital through the front desk, which is what makes
+    admission one accountable step: the demographics, the patient code and the
+    choice of treating doctor are all recorded by the person who met them. A
+    doctor registering a patient would be assigning themselves the case, which
+    is precisely the routing decision reception owns; admin monitors the
+    hospital and administers accounts, and admits nobody.
+
+    Narrower than FRONT_DESK_ROLES on purpose -- correcting a registration
+    (`update_patient`) and re-routing one (`reassign_patient`) stay open to
+    admin, because unsticking a bad record is administration. Creating one is
+    not.
+    """
     payload = request.get_json(silent=True) or {}
     name = (payload.get("name") or "").strip()
     if not name:
@@ -199,17 +249,31 @@ def create_patient():
     if dob_error:
         return error(dob_error, status=422)
 
-    assigned_doctor_id, doctor_error = _resolve_assigned_doctor(payload, get_current_doctor())
+    assigned_doctor_id, doctor_error = _resolve_assigned_doctor(payload)
     if doctor_error:
         return error(doctor_error, status=422)
+
+    blood_group, blood_group_error = normalize_blood_group(payload.get("blood_group"))
+    if blood_group_error:
+        return error(blood_group_error, status=422)
+
+    # Both optional on a patient record -- somebody brought in unconscious has
+    # neither -- but held to the same shape as everywhere else when given.
+    phone, phone_error = normalize_phone(payload.get("phone"))
+    if phone_error:
+        return error(phone_error, status=422)
+
+    email, email_error = normalize_email(payload.get("email"))
+    if email_error:
+        return error(email_error, status=422)
 
     patient = Patient(
         name=name,
         gender=payload.get("gender") or None,
         dob=dob,
-        phone=payload.get("phone") or None,
-        email=payload.get("email") or None,
-        blood_group=payload.get("blood_group") or None,
+        phone=phone,
+        email=email,
+        blood_group=blood_group,
         allergies=payload.get("allergies") or None,
         medical_history=payload.get("medical_history") or None,
         assigned_doctor_id=assigned_doctor_id,
@@ -268,6 +332,26 @@ def update_patient(patient_id):
         if gender and gender not in GENDERS:
             return error(f"gender must be one of: {', '.join(GENDERS)}", status=422)
 
+    # Validated before anything is written, so a bad value refuses the whole
+    # edit rather than saving the other fields and dropping this one.
+    blood_group = None
+    if "blood_group" in payload:
+        blood_group, blood_group_error = normalize_blood_group(payload.get("blood_group"))
+        if blood_group_error:
+            return error(blood_group_error, status=422)
+
+    phone = None
+    if "phone" in payload:
+        phone, phone_error = normalize_phone(payload.get("phone"))
+        if phone_error:
+            return error(phone_error, status=422)
+
+    email = None
+    if "email" in payload:
+        email, email_error = normalize_email(payload.get("email"))
+        if email_error:
+            return error(email_error, status=422)
+
     if "dob" in payload:
         dob, dob_error = _parse_dob(payload.get("dob"))
         if dob_error:
@@ -281,6 +365,14 @@ def update_patient(patient_id):
         value = (payload.get(field) or "").strip() or None
         if field == "gender" and value:
             value = value.lower()
+        # Already validated and normalised above; "o+" is stored as "O+" and
+        # an address as its lowercase form.
+        if field == "blood_group":
+            value = blood_group
+        if field == "phone":
+            value = phone
+        if field == "email":
+            value = email
         if getattr(patient, field) != value:
             changed.append(field)
         setattr(patient, field, value)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { HiOutlineCalendarDays, HiOutlinePlus } from "react-icons/hi2";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { HiOutlineCalendarDays, HiOutlineClock, HiOutlinePlus } from "react-icons/hi2";
 import AppointmentCard from "../components/AppointmentCard";
 import FilterChip from "../components/FilterChip";
 import Modal from "../components/Modal";
@@ -13,14 +13,65 @@ import {
 import { useAuth } from "../context/AuthContext";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchAppointments, createAppointment, startAppointment } from "../services/appointmentService";
+import { fetchDoctorAvailability } from "../services/doctorService";
 import { fetchPatients } from "../services/patientService";
 import { canCreateOp, canRunConsultation } from "../utils/permissions";
+
+/**
+ * Whether the doctor this OP will go to is actually in today.
+ *
+ * A warning, never a block: a walk-in still gets queued, and the front desk
+ * decides whether to book them for another day. Silence would be worse — the
+ * OP would sit in a queue nobody is there to call from.
+ */
+function DoctorTodayNote({ doctor }) {
+  if (!doctor) return null;
+
+  const [text, tone] =
+    doctor.status === "on_duty"
+      ? [
+          doctor.available_until
+            ? `On duty now, until ${doctor.available_until}.`
+            : "On duty now.",
+          "bg-emerald-50 text-emerald-700",
+        ]
+      : doctor.status === "upcoming"
+        ? [`Not in yet — starts at ${doctor.available_from} today.`, "bg-brand-50 text-brand-700"]
+        : doctor.status === "finished"
+          ? ["Today's shift has finished.", "bg-amber-50 text-amber-700"]
+          : ["Not rostered today.", "bg-amber-50 text-amber-700"];
+
+  return (
+    <p className={`mt-1 flex flex-wrap items-center gap-x-2 rounded-lg px-3 py-2 text-xs font-semibold ${tone}`}>
+      <HiOutlineClock className="h-4 w-4 shrink-0" />
+      {text}
+      <Link
+        to="/dashboard/doctors/availability"
+        className="font-semibold underline underline-offset-2"
+      >
+        See the week
+      </Link>
+    </p>
+  );
+}
 
 function CreateOpModal({ patients, preselectedPatientId, onClose, onCreated }) {
   const [patientId, setPatientId] = useState(preselectedPatientId || "");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  // Today's rota for every doctor, fetched once when the modal opens rather
+  // than per patient selection — the list is small and the receptionist
+  // changes the patient dropdown far more often than the rota changes.
+  const [availability, setAvailability] = useState([]);
+
+  useEffect(() => {
+    fetchDoctorAvailability()
+      .then((data) => setAvailability(data.items || []))
+      .catch(() => {
+        /* Advisory only. A failure here must not stop an OP being raised. */
+      });
+  }, []);
 
   const inputClass =
     "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
@@ -32,6 +83,9 @@ function CreateOpModal({ patients, preselectedPatientId, onClose, onCreated }) {
   // that the doctor is this exact patient's assigned_doctor).
   const assignedDoctor = patient?.assigned_doctor;
   const departmentId = assignedDoctor?.department_id;
+  const doctorToday = assignedDoctor
+    ? availability.find((d) => d.id === assignedDoctor.id)
+    : null;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -77,10 +131,13 @@ function CreateOpModal({ patients, preselectedPatientId, onClose, onCreated }) {
           {!patientId ? (
             <p className={`${inputClass} bg-slate-50 text-slate-400`}>Select a patient first</p>
           ) : assignedDoctor?.department_id ? (
-            <p className={`${inputClass} bg-slate-50 text-slate-700`}>
-              {assignedDoctor.department} — Dr. {assignedDoctor.name}
-              {assignedDoctor.specialization ? ` (${assignedDoctor.specialization})` : ""}
-            </p>
+            <>
+              <p className={`${inputClass} bg-slate-50 text-slate-700`}>
+                {assignedDoctor.department} — Dr. {assignedDoctor.name}
+                {assignedDoctor.specialization ? ` (${assignedDoctor.specialization})` : ""}
+              </p>
+              <DoctorTodayNote doctor={doctorToday} />
+            </>
           ) : (
             <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
               {assignedDoctor
@@ -141,9 +198,6 @@ export default function Appointments() {
   const [startingId, setStartingId] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Set by the dashboard's "Today's Appointments" card: today's queue that
-  // still needs someone (waiting or in progress).
-  const todayOnly = searchParams.get("filter") === "today";
   // Set by the "Active Consultations" card: only the patients in a room now.
   const ongoingOnly = searchParams.get("status") === "in_progress";
 
@@ -158,7 +212,6 @@ export default function Appointments() {
     (silent = false) => {
       if (!silent) setLoading(true);
       const listParams = {};
-      if (todayOnly) listParams.filter = "today";
       if (ongoingOnly) listParams.status = "in_progress";
       const requests = canScheduleAppointments
         ? [fetchAppointments(listParams), fetchPatients("all")]
@@ -172,7 +225,7 @@ export default function Appointments() {
         .catch(() => setErrorMsg("Could not load the appointment queue."))
         .finally(() => setLoading(false));
     },
-    [todayOnly, ongoingOnly, canScheduleAppointments]
+    [ongoingOnly, canScheduleAppointments]
   );
 
   // Re-runs when a filter changes, so clearing a chip refetches the
@@ -250,7 +303,6 @@ export default function Appointments() {
           {appointments.length} OP{appointments.length === 1 ? "" : "s"} · {ongoingCount} in
           consultation · {appointments.length - ongoingCount} waiting
         </p>
-        {todayOnly && <FilterChip label="Today only" onClear={() => clearFilter("filter")} />}
         {ongoingOnly && (
           <FilterChip label="In consultation" onClear={() => clearFilter("status")} />
         )}
@@ -267,9 +319,7 @@ export default function Appointments() {
           <EmptyState icon={HiOutlineCalendarDays}>
             {ongoingOnly
               ? "No consultations are in progress right now."
-              : todayOnly
-                ? "No patients pending or in consultation today."
-                : `The ${user?.department || "hospital"} queue is empty — nobody is waiting.`}
+              : `The ${user?.department || "hospital"} queue is empty — nobody is waiting.`}
           </EmptyState>
         ) : (
           <RecordGrid>

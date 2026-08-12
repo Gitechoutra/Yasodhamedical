@@ -1,12 +1,22 @@
+import io
 import json
+import logging
 import os
+import random
+import re
 import subprocess
 import tempfile
+import time
 
+import httpx
 from google import genai
 from google.genai import errors as genai_errors, types
 
 from portal.ai import ffmpeg_setup  # noqa: F401  (puts ffmpeg on PATH)
+
+# A child of the app's own "portal" logger, so these land in portal.log
+# alongside everything else.
+logger = logging.getLogger(__name__)
 
 _client = None
 
@@ -79,19 +89,121 @@ def _quota_error(exc, model):
     )
 
 
-def _call(fn, model):
-    """Runs an SDK call, converting quota refusals into QuotaExceededError.
+class AIServiceUnavailableError(Exception):
+    """The Gemini API could not be reached, after retrying.
+
+    Distinct from a quota refusal: nothing is wrong with the request, the
+    account or the recording — the connection to Google dropped. Raised in
+    place of the raw socket error so a doctor sees an instruction they can act
+    on instead of "[WinError 10054] An existing connection was forcibly closed
+    by the remote host".
+    """
+
+
+class SilentRecordingError(Exception):
+    """The clip is below the noise floor — nothing was captured at all.
+
+    Detected locally, before the upload, so a muted mic or a device the
+    browser picked that isn't the one on the desk is reported as the hardware
+    problem it is rather than as "the AI found no speech".
+    """
+
+
+# Retried, because none of these mean the request was wrong. A 429 is
+# deliberately absent: quota is handled separately, with advice, and sitting
+# in a backoff loop only delays telling the doctor about it.
+_RETRIABLE_STATUS = (408, 500, 502, 503, 504)
+
+# Winsock's flavours of "the connection went away mid-request": reset by peer,
+# aborted by the local stack, timed out. These arrive as bare OSErrors on
+# Windows rather than as anything httpx models.
+_RETRIABLE_WINSOCK = (10053, 10054, 10060)
+
+MAX_ATTEMPTS = 4
+RETRY_BASE_DELAY = 1.5  # seconds, doubled each attempt
+
+# How long any single request may take before it is abandoned and retried. A
+# whole-consultation recording is a real upload followed by real inference, so
+# this is generous — but unbounded is worse: a half-open socket would hang the
+# doctor's browser forever with no way back.
+REQUEST_TIMEOUT_SECONDS = int(os.getenv("GEMINI_TIMEOUT_SECONDS", "300"))
+
+
+def _is_transient(exc):
+    """Whether this failure is worth retrying rather than reporting."""
+    if isinstance(exc, genai_errors.ServerError):
+        return True
+    if isinstance(exc, genai_errors.APIError) and getattr(exc, "code", None) in _RETRIABLE_STATUS:
+        return True
+
+    # httpx.TransportError covers connect/read/write/timeout/protocol errors —
+    # every way a request can die without the server ever answering. The cause
+    # chain is walked because httpx does not wrap all of them: a reset raised
+    # while the request body is still being written surfaces as a plain
+    # ConnectionResetError.
+    seen = 0
+    current = exc
+    while current is not None and seen < 10:
+        if isinstance(current, (httpx.TransportError, ConnectionError, TimeoutError)):
+            return True
+        if isinstance(current, OSError) and (
+            current.errno in _RETRIABLE_WINSOCK
+            or getattr(current, "winerror", None) in _RETRIABLE_WINSOCK
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+        seen += 1
+    return False
+
+
+def _call(fn, model, doing="talking to the AI service", attempts=MAX_ATTEMPTS):
+    """Runs an SDK call, retrying dropped connections and translating refusals.
 
     Wrapped at the call site rather than at the top of each public function so
     a 429 raised on a retry attempt is translated too.
+
+    The SDK does not retry anything by default, and even when configured it
+    only covers connect and timeout errors — not a reset partway through, which
+    is exactly what a several-megabyte audio upload over a flaky link runs
+    into. So the retry lives here, where it can also cover the transcription
+    and summary calls uniformly.
     """
-    try:
-        return fn()
-    except genai_errors.ClientError as exc:
-        quota = _quota_error(exc, model)
-        if quota:
-            raise quota from exc
-        raise
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except genai_errors.ClientError as exc:
+            quota = _quota_error(exc, model)
+            if quota:
+                raise quota from exc
+            if not _is_transient(exc):
+                raise
+            last_error = exc
+        except Exception as exc:  # noqa: BLE001 - re-raised below unless transient
+            if not _is_transient(exc):
+                raise
+            last_error = exc
+
+        if attempt < attempts - 1:
+            # Jittered, so two consultations ending at the same moment don't
+            # retry in lockstep against a service that is already struggling.
+            delay = RETRY_BASE_DELAY * (2**attempt) + random.uniform(0, 0.5)
+            logger.warning(
+                "Transient failure while %s (attempt %s/%s): %s — retrying in %.1fs",
+                doing,
+                attempt + 1,
+                attempts,
+                last_error,
+                delay,
+            )
+            time.sleep(delay)
+
+    logger.error("Gave up %s after %s attempts: %s", doing, attempts, last_error)
+    raise AIServiceUnavailableError(
+        f"The connection to the AI service kept dropping while {doing}. This is a "
+        "network problem, not a problem with your recording — nothing has been lost. "
+        "Check the internet connection and try again."
+    ) from last_error
 
 SYSTEM_INSTRUCTION = """You are a clinical documentation assistant embedded in a hospital's \
 consultation system. You are NOT a doctor and must never present a diagnosis as final \
@@ -219,7 +331,13 @@ def _get_client():
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY is not set in the environment")
-        _client = genai.Client(api_key=api_key)
+        _client = genai.Client(
+            api_key=api_key,
+            # HttpOptions.timeout is in milliseconds. Without it httpx waits
+            # indefinitely, so a connection that dies quietly rather than
+            # resetting never fails and never retries — it just hangs.
+            http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_SECONDS * 1000),
+        )
     return _client
 
 
@@ -228,6 +346,13 @@ word for word. Speakers may switch between English and Indian languages (Hindi, 
 or others) within the same sentence — translate everything into clear English. Output ONLY the \
 transcribed text: no speaker labels, no timestamps, no commentary, no markdown.
 
+The recording is made by one microphone sitting between two people in a consulting room, so \
+one speaker is often much further from it than the other. It has been volume-normalised before \
+reaching you, which lifts faint speech but also lifts room noise with it. Transcribe every part \
+of the conversation, including passages that are quiet, distant, muffled or noisy — do not skip \
+a passage merely because it is hard to hear. Where a few words are genuinely unintelligible, \
+write [inaudible] for just those words and carry on with the rest.
+
 CRITICAL: This is a clinical recording — never invent, guess, or fabricate any dialogue, \
 symptoms, or diagnosis that isn't clearly and actually spoken in the audio. If the recording is \
 silent, contains no intelligible speech, or is just background/mic noise, output exactly this \
@@ -235,27 +360,180 @@ literal token and nothing else: [NO_SPEECH]"""
 
 NO_SPEECH_TOKEN = "[NO_SPEECH]"
 
+# --- Preparing the recording for upload ------------------------------------
 
-def _webm_to_wav(audio_bytes):
-    # Gemini's documented audio formats don't include webm/opus (what
-    # MediaRecorder produces in the browser); converting to WAV first avoids
-    # depending on undocumented format leniency.
+# A consultation is recorded across a desk, not into a headset. The doctor
+# leaning towards the laptop lands 20-30 dB hotter than the patient sitting
+# back from it, and handing that straight to the model is what made a
+# soft-spoken patient come back as [NO_SPEECH] or vanish from the middle of
+# an otherwise complete transcript. So the audio is levelled before it is
+# sent, in two stages that do different jobs:
+#   highpass    — drops rumble, mains hum and desk knocks that would otherwise
+#                 soak up the gain the quiet speech needs.
+#   speechnorm  — expands towards full scale, per speech half-cycle, capped at
+#                 the filter's maximum (e=50) with its own peak ceiling at
+#                 p=0.95 so nothing clips. The raise rate is well above the
+#                 default: at the default it takes minutes to adapt, which is
+#                 useless when the speaker changes every few seconds.
+#   dynaudnorm  — evens out what is left across a moving window, which is what
+#                 actually closes the doctor-to-patient gap. Measured on a
+#                 34 dB level difference, speechnorm alone left 34 dB; the two
+#                 together leave about 5 dB.
+# Overridable so this can be tuned against a real room without a code change.
+DEFAULT_AUDIO_FILTERS = (
+    "highpass=f=80,"
+    "speechnorm=p=0.95:e=50:r=0.01,"
+    "dynaudnorm=f=150:g=15:p=0.9:m=30"
+)
+AUDIO_FILTERS = os.getenv("GEMINI_AUDIO_FILTERS", DEFAULT_AUDIO_FILTERS)
+
+# 16 kHz mono is the standard speech-recognition format and everything above
+# it is wasted bytes. MP3 rather than WAV because a whole consultation as
+# 16-bit PCM is ~2 MB per minute — a 15-minute visit is a 30 MB upload, over
+# the API's inline limit and long enough on a domestic connection to be reset
+# partway through. At 64 kbit/s the same visit is under 8 MB, with no loss
+# that matters at this bandwidth.
+AUDIO_SAMPLE_RATE = "16000"
+AUDIO_BITRATE = os.getenv("GEMINI_AUDIO_BITRATE", "64k")
+AUDIO_MIME_TYPE = "audio/mp3"
+
+# Peak level below which the clip holds nothing but the noise floor — a muted
+# mic, or the browser recording from a device that isn't the one on the desk.
+# Set deliberately low. Normalisation is what rescues quiet speech, so the only
+# job of this threshold is to separate "nothing was captured" from "captured
+# faintly", and getting it wrong in the strict direction would throw away
+# exactly the quiet consultations this is all meant to save. A muted input
+# measures around -90 dBFS; even a badly placed mic in a quiet room stays
+# above -55.
+SILENCE_FLOOR_DBFS = float(os.getenv("GEMINI_SILENCE_FLOOR_DBFS", "-60"))
+
+# Above this, the recording goes through the Files API instead of being
+# inlined in the request. The documented inline ceiling is 20 MB, and a
+# resumable upload survives a dropped connection far better than one large
+# request body does.
+INLINE_AUDIO_LIMIT = 15 * 1024 * 1024
+
+_MAX_VOLUME_RE = re.compile(rb"max_volume:\s*(-?\d+(?:\.\d+)?) dB")
+
+
+def _ffmpeg(args):
+    return subprocess.run(
+        ["ffmpeg", "-hide_banner", "-nostdin", *args], capture_output=True
+    )
+
+
+def _peak_dbfs(path):
+    """Peak level of a recording, in dBFS, or None if ffmpeg wouldn't say.
+
+    Measured before normalisation — afterwards everything peaks near full
+    scale by construction, which tells you nothing about what the microphone
+    actually heard.
+    """
+    result = _ffmpeg(["-i", path, "-af", "volumedetect", "-f", "null", "-"])
+    match = _MAX_VOLUME_RE.search(result.stderr or b"")
+    return float(match.group(1)) if match else None
+
+
+def _prepare_audio(audio_bytes):
+    """Normalises the browser's webm/opus recording into mono MP3 for upload.
+
+    Returns (mp3_bytes, peak_dbfs_of_the_original). Raises SilentRecordingError
+    when there was nothing on the recording to normalise in the first place.
+    """
     with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as src:
         src.write(audio_bytes)
         src_path = src.name
-    dst_path = src_path + ".wav"
+    dst_path = src_path + ".mp3"
+
     try:
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", src_path, "-ar", "16000", "-ac", "1", dst_path],
-            check=True,
-            capture_output=True,
+        peak = _peak_dbfs(src_path)
+        if peak is not None and peak < SILENCE_FLOOR_DBFS:
+            logger.warning("Recording rejected as silent: peak %.1f dBFS", peak)
+            raise SilentRecordingError(
+                "The microphone barely picked anything up — the recording is silent. "
+                "Check that the right microphone is selected and unmuted, and that the "
+                "browser has permission to use it, then record again."
+            )
+
+        encode = ["-y", "-i", src_path, "-vn", "-ac", "1", "-ar", AUDIO_SAMPLE_RATE]
+        result = _ffmpeg(
+            [*encode, "-af", AUDIO_FILTERS, "-c:a", "libmp3lame", "-b:a", AUDIO_BITRATE, dst_path]
         )
+        if result.returncode != 0:
+            # The filter chain is the only part of this that a different
+            # ffmpeg build might not support, and a transcript from
+            # un-normalised audio beats no transcript at all.
+            logger.warning(
+                "Audio filter chain failed, falling back to a plain conversion: %s",
+                (result.stderr or b"").decode(errors="replace")[-500:],
+            )
+            result = _ffmpeg(
+                [*encode, "-c:a", "libmp3lame", "-b:a", AUDIO_BITRATE, dst_path]
+            )
+        if result.returncode != 0:
+            raise RuntimeError(
+                "Could not convert the recording: "
+                + (result.stderr or b"").decode(errors="replace")[-500:]
+            )
+
         with open(dst_path, "rb") as f:
-            return f.read()
+            prepared = f.read()
+
+        logger.info(
+            "Prepared %.1f KB of audio for transcription (was %.1f KB, peak %s dBFS)",
+            len(prepared) / 1024,
+            len(audio_bytes) / 1024,
+            f"{peak:.1f}" if peak is not None else "unknown",
+        )
+        return prepared, peak
     finally:
         os.remove(src_path)
         if os.path.exists(dst_path):
             os.remove(dst_path)
+
+
+def _wait_until_active(client, uploaded, model_name):
+    """Blocks until an uploaded file is usable, or gives up.
+
+    A file referenced while it is still PROCESSING is rejected, so the wait is
+    part of uploading rather than something the caller should have to know.
+    """
+    deadline = time.monotonic() + 120
+    while getattr(uploaded.state, "name", str(uploaded.state)) == "PROCESSING":
+        if time.monotonic() > deadline:
+            raise AIServiceUnavailableError(
+                "The AI service did not finish accepting the recording in time. "
+                "Nothing has been lost — please try again."
+            )
+        time.sleep(2)
+        uploaded = _call(
+            lambda: client.files.get(name=uploaded.name), model_name, "checking the upload"
+        )
+
+    if getattr(uploaded.state, "name", str(uploaded.state)) == "FAILED":
+        raise RuntimeError("The AI service rejected the uploaded recording")
+    return uploaded
+
+
+def _audio_part(client, audio_bytes, model_name):
+    """The recording as something `generate_content` can take.
+
+    Returns (part, uploaded_name). `uploaded_name` is None for the inline case
+    and otherwise names a server-side file the caller must delete.
+    """
+    if len(audio_bytes) <= INLINE_AUDIO_LIMIT:
+        return types.Part.from_bytes(data=audio_bytes, mime_type=AUDIO_MIME_TYPE), None
+
+    uploaded = _call(
+        lambda: client.files.upload(
+            file=io.BytesIO(audio_bytes),
+            config=types.UploadFileConfig(mime_type=AUDIO_MIME_TYPE),
+        ),
+        model_name,
+        "uploading the recording",
+    )
+    uploaded = _wait_until_active(client, uploaded, model_name)
+    return uploaded, uploaded.name
 
 
 # --- Embeddings, for matching a presentation to approved cases -------------
@@ -297,6 +575,11 @@ def embed_text(text, is_query=False):
             ),
         ),
         model_name,
+        "matching against past cases",
+        # Fewer attempts than a summary gets: every caller of this already
+        # degrades gracefully to "no precedents", so a long backoff here only
+        # delays a consultation that is going to be summarised regardless.
+        attempts=2,
     )
     return list(response.embeddings[0].values)
 
@@ -307,22 +590,41 @@ def transcribe_audio(audio_bytes):
     multi-minute recording that took ~2 minutes on local "small" Whisper comes
     back in a few seconds from Gemini's hosted inference — the doctor isn't
     waiting on this laptop's CPU anymore.
+
+    The clip is levelled and compressed first — see `_prepare_audio`. That is
+    what makes the quieter of the two people in the room transcribe, and it is
+    also what keeps the upload small enough to survive an ordinary connection.
     """
-    wav_bytes = _webm_to_wav(audio_bytes)
+    prepared, peak = _prepare_audio(audio_bytes)
     model_name = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
     client = _get_client()
-    response = _call(
-        lambda: client.models.generate_content(
-            model=model_name,
-            contents=[
-                TRANSCRIBE_INSTRUCTION,
-                types.Part.from_bytes(data=wav_bytes, mime_type="audio/wav"),
-            ],
-        ),
-        model_name,
-    )
+    part, uploaded_name = _audio_part(client, prepared, model_name)
+
+    try:
+        response = _call(
+            lambda: client.models.generate_content(
+                model=model_name,
+                contents=[TRANSCRIBE_INSTRUCTION, part],
+                # Verbatim transcription is not a creative task, and sampling
+                # is where invented dialogue comes from.
+                config=types.GenerateContentConfig(temperature=0),
+            ),
+            model_name,
+            "transcribing the recording",
+        )
+    finally:
+        if uploaded_name:
+            try:
+                client.files.delete(name=uploaded_name)
+            except Exception:  # noqa: BLE001 - the file expires on its own anyway
+                logger.warning("Could not delete uploaded audio %s", uploaded_name)
+
     text = (response.text or "").strip()
-    if NO_SPEECH_TOKEN in text:
+    if not text or NO_SPEECH_TOKEN in text:
+        logger.info(
+            "No speech found in a recording peaking at %s dBFS",
+            f"{peak:.1f}" if peak is not None else "unknown",
+        )
         return ""
     return text
 
@@ -476,9 +778,13 @@ def generate_consultation_summary(
     return _generate_json(client, model_name, prompt, config)
 
 
-def _generate_json(client, model_name, prompt, config):
+def _generate_json(client, model_name, prompt, config, doing="writing up the consultation"):
     """One retry, because a malformed response is almost always transient and
-    losing a whole consultation's summary to it is not acceptable."""
+    losing a whole consultation's summary to it is not acceptable.
+
+    This retries a *well-formed response containing malformed JSON*. Dropped
+    connections are retried a level down, inside `_call`.
+    """
     last_error = None
     for _attempt in range(2):
         response = _call(
@@ -486,6 +792,7 @@ def _generate_json(client, model_name, prompt, config):
                 model=model_name, contents=prompt, config=config
             ),
             model_name,
+            doing,
         )
         try:
             return json.loads(response.text)
@@ -613,4 +920,10 @@ def consolidate_case(patient, sessions):
         response_mime_type="application/json",
         response_schema=CONSOLIDATION_RESPONSE_SCHEMA,
     )
-    return _generate_json(client, model_name, _build_consolidation_prompt(patient, sessions), config)
+    return _generate_json(
+        client,
+        model_name,
+        _build_consolidation_prompt(patient, sessions),
+        config,
+        "consolidating the case",
+    )

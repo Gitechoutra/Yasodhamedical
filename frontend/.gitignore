@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Per-machine, so it cannot be shared: VITE_API_BASE_URL has to name an
+# address the developer's own browser reaches their own backend on. Committed
+# once with one laptop's LAN IP in it, it pointed everybody else's frontend at
+# that laptop. .env.example is the template to copy; it stays tracked.
+.env
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

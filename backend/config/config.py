@@ -104,7 +104,46 @@ SETTINGS = (
     # Transcription and consultation summaries both run through Gemini.
     ("GEMINI_API_KEY", "ai", "gemini_api_key", ""),
     ("GEMINI_MODEL", "ai", "gemini_model", "gemini-flash-latest"),
+    # -- [email] -----------------------------------------------------------
+    # Outbound mail. Staff credentials and password-reset links are the only
+    # things the portal sends, and both are useless if they don't arrive, so
+    # every part of the connection is configurable rather than assumed.
+    #
+    # With smtp_host blank the app does not fail: helpers/email.py logs the
+    # message instead of sending it, which is what makes a local checkout
+    # usable without a mail account. See MAIL_ENABLED for switching sending
+    # off deliberately on a machine that *does* have SMTP configured.
+    ("SMTP_HOST", "email", "smtp_host", ""),
+    ("SMTP_PORT", "email", "smtp_port", "587"),
+    ("SMTP_USER", "email", "smtp_user", ""),
+    ("SMTP_PASSWORD", "email", "smtp_password", ""),
+    # starttls (587, the usual), ssl (465) or none (a local relay).
+    ("SMTP_SECURITY", "email", "smtp_security", "starttls"),
+    ("SMTP_TIMEOUT", "email", "smtp_timeout", "20"),
+    ("MAIL_FROM", "email", "from_address", ""),
+    ("MAIL_FROM_NAME", "email", "from_name", ""),
+    ("MAIL_REPLY_TO", "email", "reply_to", ""),
+    ("MAIL_ENABLED", "email", "enabled", "true"),
+    # How long a credentials email's "set your password" link stays usable,
+    # and how long a self-service reset link does. The invite window is
+    # deliberately the longer of the two -- a new joiner may not read the
+    # message until their first shift, whereas somebody who just pressed
+    # "forgot password" is at the keyboard now.
+    ("INVITE_TOKEN_HOURS", "email", "invite_token_hours", "72"),
+    ("RESET_TOKEN_MINUTES", "email", "reset_token_minutes", "60"),
     # -- [server] ----------------------------------------------------------
+    # Domains an email address may be at, anywhere one is typed: staff
+    # accounts, patient records and the sign-in form. Comma-separated, and `*`
+    # turns the restriction off. (Not blank -- a key left empty in the ini
+    # falls back to the default here, by _resolve's own rule, so there has to
+    # be something to write.) Enforced by helpers/contact.py -- see the note
+    # there about keeping the frontend's copy of the list in step.
+    (
+        "ALLOWED_EMAIL_DOMAINS",
+        "server",
+        "allowed_email_domains",
+        "gmail.com,yasodhahospitals.com",
+    ),
     ("CORS_ORIGINS", "server", "cors_origins", "http://localhost:5173"),
     ("PORTAL_BASE_URL", "server", "portal_base_url", "http://localhost:5173"),
     # -- [upload_folder] ---------------------------------------------------
@@ -139,6 +178,54 @@ ALIASES = {
     "JWT_REFRESH_DAYS": ("JWT_REFRESH_TOKEN_EXPIRES_DAYS",),
     "PORTAL_BASE_URL": ("FRONTEND_BASE_URL",),
     "DB_PASSWORD": ("MYSQL_PASSWORD",),
+    # Flask-Mail's spellings, which is what most .env templates in circulation
+    # use even where Flask-Mail itself isn't installed.
+    "SMTP_HOST": ("MAIL_SERVER",),
+    "SMTP_PORT": ("MAIL_PORT",),
+    "SMTP_USER": ("MAIL_USERNAME",),
+    "SMTP_PASSWORD": ("MAIL_PASSWORD",),
+    "MAIL_FROM": ("MAIL_DEFAULT_SENDER", "SMTP_FROM"),
+    "MAIL_FROM_NAME": ("MAIL_SENDER_NAME",),
+}
+
+# The same idea as ALIASES, for the ini: extra (section, key) places a setting
+# is accepted from, tried in order after the canonical location in SETTINGS.
+#
+# This is what lets the house ini template -- [server] with a whole
+# sqlalchemy_database_uri, [jwt], [mail_server_Email], [gemini] -- be dropped
+# in unchanged, alongside this project's own [database]/[flask]/[ai] layout.
+# Neither is "the" format; whichever a given file uses, it is read.
+#
+# Section names are matched case-insensitively ([mail_server_Email] and
+# [mail_server_email] are the same section) because a hand-edited file should
+# not fail over capitalisation. configparser already lowercases keys, so
+# MAILSERVER_USERNAME and mailserver_username are the same key for free.
+INI_ALIASES = {
+    "SECRET_KEY": (("server", "app_secret_key"),),
+    "JWT_SECRET_KEY": (("jwt", "secret_key"),),
+    "JWT_ACCESS_MINUTES": (("jwt", "access_token_expires_minutes"),),
+    "JWT_REFRESH_DAYS": (("jwt", "refresh_token_expires_days"),),
+    # A complete DSN wherever the house template puts it. Still overridden by
+    # the [database] parts only if those are what the file actually carries --
+    # see _database_uri, where a full URL wins.
+    "DATABASE_URL": (
+        ("server", "sqlalchemy_database_uri"),
+        ("database", "sqlalchemy_database_uri"),
+    ),
+    "TEST_DATABASE_URL": (("server", "sqlalchemy_test_database_uri"),),
+    "SQLALCHEMY_TRACK_MODIFICATIONS": (("server", "sqlalchemy_track_modifications"),),
+    "SQL_ECHO": (("server", "sqlalchemy_echo"),),
+    "PORTAL_BASE_URL": (("server", "frontend_base_url"),),
+    "SMTP_HOST": (("mail_server_email", "mailserver_domain"),),
+    "SMTP_PORT": (("mail_server_email", "mailserver_port"),),
+    "SMTP_USER": (("mail_server_email", "mailserver_username"),),
+    "SMTP_PASSWORD": (("mail_server_email", "mailserver_password"),),
+    "MAIL_FROM": (("mail_server_email", "mailserver_default_sender"),),
+    "MAIL_ENABLED": (("mail_server_email", "enabled"),),
+    "INVITE_TOKEN_HOURS": (("password_reset", "invite_token_hours"),),
+    "RESET_TOKEN_MINUTES": (("password_reset", "reset_token_minutes"),),
+    "GEMINI_API_KEY": (("gemini", "api_key"),),
+    "GEMINI_MODEL": (("gemini", "model"),),
 }
 
 TRUTHY = {"1", "true", "yes", "on"}
@@ -211,6 +298,20 @@ APP_ENV = _ENV_OVERRIDE or _ini.get("flask", "env", fallback="development").stri
 IS_PRODUCTION = APP_ENV.startswith("prod")
 
 
+def _ini_sections(name):
+    """Every section in the file whose name matches `name`, ignoring case."""
+    wanted = (name or "").strip().lower()
+    return [s for s in _ini.sections() if s.strip().lower() == wanted]
+
+
+def _ini_lookup(section, key):
+    """The value at (section, key), or None. Case-insensitive on the section."""
+    for actual in _ini_sections(section):
+        if _ini.has_option(actual, key):
+            return _expand(_ini.get(actual, key))
+    return None
+
+
 def _resolve():
     """Merges the process environment (including .env) with the ini file.
 
@@ -219,6 +320,12 @@ def _resolve():
     "the current working directory". Keys whose default is itself empty (the
     database password, and the secrets checked below) are unaffected, so blank
     still means blank where blank is a real answer.
+
+    Order per setting: the canonical environment variable, then its aliases,
+    then the canonical ini location, then its ini aliases, then the default.
+    A real environment variable always wins, which is the documented rule at
+    the top of this file and is what lets a server hold its secrets outside
+    any file on disk.
     """
     values = {}
     for env_key, section, key, default in SETTINGS:
@@ -226,14 +333,95 @@ def _resolve():
             (os.environ[n] for n in (env_key, *ALIASES.get(env_key, ())) if n in os.environ),
             None,
         )
-        if value is None and _ini.has_option(section, key):
-            value = _expand(_ini.get(section, key))
+        if value is None:
+            value = _ini_lookup(section, key)
+        if value is None:
+            for alt_section, alt_key in INI_ALIASES.get(env_key, ()):
+                value = _ini_lookup(alt_section, alt_key)
+                if value is not None:
+                    break
         value = default if value is None else value.strip()
         values[env_key] = default if (value == "" and default) else value
     return values
 
 
 _VALUES = _resolve()
+
+
+def _resolve_smtp_security():
+    """Reconciles a use_tls/use_ssl pair into the single value this app keeps.
+
+    The house template (and Flask-Mail) express the connection as two
+    independent booleans, which can say things that are not true of any real
+    connection -- both on, or both off with a port that needs one. SMTP_SECURITY
+    says the one thing that is actually the case, so the pair is folded into it
+    here, at the edge, rather than carried any further inward.
+
+    An explicit SMTP_SECURITY always wins. Otherwise SSL beats TLS when both
+    are set, since implicit SSL is the stronger claim about the socket, and a
+    pair that is silent leaves the default alone.
+    """
+    explicit = next(
+        (os.environ[n] for n in ("SMTP_SECURITY",) if n in os.environ), None
+    ) or _ini_lookup("email", "smtp_security")
+    if explicit and explicit.strip():
+        return explicit.strip().lower()
+
+    def flag(env_name, section, key):
+        raw = os.environ.get(env_name)
+        if raw is None:
+            raw = _ini_lookup(section, key)
+        return None if raw is None else raw.strip().lower() in TRUTHY
+
+    use_ssl = flag("MAIL_USE_SSL", "mail_server_email", "mailserver_use_ssl")
+    use_tls = flag("MAIL_USE_TLS", "mail_server_email", "mailserver_use_tls")
+
+    if use_ssl:
+        return "ssl"
+    if use_tls:
+        return "starttls"
+    # Both explicitly off means a plain relay; both absent means nobody said,
+    # so the declared default (starttls) stands.
+    if use_ssl is False and use_tls is False:
+        return "none"
+    return DEFAULTS["SMTP_SECURITY"]
+
+
+_VALUES["SMTP_SECURITY"] = _resolve_smtp_security()
+
+
+def _reset_minutes_from_seconds():
+    """Accepts the house template's `reset_token_expires`, which is seconds.
+
+    This app keeps the reset window in minutes. The two names are close enough
+    that reading one as the other would be a silent factor-of-sixty bug --
+    3600 taken as minutes is two and a half days, not the hour it means -- so
+    the conversion is explicit and the seconds key is never read as anything
+    else. An explicit reset_token_minutes wins; this is only consulted when
+    nothing said it in the app's own units.
+    """
+    if "RESET_TOKEN_MINUTES" in os.environ:
+        return None
+    if _ini_lookup("email", "reset_token_minutes") is not None:
+        return None
+    if _ini_lookup("password_reset", "reset_token_minutes") is not None:
+        return None
+
+    raw = os.environ.get("RESET_TOKEN_EXPIRES")
+    if raw is None:
+        raw = _ini_lookup("password_reset", "reset_token_expires")
+    try:
+        seconds = int((raw or "").strip())
+    except (TypeError, ValueError):
+        return None
+    # Rounded up, so a sub-minute value becomes one minute rather than a link
+    # that has already expired by the time it is emailed.
+    return str(max(1, -(-seconds // 60))) if seconds > 0 else None
+
+
+_converted = _reset_minutes_from_seconds()
+if _converted:
+    _VALUES["RESET_TOKEN_MINUTES"] = _converted
 
 missing = [k for k in REQUIRED if not _VALUES[k]]
 if missing:
@@ -362,6 +550,13 @@ class BaseConfig:
     # -- CORS --------------------------------------------------------------
     CORS_ORIGINS = [o.strip() for o in _VALUES["CORS_ORIGINS"].split(",") if o.strip()]
 
+    # -- Contact details ---------------------------------------------------
+    ALLOWED_EMAIL_DOMAINS = [
+        d.strip().lower().lstrip("@")
+        for d in _VALUES["ALLOWED_EMAIL_DOMAINS"].split(",")
+        if d.strip()
+    ]
+
     # -- AI ----------------------------------------------------------------
     GEMINI_API_KEY = _VALUES["GEMINI_API_KEY"]
     GEMINI_MODEL = _VALUES["GEMINI_MODEL"]
@@ -374,6 +569,28 @@ class BaseConfig:
     # 2 MB by helpers/uploads.py, which returns a clean 413 with a message;
     # this only catches something far larger before it is buffered.
     MAX_CONTENT_LENGTH = 32 * 1024 * 1024
+
+    # -- Outbound mail -----------------------------------------------------
+    SMTP_HOST = _VALUES["SMTP_HOST"]
+    SMTP_PORT = _as_int("SMTP_PORT")
+    SMTP_USER = _VALUES["SMTP_USER"]
+    SMTP_PASSWORD = _VALUES["SMTP_PASSWORD"]
+    SMTP_SECURITY = _VALUES["SMTP_SECURITY"].strip().lower()
+    SMTP_TIMEOUT = _as_int("SMTP_TIMEOUT")
+    # Falls back to the authenticating account, then to the hospital's own
+    # published address. A From: header that doesn't match the sending account
+    # is the fastest way to a spam folder, so the authenticated user is the
+    # better default than the hospital address here.
+    MAIL_FROM = (
+        _VALUES["MAIL_FROM"] or _VALUES["SMTP_USER"] or _VALUES["HOSPITAL_EMAIL"]
+    )
+    MAIL_FROM_NAME = _VALUES["MAIL_FROM_NAME"] or _VALUES["HOSPITAL_NAME"]
+    MAIL_REPLY_TO = _VALUES["MAIL_REPLY_TO"] or _VALUES["HOSPITAL_EMAIL"]
+    MAIL_ENABLED = _as_bool("MAIL_ENABLED")
+
+    # -- Credential links --------------------------------------------------
+    INVITE_TOKEN_HOURS = _as_int("INVITE_TOKEN_HOURS")
+    RESET_TOKEN_MINUTES = _as_int("RESET_TOKEN_MINUTES")
 
     # -- Report letterhead -------------------------------------------------
     PORTAL_BASE_URL = _VALUES["PORTAL_BASE_URL"].rstrip("/")
@@ -400,6 +617,11 @@ class TestingConfig(BaseConfig):
     SQLALCHEMY_DATABASE_URI = _test_database_uri()
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(minutes=5)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(minutes=10)
+    # A test run must never put a real message in front of a real person, even
+    # if the machine it runs on has working SMTP credentials. helpers/email
+    # logs instead, so the assertions about "was a credentials mail queued"
+    # still hold.
+    MAIL_ENABLED = False
 
 
 class ProductionConfig(BaseConfig):

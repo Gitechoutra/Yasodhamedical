@@ -1,9 +1,8 @@
-from datetime import datetime, time
-
 from flask import Blueprint
 from flask_jwt_extended import jwt_required
 
 from portal.helpers.auth_helper import get_current_doctor, get_current_nurse
+from portal.helpers.datetime_helper import local_day_bounds
 from portal.helpers.decorators import current_role
 from portal.helpers.patient_access import patient_scope, scope_patients
 from portal.helpers.response import success
@@ -12,7 +11,7 @@ from portal.models.consultation import Consultation
 from portal.models.nursing_assignment import NursingAssignment
 from portal.models.patient import Patient
 from portal.models.report import Report
-from portal.routes.appointment_routes import todays_open_appointments_query
+from portal.routes.appointment_routes import open_appointments_query
 from portal.routes.report_routes import scope_reports
 
 dashboard_bp = Blueprint("dashboard", __name__)
@@ -21,8 +20,9 @@ dashboard_bp = Blueprint("dashboard", __name__)
 @dashboard_bp.get("/summary")
 @jwt_required()
 def summary():
-    today_start = datetime.combine(datetime.utcnow().date(), time.min)
-    today_end = datetime.combine(datetime.utcnow().date(), time.max)
+    # The staff's day, not UTC's — see local_day_bounds. Only the genuinely
+    # date-bounded counts below use these; the queue card is not one of them.
+    today_start, today_end = local_day_bounds()
 
     role = current_role()
     doctor = get_current_doctor()
@@ -39,7 +39,7 @@ def summary():
                 "unassigned_patients": Patient.query.filter(
                     Patient.assigned_doctor_id.is_(None)
                 ).count(),
-                "todays_appointments": todays_open_appointments_query().count(),
+                "todays_appointments": open_appointments_query().count(),
                 "todays_registrations": Patient.query.filter(
                     Patient.created_at >= today_start, Patient.created_at <= today_end
                 ).count(),
@@ -60,7 +60,7 @@ def summary():
     # Admin accounts (no doctor profile) still see the hospital-wide view.
     # Each card's query mirrors the filter its link applies on the target
     # page, so the number and the rows behind it can't disagree.
-    appointments_query = todays_open_appointments_query()
+    appointments_query = open_appointments_query()
     consultations_query = Consultation.query.filter_by(status="in_progress")
     recent_query = Consultation.query.order_by(Consultation.created_at.desc())
     # Both kinds of report count here — a single session's and a whole course

@@ -56,6 +56,15 @@ export default function ConsultationRoom() {
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
 
+  // Live input level, so "is it actually hearing the patient?" is answerable
+  // while the consultation is happening rather than after it, when the only
+  // evidence left is a transcript with half the conversation missing.
+  const [micLevel, setMicLevel] = useState(0);
+  const [micTooQuiet, setMicTooQuiet] = useState(false);
+  const audioCtxRef = useRef(null);
+  const meterTimerRef = useRef(null);
+  const peakRef = useRef(0);
+
   function addMessageIfNew(message) {
     setConsultation((c) => {
       if (!c) return c;
@@ -98,10 +107,68 @@ export default function ConsultationRoom() {
         recorderRef.current.onstop = null; // leaving the page cancels any in-flight segment
         recorderRef.current.stop();
       }
+      // Cancelling onstop above also skips its teardown, so the meter's
+      // AudioContext has to be closed here or it outlives the page.
+      if (meterTimerRef.current) window.clearInterval(meterTimerRef.current);
+      audioCtxRef.current?.close().catch(() => {});
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  /**
+   * Drives the input-level bar shown while recording.
+   *
+   * Purely diagnostic — it taps the same stream the recorder is using and
+   * changes nothing about what gets captured. The point is that a mic that is
+   * muted, pointing away, or set to the wrong device looks identical to a
+   * quiet room until the transcript comes back empty; this makes the
+   * difference visible in the moment.
+   */
+  function startLevelMeter(stream) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+
+    const ctx = new AudioCtx();
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    audioCtxRef.current = ctx;
+    peakRef.current = 0;
+    setMicTooQuiet(false);
+
+    const samples = new Float32Array(analyser.fftSize);
+    // Sampled on a timer rather than per animation frame: ten updates a
+    // second is more than the eye needs, and it keeps this off React's
+    // render-per-frame path.
+    meterTimerRef.current = window.setInterval(() => {
+      analyser.getFloatTimeDomainData(samples);
+      let sumOfSquares = 0;
+      for (let i = 0; i < samples.length; i += 1) sumOfSquares += samples[i] * samples[i];
+      const rms = Math.sqrt(sumOfSquares / samples.length);
+
+      // Mapped on a dB scale, not linearly: speech across a desk sits around
+      // -35 dBFS, which on a linear bar is a sliver indistinguishable from
+      // silence.
+      const dbfs = 20 * Math.log10(rms || 1e-8);
+      const level = Math.min(1, Math.max(0, (dbfs + 60) / 60));
+      setMicLevel(level);
+
+      peakRef.current = Math.max(peakRef.current, level);
+      // Only after a few seconds — the first moments of a recording are
+      // usually silence while people settle, and warning then is noise.
+      if (ctx.currentTime > 4) setMicTooQuiet(peakRef.current < 0.25);
+    }, 100);
+  }
+
+  function stopLevelMeter() {
+    if (meterTimerRef.current) window.clearInterval(meterTimerRef.current);
+    meterTimerRef.current = null;
+    audioCtxRef.current?.close().catch(() => {});
+    audioCtxRef.current = null;
+    setMicLevel(0);
+    setMicTooQuiet(false);
+  }
 
   // One MediaRecorder runs for as long as the doctor leaves the mic on —
   // no auto-chopping into fixed-length chunks. Short, arbitrarily-cut clips
@@ -111,11 +178,42 @@ export default function ConsultationRoom() {
   // end_consultation anyway, so nothing is lost by not tagging speakers live.
   async function startRecording() {
     setErrorMsg("");
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        // Spelled out rather than left as `audio: true`. The defaults vary by
+        // browser and by device, and the one that matters here is
+        // autoGainControl: with it off, a patient sitting back from the laptop
+        // records 20-30 dB below the doctor leaning towards it, and the quiet
+        // half of the conversation is what goes missing from the transcript.
+        // echoCancellation is off deliberately — nothing is being played back
+        // for it to cancel, and it is tuned to duck the far end of a call,
+        // which is exactly the distant speaker we are trying to keep.
+        audio: {
+          channelCount: 1,
+          autoGainControl: true,
+          noiseSuppression: true,
+          echoCancellation: false,
+        },
+      });
+    } catch (err) {
+      setErrorMsg(
+        err?.name === "NotAllowedError"
+          ? "The browser blocked access to the microphone. Allow it for this site, then press the mic again."
+          : "No microphone could be opened. Check that one is connected and selected, then try again."
+      );
+      return;
+    }
     streamRef.current = stream;
     chunksRef.current = [];
 
-    const recorder = new MediaRecorder(stream);
+    startLevelMeter(stream);
+
+    // A higher bitrate than the browser's default for the hop to our own
+    // server, which is on the same network. The backend levels the audio and
+    // re-encodes it small before it goes anywhere near the internet, so
+    // nothing is gained by starving the capture of detail here.
+    const recorder = new MediaRecorder(stream, { audioBitsPerSecond: 128000 });
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
     };
@@ -135,6 +233,7 @@ export default function ConsultationRoom() {
         return;
       }
       recorder.onstop = async () => {
+        stopLevelMeter();
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
         setIsRecording(false);
@@ -447,6 +546,35 @@ export default function ConsultationRoom() {
                       <HiOutlineMicrophone className="h-6 w-6" />
                     )}
                   </button>
+
+                  {/* What the microphone is hearing, right now. A doctor can
+                      see from this whether the patient is reaching it at all,
+                      and move the laptop while it still matters — rather than
+                      finding out from a transcript that stops halfway. */}
+                  {isRecording && (
+                    <div className="w-full max-w-xs">
+                      <div
+                        role="meter"
+                        aria-label="Microphone input level"
+                        aria-valuenow={Math.round(micLevel * 100)}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100"
+                      >
+                        <div
+                          className={`h-full rounded-full transition-[width] duration-100 ${
+                            micLevel < 0.25 ? "bg-amber-400" : "bg-emerald-500"
+                          }`}
+                          style={{ width: `${Math.round(micLevel * 100)}%` }}
+                        />
+                      </div>
+                      <p className="mt-1.5 text-center text-xs text-slate-400">
+                        {micTooQuiet
+                          ? "Barely picking anything up — move the microphone closer, or ask everyone to speak up."
+                          : "Microphone level"}
+                      </p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="mt-4 border-t border-slate-100 pt-4 text-center text-sm text-slate-400">

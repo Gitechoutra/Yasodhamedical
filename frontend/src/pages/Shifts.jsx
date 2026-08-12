@@ -12,6 +12,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import Modal from "../components/Modal";
 import { Badge, EmptyState, PageHeader } from "../components/RecordCard";
 import { useAuth } from "../context/AuthContext";
+import { isoDate, formatDay } from "../utils/dates";
 import {
   cancelShift,
   createShift,
@@ -29,6 +30,27 @@ const SLOT_TONES = {
   custom: "slate",
 };
 
+// The slot names as a person reads them. The stored values are lower-case
+// enum members ("morning"); a rota is not the place to show a database value.
+// There is no `afternoon` slot — the hospital runs three eight-hour turns and
+// `evening` is the 14:00 one, so its hours are spelled out below rather than
+// left to be inferred from the name.
+const SLOT_LABELS = {
+  morning: "Morning",
+  evening: "Evening",
+  night: "Night",
+  custom: "Custom hours",
+};
+
+/** The ISO date a shift ends on — the next day when it runs through midnight. */
+function shiftEndDate(shift) {
+  if (!shift.crosses_midnight) return shift.shift_date;
+  const d = new Date(`${shift.shift_date}T00:00:00`);
+  d.setDate(d.getDate() + 1);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 const ROLE_LABELS = {
   doctor: "Doctor",
   nurse: "Nurse",
@@ -41,32 +63,6 @@ const ROLE_LABELS = {
 
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
-
-/** Today (or today ± offsetDays) as YYYY-MM-DD in the *hospital's* timezone.
- *
- *  Built from the local date parts rather than `toISOString()`, which converts
- *  to UTC first and so returns the wrong day for part of every day: east of
- *  UTC it reads a day behind until the offset passes (05:30 in IST), west of
- *  it a day ahead all evening. A rota is wall-clock local — matching the
- *  storage model — so an administrator rostering the night shift at 2am must
- *  not be handed yesterday's date as the default. */
-function isoDate(offsetDays = 0) {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-/** "Mon 11 Aug 2026" — the rota is read by date, so the weekday leads. */
-function formatDay(iso) {
-  const d = new Date(`${iso}T00:00:00`);
-  return d.toLocaleDateString(undefined, {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
 
 /** Groups a flat list into [date, shifts[]] pairs, preserving server order —
  *  the API already sorts by date then start time. */
@@ -94,13 +90,48 @@ function ShiftHours({ shift }) {
 function ShiftBadges({ shift, showRole }) {
   return (
     <>
-      <Badge tone={SLOT_TONES[shift.slot] || "slate"}>{shift.slot}</Badge>
+      <Badge tone={SLOT_TONES[shift.slot] || "slate"}>
+        {SLOT_LABELS[shift.slot] || shift.slot}
+      </Badge>
       {shift.status === "cancelled" && <Badge tone="amber">Cancelled</Badge>}
       {showRole && shift.staff_role && (
         <Badge tone="slate">{ROLE_LABELS[shift.staff_role] || shift.staff_role}</Badge>
       )}
       {shift.department && <Badge tone="slate">{shift.department}</Badge>}
     </>
+  );
+}
+
+/**
+ * One shift spelled out for the person working it: which day it starts, which
+ * day it ends, and the hours on each side.
+ *
+ * The end date is stated rather than implied. A night shift is stored as one
+ * row with an end time "before" its start, so 22:00–06:00 under a single date
+ * heading reads as though it ends the same morning it began — the one detail
+ * on this screen somebody could turn up a day late for.
+ */
+function ShiftWindow({ shift }) {
+  const endDate = shiftEndDate(shift);
+  const rows = [
+    ["From", shift.shift_date, shift.starts_at],
+    ["To", endDate, shift.ends_at],
+  ];
+  return (
+    <dl className="grid grid-cols-[3rem_1fr] gap-x-3 gap-y-1 text-sm">
+      {rows.map(([label, day, time]) => (
+        <div key={label} className="contents">
+          <dt className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            {label}
+          </dt>
+          <dd className="text-slate-700">
+            {formatDay(day)}
+            <span className="text-slate-400"> · </span>
+            <span className="font-semibold text-slate-900">{time}</span>
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -214,14 +245,24 @@ function MyShifts() {
                         : "border-slate-100"
                     }`}
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <ShiftHours shift={shift} />
+                    {/* Deliberately just the shift: its type, its window and
+                        whatever the roster note says. The department and the
+                        staff badges belong to the administrator's rota, where
+                        a row has to be told apart from everyone else's — here
+                        every row is already this person's own. */}
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <ShiftWindow shift={shift} />
                       <div className="flex flex-wrap items-center gap-2">
-                        <ShiftBadges shift={shift} />
+                        <Badge tone={SLOT_TONES[shift.slot] || "slate"}>
+                          {SLOT_LABELS[shift.slot] || shift.slot}
+                        </Badge>
+                        {shift.status === "cancelled" && <Badge tone="amber">Cancelled</Badge>}
                       </div>
                     </div>
                     {shift.notes && (
-                      <p className="mt-2 text-sm text-slate-500">{shift.notes}</p>
+                      <p className="mt-3 border-t border-slate-100 pt-3 text-sm text-slate-500">
+                        {shift.notes}
+                      </p>
                     )}
                   </div>
                 ))}
@@ -236,11 +277,27 @@ function MyShifts() {
 
 // --------------------------------------------------------------- admin --
 
+/** How many days a from/to window covers, inclusive. 0 for anything that
+ *  isn't a usable range — the submit button reads this to decide whether it
+ *  can be pressed, so a half-typed date must not count as a day. */
+function dayspan(from, to) {
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+  const days = Math.round((end - start) / 86_400_000) + 1;
+  return days > 0 ? days : 0;
+}
+
 function ShiftFormModal({ shift, options, onClose, onSaved }) {
   const editing = Boolean(shift);
+  // Creating takes a window and writes one shift per day in it; editing moves
+  // the one row it opened on. Both are held in `from_date` so the rest of the
+  // form doesn't have to know which mode it is in — `to_date` is simply
+  // ignored on an edit.
   const [form, setForm] = useState(() => ({
     user_id: shift?.user_id ? String(shift.user_id) : "",
-    shift_date: shift?.shift_date || isoDate(0),
+    from_date: shift?.shift_date || isoDate(0),
+    to_date: shift?.shift_date || isoDate(0),
     slot: shift?.slot || "morning",
     starts_at: shift?.starts_at || options.slot_hours?.morning?.starts_at || "06:00",
     ends_at: shift?.ends_at || options.slot_hours?.morning?.ends_at || "14:00",
@@ -253,6 +310,18 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
 
   function update(field) {
     return (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
+  }
+
+  // Moving the start past the end drags the end with it. Leaving them crossed
+  // would mean the form's own count says "0 shifts" and the button is dead
+  // until the admin works out which of the two fields to fix.
+  function handleFromDate(e) {
+    const from_date = e.target.value;
+    setForm((f) => ({
+      ...f,
+      from_date,
+      to_date: !f.to_date || f.to_date < from_date ? from_date : f.to_date,
+    }));
   }
 
   // Picking a named slot fills its standard hours in, which the admin can
@@ -268,19 +337,45 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
     }));
   }
 
+  const staffById = useMemo(() => {
+    const map = new Map();
+    for (const s of options.staff || []) map.set(String(s.id), s);
+    return map;
+  }, [options.staff]);
+
+  // A nurse is rostered to a ward, not to a department — the department list
+  // is the doctors' specialities and means nothing against a nursing shift.
+  // Hiding the field is not enough on its own: an admin can pick a department
+  // and then switch the assignee to a nurse, so the value is dropped on save
+  // too rather than travelling up from a control nobody can see.
+  const assigneeIsNurse = staffById.get(form.user_id)?.role === "nurse";
+
+  // How many rows this form will write. Editing always touches exactly the one
+  // it opened on, whatever `to_date` happens to still hold.
+  const days = editing ? 1 : dayspan(form.from_date, form.to_date);
+  const assignee = staffById.get(form.user_id);
+
   async function handleSubmit(e) {
     e.preventDefault();
     setSaving(true);
     setErrorMsg("");
     const payload = {
       user_id: form.user_id ? Number(form.user_id) : null,
-      shift_date: form.shift_date,
       slot: form.slot,
       starts_at: form.starts_at,
       ends_at: form.ends_at,
-      department_id: form.department_id ? Number(form.department_id) : null,
+      department_id:
+        assigneeIsNurse || !form.department_id ? null : Number(form.department_id),
       notes: form.notes,
     };
+    // A create spans a window and the server writes one shift per day in it;
+    // an edit moves the single row it opened on.
+    if (editing) {
+      payload.shift_date = form.from_date;
+    } else {
+      payload.from_date = form.from_date;
+      payload.to_date = form.to_date;
+    }
     // Only on edit: creating always starts a shift scheduled, and sending a
     // status on create would offer a "roster it already cancelled" that means
     // nothing. On edit this is what puts a cancelled shift back on the rota.
@@ -308,7 +403,7 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
   }, [options.staff]);
 
   return (
-    <Modal title={editing ? "Edit shift" : "Roster a shift"} onClose={onClose}>
+    <Modal title={editing ? "Edit shift" : "Add a Shift"} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-3">
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">
@@ -330,30 +425,54 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
           </select>
         </div>
 
+        {/* A run of days, not one. The same person works the same slot across
+            a week or a month, and making the administrator reopen this form
+            for each of those days is how a rota ends up with holes in it.
+            Editing narrows back to a single date: a range there would have to
+            answer what happens to the row already on screen. */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Date *</label>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">
+              {editing ? "Date *" : "From date *"}
+            </label>
             <input
               required
               type="date"
               className={inputClass}
-              value={form.shift_date}
-              onChange={update("shift_date")}
+              value={form.from_date}
+              onChange={editing ? update("from_date") : handleFromDate}
             />
           </div>
+          {!editing && (
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-slate-600">
+                To date *
+              </label>
+              <input
+                required
+                type="date"
+                // The browser refuses a backwards range before the form has to
+                // explain one.
+                min={form.from_date}
+                className={inputClass}
+                value={form.to_date}
+                onChange={update("to_date")}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Slot *</label>
             <select className={inputClass} value={form.slot} onChange={handleSlot}>
               {(options.slots || []).map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  {SLOT_LABELS[s] || s}
                 </option>
               ))}
             </select>
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">Starts *</label>
             <input
@@ -376,21 +495,40 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
           </div>
         </div>
 
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600">Department</label>
-          <select
-            className={inputClass}
-            value={form.department_id}
-            onChange={update("department_id")}
-          >
-            <option value="">No department</option>
-            {(options.departments || []).map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* What pressing the button will actually do. One form producing
+            thirty rows is worth stating before the fact rather than leaving
+            the administrator to count them on the rota afterwards. */}
+        {!editing && days > 0 && (
+          <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            Adds <span className="font-semibold text-slate-900">{days}</span>{" "}
+            {SLOT_LABELS[form.slot]?.toLowerCase() || form.slot} shift
+            {days === 1 ? "" : "s"}, {form.starts_at}–{form.ends_at}
+            {days === 1 ? " on " : ", one on each day from "}
+            {formatDay(form.from_date)}
+            {days === 1 ? "" : ` to ${formatDay(form.to_date)}`}.
+            {assignee
+              ? ` ${assignee.name} will be notified.`
+              : " Nobody is assigned yet, so no one is notified."}
+          </p>
+        )}
+
+        {!assigneeIsNurse && (
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">Department</label>
+            <select
+              className={inputClass}
+              value={form.department_id}
+              onChange={update("department_id")}
+            >
+              <option value="">No department</option>
+              {(options.departments || []).map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Edit only. Cancelling is done from the rota, but putting a shift
             back is only possible here — without this a cancelled shift could
@@ -428,10 +566,16 @@ function ShiftFormModal({ shift, options, onClose, onSaved }) {
 
         <button
           type="submit"
-          disabled={saving}
+          disabled={saving || days === 0}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
-          {saving ? "Saving…" : editing ? "Save changes" : "Roster shift"}
+          {saving
+            ? "Saving…"
+            : editing
+              ? "Save changes"
+              : days > 1
+                ? `Add ${days} shifts`
+                : "Add shift"}
         </button>
       </form>
     </Modal>
@@ -512,7 +656,7 @@ function ShiftManager() {
             className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
           >
             <HiOutlinePlus className="h-4 w-4" />
-            Roster a shift
+            Add a Shift
           </button>
         }
       />
@@ -597,7 +741,7 @@ function ShiftManager() {
                 to see the whole rota.
               </>
             ) : (
-              "No shifts rostered for this period. Use “Roster a shift” to add one."
+              "No shifts rostered for this period. Use “Add a Shift” to add one."
             )}
           </EmptyState>
         ) : (

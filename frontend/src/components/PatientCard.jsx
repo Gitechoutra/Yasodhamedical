@@ -73,7 +73,7 @@ function AssignDoctorSelect({ patient, doctors, onAssigned }) {
 export default function PatientCard({
   patient,
   doctors,
-  mustAssign,
+  canReassignDoctor,
   canScheduleAppointments,
   canAssignNurse,
   canEditPatient,
@@ -110,7 +110,7 @@ export default function PatientCard({
         <Detail label="Blood Group" value={patient.blood_group} />
       </div>
 
-      {mustAssign && (
+      {canReassignDoctor && (
         <AssignDoctorSelect patient={patient} doctors={doctors} onAssigned={onAssignDoctor} />
       )}
 

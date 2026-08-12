@@ -12,6 +12,7 @@ import {
   HiOutlineDocumentChartBar,
   HiOutlineUserGroup,
   HiOutlineBuildingOffice2,
+  HiOutlineClock,
   HiOutlineIdentification,
   HiOutlineCalendarDays as HiOutlineShiftCalendar,
   HiOutlineCog6Tooth,
@@ -88,7 +89,23 @@ const NAV_ITEMS = [
   // doctor only ever meets it while prescribing — the picker in the
   // consultation room reads the same formulary, so a browse-only copy of it
   // on the dashboard was a second door onto data nobody edits from here.
-  { to: "/dashboard/doctors", label: "Doctors", icon: HiOutlineUserGroup, hideFrom: ["doctor"] },
+  // `end`: Availability sits underneath this path, and without it both entries
+  // would highlight at once.
+  {
+    to: "/dashboard/doctors",
+    label: "Doctors",
+    icon: HiOutlineUserGroup,
+    end: true,
+    hideFrom: ["doctor"],
+  },
+  // When each doctor is in. Front-desk work — the API allows admin and
+  // reception only — and hidden from doctors like the rest of this group.
+  {
+    to: "/dashboard/doctors/availability",
+    label: "Availability",
+    icon: HiOutlineClock,
+    hideFrom: ["doctor"],
+  },
   {
     to: "/dashboard/departments",
     label: "Departments",

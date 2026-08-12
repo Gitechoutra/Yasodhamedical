@@ -19,7 +19,9 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from portal.extensions import db
 from portal.helpers.audit import audit
+from portal.helpers.broadcast import dashboard_changed
 from portal.helpers.decorators import current_role, role_required
+from portal.helpers.notify import notify
 from portal.helpers.response import error, success
 from portal.models.branch import Branch
 from portal.models.department import Department
@@ -40,6 +42,11 @@ SHIFT_DELETED = "shift.deleted"
 DEFAULT_RANGE_DAYS = 14
 MAX_RANGE_DAYS = 366
 MAX_NOTES = 500
+
+# How long a run of days one create request may cover. A rota is built a week
+# or a month at a time; a cap well past that stops a typo in the year turning
+# into three hundred rows and three hundred audit entries.
+MAX_CREATE_DAYS = 92
 
 
 def _caller_id():
@@ -199,8 +206,46 @@ def _range_from_args():
     return start, end, None
 
 
+def _create_dates(payload):
+    """The days one create request covers. Returns (dates, error_message).
+
+    A create carries a *window* rather than a single date. The same person
+    works the same slot for a run of days far more often than for one, so the
+    administrator names the run once instead of repeating the form for every
+    day of it. A one-day shift is that window collapsed: either end on its own
+    stands for both.
+
+    `shift_date` is still accepted so an older client — or anything scripted
+    against the previous shape of this endpoint — keeps working unchanged.
+    """
+    fallback = payload.get("shift_date")
+    start, err = _parse_date(payload.get("from_date") or fallback, "from_date")
+    if err:
+        return None, err
+    end, err = _parse_date(payload.get("to_date") or fallback, "to_date")
+    if err:
+        return None, err
+
+    if start is None and end is None:
+        return None, "from_date is required"
+    start = start or end
+    end = end or start
+
+    if end < start:
+        return None, "'to_date' cannot be earlier than 'from_date'"
+    span = (end - start).days + 1
+    if span > MAX_CREATE_DAYS:
+        return None, f"A shift cannot be rostered across more than {MAX_CREATE_DAYS} days at once"
+
+    return [start + timedelta(days=offset) for offset in range(span)], None
+
+
 def _validate_common(payload, existing=None):
-    """Shared create/update validation.
+    """Shared create/update validation for everything except the date.
+
+    The date is left out because the two callers want different things from
+    it: an update moves one row, a create writes one row per day of a range.
+    See `_create_dates`.
 
     Returns (fields, error_message). `fields` is a dict ready to apply to a
     StaffShift.
@@ -209,21 +254,12 @@ def _validate_common(payload, existing=None):
     if slot not in SHIFT_SLOTS:
         return None, f"slot must be one of: {', '.join(SHIFT_SLOTS)}"
 
-    shift_date, err = _parse_date(payload.get("shift_date"), "shift_date")
-    if err:
-        return None, err
-    if shift_date is None:
-        shift_date = existing.shift_date if existing else None
-    if shift_date is None:
-        return None, "shift_date is required"
-
     starts_at, ends_at, err = _resolve_hours(payload, slot, existing)
     if err:
         return None, err
 
     fields = {
         "slot": slot,
-        "shift_date": shift_date,
         "starts_at": starts_at,
         "ends_at": ends_at,
     }
@@ -269,6 +305,56 @@ def _describe(shift, user=_UNSET):
     staff = shift.user if user is _UNSET else user
     who = staff.name if staff else "unassigned"
     return f"{shift.shift_date} {shift.slot} ({shift.starts_at:%H:%M}-{shift.ends_at:%H:%M}) — {who}"
+
+
+def _notify_assigned(user, shifts, actor_id):
+    """Tells a member of staff they have been put on the rota.
+
+    Only the person the shifts belong to is told, which is the whole point:
+    the rest of the hospital's roster is none of their business, and a nurse
+    should not learn from her bell who else is on tonight.
+
+    One notification per assignment rather than per day. Rostering somebody
+    across a fortnight is one decision by the administrator and should read as
+    one line in that person's bell, not fourteen — and fourteen would push
+    every other notification they have off the panel.
+
+    Called before the commit, like every other `notify()` in the app: the rows
+    join the open session, so a shift that fails to save cannot leave behind a
+    notification announcing it.
+    """
+    if not user or not shifts:
+        return
+
+    first, last = shifts[0], shifts[-1]
+    hours = f"{first.starts_at:%H:%M}–{first.ends_at:%H:%M}"
+
+    if len(shifts) == 1:
+        title = "You have a new shift"
+        body = f"{first.slot.capitalize()} shift on {first.shift_date:%a, %d %b %Y}, {hours}."
+    else:
+        title = f"You have {len(shifts)} new shifts"
+        body = (
+            f"{first.slot.capitalize()} shift, {hours}, every day from "
+            f"{first.shift_date:%d %b} to {last.shift_date:%d %b %Y}."
+        )
+
+    # Worth saying outright. An end time earlier than the start reads as a
+    # mistake to whoever is being told to work it.
+    if first.crosses_midnight:
+        body += " Ends the following morning."
+
+    notify(
+        [user.id],
+        title=title,
+        body=body,
+        category="shift",
+        # The staff-facing rota. NotificationMenu.resolveLink points this at
+        # whichever module the reader actually lives in — a nurse's own shifts
+        # are at /nurse/shifts, and /dashboard would bounce her straight out.
+        link="/dashboard/shifts",
+        exclude_user_id=actor_id,
+    )
 
 
 # ---------------------------------------------------------------- reading --
@@ -426,10 +512,22 @@ def get_shift(shift_id):
 @shift_bp.post("")
 @role_required("admin")
 def create_shift():
-    """Rosters a shift, assigned or left open for someone to be put in later."""
+    """Rosters a run of days, assigned or left open for someone to be put in
+    later.
+
+    One row is written per day between `from_date` and `to_date` inclusive,
+    all sharing the slot, hours, department and notes given once. The dates
+    stay one row each rather than becoming a range column on the table: a rota
+    is read, cancelled and reassigned a day at a time, and a shift that had to
+    remember it was created alongside four others could not be.
+    """
     payload = request.get_json(silent=True) or {}
 
     fields, err = _validate_common(payload)
+    if err:
+        return error(err, status=422)
+
+    dates, err = _create_dates(payload)
     if err:
         return error(err, status=422)
 
@@ -446,24 +544,46 @@ def create_shift():
     else:
         user_id = None
 
-    clash = _clashing_shift(user_id, fields["shift_date"], fields["starts_at"], fields["ends_at"])
-    if clash:
-        return error(
-            f"{user.name} is already rostered {clash.starts_at:%H:%M}-{clash.ends_at:%H:%M} "
-            f"on {clash.shift_date}",
-            status=409,
-            errors={"shift_id": clash.id},
+    # Every day is checked before any of them is written. A run that half
+    # applied would leave the administrator to work out which days landed and
+    # which did not, from a rota that looks deliberate either way.
+    for day in dates:
+        clash = _clashing_shift(user_id, day, fields["starts_at"], fields["ends_at"])
+        if clash:
+            return error(
+                f"{user.name} is already rostered {clash.starts_at:%H:%M}-"
+                f"{clash.ends_at:%H:%M} on {clash.shift_date}",
+                status=409,
+                errors={"shift_id": clash.id, "shift_date": day.isoformat()},
+            )
+
+    created = []
+    for day in dates:
+        shift = StaffShift(
+            user_id=user_id, created_by_id=_caller_id(), shift_date=day, **fields
+        )
+        db.session.add(shift)
+        created.append(shift)
+    db.session.flush()  # assigns the ids the audit entries reference
+
+    for shift in created:
+        audit(
+            SHIFT_CREATED, entity="staff_shift", entity_id=shift.id, detail=_describe(shift, user)
         )
 
-    shift = StaffShift(user_id=user_id, created_by_id=_caller_id(), **fields)
-    db.session.add(shift)
-    db.session.flush()
+    _notify_assigned(user, created, _caller_id())
 
-    audit(
-        SHIFT_CREATED, entity="staff_shift", entity_id=shift.id, detail=_describe(shift, user)
-    )
     db.session.commit()
-    return success(shift.to_dict(), message="Shift created", status=201)
+    # Wakes the assignee's bell now rather than on its next minute-long poll.
+    dashboard_changed("shift_created")
+
+    return success(
+        {"items": [s.to_dict() for s in created], "count": len(created)},
+        message=(
+            "Shift added" if len(created) == 1 else f"{len(created)} shifts added"
+        ),
+        status=201,
+    )
 
 
 @shift_bp.patch("/<int:shift_id>")
@@ -480,6 +600,14 @@ def update_shift(shift_id):
     fields, err = _validate_common(payload, existing=shift)
     if err:
         return error(err, status=422)
+
+    # An edit moves one row, so it takes one date rather than a window —
+    # splitting an existing shift across a range would be a different
+    # operation with a different answer for what happens to this row's id.
+    shift_date, err = _parse_date(payload.get("shift_date"), "shift_date")
+    if err:
+        return error(err, status=422)
+    fields["shift_date"] = shift_date or shift.shift_date
 
     reassigned = False
     target_user_id = shift.user_id
@@ -525,6 +653,13 @@ def update_shift(shift_id):
     for key, value in fields.items():
         setattr(shift, key, value)
 
+    # The "Assign" button on an unfilled slot lands here, not on create, so
+    # telling people only on create would leave the drafted-then-filled rota —
+    # the way an administrator is meant to work — silently unannounced. Only a
+    # shift that will actually be worked is worth a notification.
+    if reassigned and shift.status == "scheduled":
+        _notify_assigned(user, [shift], _caller_id())
+
     audit(
         SHIFT_ASSIGNED if reassigned else SHIFT_UPDATED,
         entity="staff_shift",
@@ -532,6 +667,8 @@ def update_shift(shift_id):
         detail=_describe(shift, user),
     )
     db.session.commit()
+    if reassigned:
+        dashboard_changed("shift_assigned")
     return success(shift.to_dict(), message="Shift updated")
 
 

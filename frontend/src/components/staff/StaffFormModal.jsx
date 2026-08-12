@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import Modal from "../Modal";
 import { createStaff, updateStaff } from "../../services/staffService";
+import {
+  EMAIL_ERROR,
+  EMAIL_HINT,
+  PHONE_DIGITS,
+  PHONE_ERROR,
+  digitsOnly,
+  isPhoneIncomplete,
+  isValidEmail,
+} from "../../utils/contact";
 
 const input =
   "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
@@ -24,18 +33,35 @@ export const ROLE_LABELS = {
  * changes, and the form re-renders itself.
  */
 const ROLE_FIELDS = {
+  // Department is a doctor-only field. It is what the OP queue routes on —
+  // an appointment is raised against a department and only a doctor in that
+  // department can pick it up — so for a doctor it is operational data the
+  // account cannot work without.
+  //
+  // For every other role it was HR trivia: a receptionist works the front
+  // desk, a pharmacist is scoped by branch, and an accountant belongs to no
+  // clinical department at all. Nothing read those values.
   doctor: ["department", "specialization", "designation", "registration_no", "years_experience"],
-  nurse: ["department", "designation", "registration_no"],
-  receptionist: ["department"],
+  nurse: ["designation", "registration_no"],
+  receptionist: [],
   pharmacist: ["branch", "designation", "registration_no"],
-  lab_technician: ["department", "lab_department", "qualification", "designation"],
+  lab_technician: ["lab_department", "qualification", "designation"],
   accountant: ["designation", "qualification"],
-  other_staff: ["department", "designation"],
+  other_staff: ["designation"],
 };
 
 // Fields the server refuses to create the account without, because the role's
 // operational profile cannot exist otherwise.
-const REQUIRED_BY_ROLE = { doctor: ["department"], nurse: ["department"], pharmacist: ["branch"] };
+// Nurse is deliberately absent: `nurses.department_id` is nullable, the only
+// query that filters on it passes the department optionally (and no caller
+// ever does), and POST /nursing/nurses has always created nurses without one.
+// Requiring it here was stricter than the rest of the application.
+//
+// The phone and email rules themselves live in utils/contact.js, shared with
+// every other form that collects either — the server is the boundary, and
+// these are what stop the administrator finding out only when they press Save.
+
+const REQUIRED_BY_ROLE = { doctor: ["department"], pharmacist: ["branch"] };
 
 const REGISTRATION_LABELS = {
   doctor: "Medical registration number",
@@ -43,11 +69,16 @@ const REGISTRATION_LABELS = {
   pharmacist: "Pharmacy license number",
 };
 
+// No password here, and no username either. Both are the server's to decide:
+// the username is derived from the full name (Sandeep Viswanadh ->
+// sandeep.viswanadh, numbered if taken) and the first password is random and
+// emailed to the staff member with a single-use link to replace it. An
+// administrator who could type a password would be an administrator who knows
+// one, which is the thing that flow exists to prevent — so the field is gone
+// rather than hidden.
 const EMPTY = {
   name: "",
   email: "",
-  password: "",
-  confirm_password: "",
   role: "",
   phone: "",
   gender: "",
@@ -78,7 +109,12 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
       email: staff.email || "",
       role: staff.role || "",
       is_active: staff.is_active,
-      phone: p.phone || "",
+      // Sanitised on the way in too. No stored number currently breaks the
+      // rule, but one written before it existed would otherwise load into a
+      // field that can no longer represent it — leaving the admin unable to
+      // save the record at all without first clearing a number they may have
+      // wanted to keep.
+      phone: digitsOnly(p.phone),
       gender: p.gender || "",
       date_of_birth: p.date_of_birth || "",
       joined_on: p.joined_on || "",
@@ -125,8 +161,14 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.role]);
 
-  const mismatch =
-    form.confirm_password.length > 0 && form.password !== form.confirm_password;
+  // Optional, but exact when given: a half-typed number is not "nearly valid",
+  // it is a number that would reach the wrong person.
+  const phoneIncomplete = isPhoneIncomplete(form.phone);
+
+  // This address is where the account's credentials are sent, so it being at a
+  // domain the hospital accepts is not a formality — a typo'd one produces an
+  // account whose only way in is a mail that goes nowhere.
+  const emailInvalid = !isValidEmail(form.email);
 
   // Trivial to compute and `required` is rebuilt each render anyway, so a
   // memo here would cost more than it saves.
@@ -136,25 +178,28 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (mismatch) {
-      setErrorMsg("Those passwords do not match.");
+    if (phoneIncomplete) {
+      setErrorMsg(PHONE_ERROR);
+      return;
+    }
+    if (emailInvalid) {
+      setErrorMsg(EMAIL_ERROR);
       return;
     }
     setSaving(true);
     setErrorMsg("");
     try {
-      const payload = { ...form };
-      // Blank means "leave it" on edit; on create the server requires one.
-      if (editing && !payload.password) {
-        delete payload.password;
-        delete payload.confirm_password;
-      }
       if (editing) {
-        await updateStaff(staff.id, payload);
+        await updateStaff(staff.id, form);
+        onSaved();
       } else {
-        await createStaff(payload);
+        // The created record carries `credentials` and the message written
+        // for the administrator — whether the email went, and the sign-in
+        // details themselves if it didn't. Handed up so the staff list can
+        // show them; there is no second chance to read them.
+        const created = await createStaff(form);
+        onSaved(created);
       }
-      onSaved();
     } catch (err) {
       setErrorMsg(err.response?.data?.message || "Could not save this staff member.");
     } finally {
@@ -192,17 +237,40 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
             <input
               required
               type="email"
-              className={input}
+              className={`${input} ${emailInvalid ? "border-red-300" : ""}`}
+              placeholder={EMAIL_HINT}
               value={form.email}
               onChange={update("email")}
             />
+            <p className={`mt-1 text-xs ${emailInvalid ? "text-red-600" : "text-slate-400"}`}>
+              {emailInvalid ? EMAIL_ERROR : `Must be ${EMAIL_HINT}`}
+            </p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div>
             <label className={label}>Mobile number</label>
-            <input className={input} value={form.phone} onChange={update("phone")} />
+            <input
+              type="tel"
+              // inputMode gets a phone keypad on mobile; the value is still
+              // sanitised on the way in, because a keypad is a suggestion and
+              // paste ignores it entirely.
+              inputMode="numeric"
+              autoComplete="tel"
+              maxLength={PHONE_DIGITS}
+              placeholder={`${PHONE_DIGITS} digits`}
+              className={`${input} ${phoneIncomplete ? "border-red-300" : ""}`}
+              value={form.phone}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, phone: digitsOnly(e.target.value) }))
+              }
+            />
+            {phoneIncomplete && (
+              <p className="mt-1 text-xs text-red-600">
+                {form.phone.length} of {PHONE_DIGITS} digits
+              </p>
+            )}
           </div>
           <div>
             <label className={label}>Gender</label>
@@ -249,7 +317,10 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
         </div>
 
         {/* Everything below depends on the role selected above. */}
-        {form.role && (
+        {/* Only when the role actually adds fields. Receptionist now adds
+            none, and a "Receptionist details" heading over an empty box
+            reads as something failing to load. */}
+        {form.role && shown.length > 0 && (
           <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50/70 p-4">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
               {ROLE_LABELS[form.role]} details
@@ -388,38 +459,6 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
           </div>
         )}
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className={label}>{editing ? "New password" : "Password *"}</label>
-            <input
-              required={!editing}
-              type="password"
-              minLength={8}
-              autoComplete="new-password"
-              className={input}
-              value={form.password}
-              onChange={update("password")}
-              placeholder={editing ? "Leave blank to keep current" : "At least 8 characters"}
-            />
-          </div>
-          <div>
-            <label className={label}>Confirm password{editing ? "" : " *"}</label>
-            <input
-              required={!editing}
-              type="password"
-              autoComplete="new-password"
-              className={`${input} ${mismatch ? "border-red-300" : ""}`}
-              value={form.confirm_password}
-              onChange={update("confirm_password")}
-            />
-            {mismatch && (
-              <p className="mt-1 text-[11px] font-medium text-red-600">
-                Passwords do not match.
-              </p>
-            )}
-          </div>
-        </div>
-
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input
             type="checkbox"
@@ -450,10 +489,14 @@ export default function StaffFormModal({ staff, options, onClose, onSaved }) {
 
         <button
           type="submit"
-          disabled={saving || mismatch || missing.length > 0}
+          disabled={saving || phoneIncomplete || emailInvalid || missing.length > 0}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
-          {saving ? "Saving…" : editing ? "Save changes" : "Create staff account"}
+          {saving
+            ? "Saving…"
+            : editing
+            ? "Save changes"
+            : "Create account & email sign-in details"}
         </button>
       </form>
     </Modal>
