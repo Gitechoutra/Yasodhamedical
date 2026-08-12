@@ -1,5 +1,4 @@
 import { HiOutlineArrowRightCircle, HiOutlineClock, HiOutlinePlay } from "react-icons/hi2";
-import OpStatusBadge from "./OpStatusBadge";
 import {
   Badge,
   RecordCard,
@@ -82,13 +81,6 @@ export default function AppointmentCard({
         <RecordCardBadges>
           <Badge tone={status.tone}>{status.label}</Badge>
           {isNext && <Badge tone="brand">Next up</Badge>}
-          {/* Whether this OP was billed or came in free as a follow-up.
-              Rendered only when set: the field is null for every patient
-              registered before OP billing existed, and a bare dash in the
-              badge row reads as a broken value rather than "not applicable". */}
-          {appointment.patient_op_status && (
-            <OpStatusBadge status={appointment.patient_op_status} />
-          )}
         </RecordCardBadges>
 
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-2">

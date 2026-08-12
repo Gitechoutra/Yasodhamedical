@@ -1,6 +1,7 @@
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 
-from flask import Blueprint, request
+from flask import Blueprint, request, send_file
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from portal.extensions import db
@@ -29,8 +30,18 @@ from portal.models.consultation import Consultation
 from portal.models.department import Department
 from portal.models.emergency_case import EmergencyCase
 from portal.models.patient import Patient
+from portal.pdf.op_document_generator import generate_op_document_pdf
 
 appointment_bp = Blueprint("appointments", __name__)
+
+# Regenerated in place on every request rather than tracked in a table — an
+# OP slip is a 1:1, always-reproducible view of its appointment, so there is
+# nothing here worth a database row the way a signed-off prescription is.
+OP_DOCUMENTS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "uploads", "op_documents")
+
+
+def _op_document_path(appointment_id):
+    return os.path.join(OP_DOCUMENTS_DIR, f"op_{appointment_id}.pdf")
 
 # In the queue, and so what the dashboard's queue card counts: still on the
 # board, i.e. not yet completed or cancelled.
@@ -107,6 +118,17 @@ def open_appointments_query():
     )
 
 
+def _parse_range_date(raw, field):
+    """Returns (date, error_message). `field` is the query param name, for
+    the error text."""
+    if not raw:
+        return None, None
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date(), None
+    except ValueError:
+        return None, f"{field} must be in YYYY-MM-DD format"
+
+
 @appointment_bp.get("")
 @jwt_required()
 def list_appointments():
@@ -114,24 +136,43 @@ def list_appointments():
 
     Completed and cancelled appointments are left out by default — this is a
     work list, not a history. Pass ?status=completed (or cancelled) to look
-    one of those up explicitly.
+    one of those up explicitly, or ?date_from=/?date_to= for a period lookup
+    (any status) — used for a per-doctor patient count, never to narrow the
+    live queue itself. The queue is deliberately never date-filtered (see
+    open_appointments_query) — a patient still waiting from yesterday must
+    never disappear because "today" was selected somewhere.
     """
     status = request.args.get("status")
+    date_from, date_from_error = _parse_range_date(request.args.get("date_from"), "date_from")
+    if date_from_error:
+        return error(date_from_error, status=422)
+    date_to, date_to_error = _parse_range_date(request.args.get("date_to"), "date_to")
+    if date_to_error:
+        return error(date_to_error, status=422)
+
     # ?filter=today was the dashboard card's link and is still accepted so
     # old links and bookmarks keep working. It no longer narrows anything:
     # the queue is every open appointment whatever day it was raised on (see
     # open_appointments_query), so this resolves to the same live queue.
     queue_requested = request.args.get("filter") == "today"
 
-    is_lookup = bool(status) and not queue_requested
+    is_lookup = (bool(status) or date_from or date_to) and not queue_requested
     if is_lookup:
-        # An explicit status on its own is a lookup, not the queue — it may
-        # return completed/cancelled rows, which the queue never does.
-        query = Appointment.query.filter(Appointment.status == status)
+        # An explicit status, or a date range, is a lookup rather than the
+        # queue — it may return completed/cancelled rows, which the queue
+        # never does.
+        query = Appointment.query
+        if status:
+            query = query.filter(Appointment.status == status)
     else:
         query = open_appointments_query()
         if status:
             query = query.filter(Appointment.status == status)
+
+    if date_from:
+        query = query.filter(Appointment.created_at >= date_from)
+    if date_to:
+        query = query.filter(Appointment.created_at < date_to + timedelta(days=1))
 
     doctor = get_current_doctor()
     # Explicit column, not filter_by: the query may already be joined to
@@ -368,3 +409,42 @@ def start_appointment(appointment_id):
     dashboard_changed("consultation_started")
 
     return success(consultation.to_dict(include_detail=True), message="Appointment started")
+
+
+@appointment_bp.post("/<int:appointment_id>/op-document")
+@role_required("receptionist")
+def generate_op_document(appointment_id):
+    """Renders this OP's registration slip — reception's own document, so
+    reception is who generates it, same gate as raising the OP itself."""
+    appointment = Appointment.query.get(appointment_id)
+    if not appointment:
+        return error("Appointment not found", status=404)
+
+    os.makedirs(OP_DOCUMENTS_DIR, exist_ok=True)
+    try:
+        generate_op_document_pdf(appointment, _op_document_path(appointment.id))
+    except Exception as exc:  # noqa: BLE001 - surface PDF generation failure
+        return error(f"Could not generate OP document: {exc}", status=500)
+
+    return success(appointment.to_dict(), message="OP document generated", status=201)
+
+
+@appointment_bp.get("/<int:appointment_id>/op-document/download")
+@jwt_required()
+def download_op_document(appointment_id):
+    appointment = Appointment.query.get(appointment_id)
+    if not appointment:
+        return error("Appointment not found", status=404)
+    if not can_access_patient(appointment.patient, get_current_doctor()):
+        # Deliberately 404, not 403 — same convention as the patient routes,
+        # so this never confirms another doctor's patient exists.
+        return error("Appointment not found", status=404)
+
+    path = _op_document_path(appointment.id)
+    if not os.path.exists(path):
+        return error("OP document has not been generated yet", status=404)
+
+    patient_name = (appointment.patient.name if appointment.patient else "patient").replace(" ", "_")
+    return send_file(
+        path, as_attachment=True, download_name=f"{patient_name}_OP_{appointment.code}.pdf"
+    )

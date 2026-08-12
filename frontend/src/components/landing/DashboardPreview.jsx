@@ -184,13 +184,13 @@ const SCREENS = {
               </div>
             ))}
             <div className="rounded-lg bg-gradient-to-r from-brand-500 to-brand-700 px-2.5 py-2 text-center text-[10px] font-bold text-white">
-              Create OP
+              ADD OP
             </div>
           </div>
         </Panel>
         <Panel title="Today's OP queue">
-          <Row name="Ramana" meta="Gynecology · Dr. Sahithi" badge="OP: Free" tone="emerald" />
-          <Row name="Ramu" meta="Orthopedics · Dr. Sandeep" badge="OP: Paid" tone="amber" />
+          <Row name="Ramana" meta="Gynecology · Dr. Sahithi" badge="Waiting" tone="brand" />
+          <Row name="Ramu" meta="Orthopedics · Dr. Sandeep" badge="In consultation" tone="emerald" />
           <Row name="Arun" meta="General Medicine" badge="Unrouted" tone="red" />
         </Panel>
       </div>

@@ -263,6 +263,11 @@ export default function EmergencyCaseDetail() {
             </div>
           </div>
 
+          {/* Clinical assessment — reception neither records nor needs it,
+              and every field is disabled for them anyway (canEdit requires
+              canTreat, doctor-only), so the card was read-only dead weight
+              on their screen. */}
+          {user?.role !== "receptionist" && (
           <form onSubmit={handleSaveNotes} className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
             <h2 className="text-base font-semibold text-slate-900">Assessment &amp; treatment</h2>
             <p className="mt-1 text-xs text-slate-400">
@@ -332,6 +337,7 @@ export default function EmergencyCaseDetail() {
               </p>
             )}
           </form>
+          )}
 
           {/* OT/Surgery decision reuses the exact same panel the normal
               surgical pathway uses — nothing here is emergency-specific. */}

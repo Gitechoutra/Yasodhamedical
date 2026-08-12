@@ -148,7 +148,16 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('portal/routes/appointment_routes.py', encoding='utf-8'\\).read\\(\\)\\)\")",
       "Bash(npm ls *)",
       "Read(//d/MedAsta_Yasodha/Yasodhamedical/frontend/src/services/**)",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('portal/routes/patient_routes.py', encoding='utf-8'\\).read\\(\\)\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('portal/routes/patient_routes.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(tasklist)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('portal/routes/notification_routes.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(git log *)",
+      "Bash(dir backend\\\\migrations\\\\versions)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('portal/pdf/op_document_generator.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('portal/helpers/queue_helper.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('portal/models/appointment.py', encoding='utf-8'\\).read\\(\\)\\)\")",
+      "Bash(cd ../frontend && npx oxlint src/components/DoctorQueueCard.jsx 2>&1)",
+      "Read(//d/MedAsst_Yasodha/**)"
     ],
     "additionalDirectories": [
       "C:\\Users\\ADMIN\\Downloads\\AI_medical\\backend",

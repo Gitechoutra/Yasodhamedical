@@ -298,6 +298,23 @@ function AddMedicationModal({ assignmentId, onClose, onAdded }) {
   );
 }
 
+// Doses actually given for one order since midnight — same UTC day boundary
+// the server uses for `assignment.today`, so this list and the "X/Y today"
+// count next to it never disagree. "Given", not scheduled: a missed or
+// skipped entry was never administered, so it has no time to show here.
+function todaysGivenDoses(administrations, orderId) {
+  const since = new Date();
+  since.setUTCHours(0, 0, 0, 0);
+  return administrations
+    .filter(
+      (a) =>
+        a.order_id === orderId &&
+        (a.status === "completed" || a.status === "delayed") &&
+        new Date(a.administered_at || a.created_at) >= since
+    )
+    .sort((a, b) => new Date(a.administered_at) - new Date(b.administered_at));
+}
+
 /**
  * The medication schedule and the log of every dose against it.
  *
@@ -357,6 +374,7 @@ export default function MedicationPanel({ assignment, canRecord, canManagePlan, 
             {activeOrders.map((order) => {
               const progress = progressByOrder.get(order.id);
               const remaining = progress?.remaining;
+              const givenToday = todaysGivenDoses(assignment.administrations, order.id);
               return (
                 <div
                   key={order.id}
@@ -369,12 +387,47 @@ export default function MedicationPanel({ assignment, canRecord, canManagePlan, 
                         {order.route_label}
                       </span>
                     </div>
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      {[order.dose, order.frequency, order.duration].filter(Boolean).join(" · ") ||
-                        "No dosing details"}
-                    </p>
+                    {/* One labelled line per field, only for what the doctor
+                        actually entered — nothing here is inferred. */}
+                    {order.dose || order.frequency || order.duration ? (
+                      <div className="mt-1 space-y-0.5 text-xs text-slate-500">
+                        {order.dose && (
+                          <p>
+                            <span className="font-medium text-slate-600">Dose:</span> {order.dose}
+                          </p>
+                        )}
+                        {order.frequency && (
+                          <p>
+                            <span className="font-medium text-slate-600">Frequency:</span>{" "}
+                            {order.frequency}
+                          </p>
+                        )}
+                        {order.duration && (
+                          <p>
+                            <span className="font-medium text-slate-600">Duration:</span>{" "}
+                            {order.duration}
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-xs text-slate-400">No dosing details</p>
+                    )}
                     {order.instructions && (
                       <p className="mt-1 text-xs italic text-slate-500">{order.instructions}</p>
+                    )}
+                    {/* Doses actually given today, with their real logged
+                        times — not a predicted schedule, since the plan only
+                        ever says how many times a day, never the clock time. */}
+                    {givenToday.length > 0 && (
+                      <div className="mt-1.5 space-y-0.5 text-xs text-slate-500">
+                        <span className="font-medium text-slate-600">Given today:</span>
+                        {givenToday.map((d) => (
+                          <p key={d.id} className="pl-2">
+                            {d.dose || order.dose || "Dose"} —{" "}
+                            {formatWhen(d.administered_at || d.created_at, { withDate: false })}
+                          </p>
+                        ))}
+                      </div>
                     )}
                   </div>
 

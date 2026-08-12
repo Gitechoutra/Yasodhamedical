@@ -36,7 +36,7 @@ OPEN_STATUSES = ("waiting", "in_progress")
 # one is treated as a double-registration rather than a second visit.
 #
 # Nobody walks in, is seen, walks out and walks back in inside ten minutes. What
-# does happen is the desk pressing "Create OP" twice, or two receptionists
+# does happen is the desk pressing "ADD OP" twice, or two receptionists
 # registering the same arrival — and every one of those becomes its own card in
 # the doctor's queue, with the same patient, the same name, the same ID and only
 # the clock to tell them apart. The doctor then has to guess which one to call.
@@ -91,7 +91,7 @@ def op_department_for(patient):
     return doctor.department, None
 
 
-def raise_op(patient, *, reason=None, actor_user_id=None, now=None):
+def raise_op(patient, *, reason=None, actor_user_id=None, now=None, payment_type=None):
     """Puts `patient` in their assigned doctor's queue.
 
     Returns (appointment, failure). `failure` is a ready-made error response
@@ -140,6 +140,7 @@ def raise_op(patient, *, reason=None, actor_user_id=None, now=None):
         patient_id=patient.id,
         department_id=department.id,
         reason=reason or None,
+        payment_type=payment_type,
         status="waiting",
     )
     db.session.add(appointment)

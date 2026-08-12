@@ -236,6 +236,20 @@ def get_patient(patient_id):
     return success(patient.to_dict())
 
 
+def _patient_assignment_link(patient):
+    """Where a "New patient assigned to you" notification should send the doctor.
+
+    A patient with a still-unclaimed Emergency Case needs that claimed before
+    anything else — sending the doctor to the Patients page first would be a
+    dead end, since claiming only happens from the Emergency Cases board.
+    Everyone else goes straight to their own record.
+    """
+    open_case = EmergencyCase.query.filter_by(patient_id=patient.id, status="waiting").first()
+    if open_case:
+        return "/dashboard/emergency"
+    return f"/dashboard/patients?patient_id={patient.id}"
+
+
 @patient_bp.post("")
 @role_required("receptionist")
 def create_patient():
@@ -291,6 +305,17 @@ def create_patient():
     if email_error:
         return error(email_error, status=422)
 
+    # How the OP was paid for, recorded by reception at the same moment as
+    # the OP itself -- a payment type with `paid` unset is dropped rather
+    # than rejected, since it means nothing without the checkbox that gates
+    # it in the UI.
+    paid = bool(payload.get("paid"))
+    payment_type = (payload.get("payment_type") or "").strip().lower() or None
+    if paid and payment_type not in ("cash", "upi", "card"):
+        return error("payment_type must be one of: cash, upi, card", status=422)
+    if not paid:
+        payment_type = None
+
     patient = Patient(
         name=name,
         gender=payload.get("gender") or None,
@@ -313,9 +338,9 @@ def create_patient():
         notify(
             [patient.assigned_doctor.user_id],
             title="New patient assigned to you",
-            body=f"{patient.name} was registered and routed to you.",
+            body=f"{patient.name} ({patient.code}) was registered and routed to you.",
             category="patient_assignment",
-            link=f"/dashboard/patients?patient_id={patient.id}",
+            link=_patient_assignment_link(patient),
             exclude_user_id=get_jwt_identity(),
         )
 
@@ -333,6 +358,7 @@ def create_patient():
         patient,
         reason=payload.get("reason"),
         actor_user_id=get_jwt_identity(),
+        payment_type=payment_type,
     )
     if failure:
         # Nothing is committed, so the patient row goes with it. Rolled back
@@ -519,9 +545,9 @@ def reassign_patient(patient_id):
         notify(
             [doctor.user_id],
             title="New patient assigned to you",
-            body=f"{patient.name} was routed to you.",
+            body=f"{patient.name} ({patient.code}) was routed to you.",
             category="patient_assignment",
-            link=f"/dashboard/patients?patient_id={patient.id}",
+            link=_patient_assignment_link(patient),
             exclude_user_id=get_jwt_identity(),
         )
 

@@ -19,14 +19,16 @@ export async function generateCaseReport(caseId) {
 
 // The download endpoint requires the JWT auth header, so a plain <a href>
 // won't carry it — fetch the PDF as a blob (through the authenticated axios
-// instance) and trigger the browser's save dialog manually.
-async function fetchReportBlobUrl(reportId) {
-  const res = await api.get(`/reports/${reportId}/download`, { responseType: "blob" });
+// instance) and trigger the browser's save dialog manually. Generic over
+// `path` so any PDF-download endpoint in the app (reports, the OP document)
+// can use the same two primitives below instead of re-implementing them.
+async function fetchPdfBlobUrl(path) {
+  const res = await api.get(path, { responseType: "blob" });
   return window.URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
 }
 
-export async function downloadReport(reportId, suggestedName = "consultation_report.pdf") {
-  const url = await fetchReportBlobUrl(reportId);
+export async function downloadPdf(path, suggestedName) {
+  const url = await fetchPdfBlobUrl(path);
   const link = document.createElement("a");
   link.href = url;
   link.download = suggestedName;
@@ -43,8 +45,8 @@ export async function downloadReport(reportId, suggestedName = "consultation_rep
  *
  * Returns true if the tab opened, false if it fell back to downloading.
  */
-export async function openReportForPrint(reportId, suggestedName = "consultation_report.pdf") {
-  const url = await fetchReportBlobUrl(reportId);
+export async function openPdfForPrint(path, suggestedName) {
+  const url = await fetchPdfBlobUrl(path);
   const tab = window.open(url, "_blank");
 
   if (!tab) {
@@ -62,4 +64,12 @@ export async function openReportForPrint(reportId, suggestedName = "consultation
   // immediately would leave it blank.
   setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
   return true;
+}
+
+export async function downloadReport(reportId, suggestedName = "consultation_report.pdf") {
+  return downloadPdf(`/reports/${reportId}/download`, suggestedName);
+}
+
+export async function openReportForPrint(reportId, suggestedName = "consultation_report.pdf") {
+  return openPdfForPrint(`/reports/${reportId}/download`, suggestedName);
 }

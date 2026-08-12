@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { HiOutlineCalendarDays, HiOutlineClock, HiOutlinePlus } from "react-icons/hi2";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { HiOutlineCalendarDays } from "react-icons/hi2";
 import AppointmentCard from "../components/AppointmentCard";
+import DoctorQueueCard from "../components/DoctorQueueCard";
 import FilterChip from "../components/FilterChip";
-import Modal from "../components/Modal";
 import {
   EmptyState,
   PageHeader,
@@ -12,201 +12,58 @@ import {
 } from "../components/RecordCard";
 import { useAuth } from "../context/AuthContext";
 import useLiveRefresh from "../hooks/useLiveRefresh";
-import { fetchAppointments, createAppointment, startAppointment } from "../services/appointmentService";
-import { fetchDoctorAvailability } from "../services/doctorService";
-import { fetchPatients } from "../services/patientService";
-import { canCreateOp, canRunConsultation } from "../utils/permissions";
+import { fetchAppointments, startAppointment } from "../services/appointmentService";
+import { fetchDoctors } from "../services/doctorService";
+import { canRunConsultation } from "../utils/permissions";
 
-// Mirrors DUPLICATE_WINDOW_MINUTES in the API. Two OPs for the same patient
-// this close together are one arrival registered twice, not two visits.
-const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
+const DATE_FILTERS = [
+  { key: "today", label: "Today" },
+  { key: "week", label: "This Week" },
+  { key: "month", label: "This Month" },
+];
 
-/** The patient's own OP raised in the last ten minutes, if the queue has one. */
-function recentOpFor(appointments, patientId) {
-  if (!patientId) return null;
-  const now = Date.now();
-  return (
-    appointments.find((a) => {
-      if (String(a.patient_id) !== String(patientId)) return false;
-      const created = new Date(a.created_at).getTime();
-      return Number.isFinite(created) && now - created < DUPLICATE_WINDOW_MS;
-    }) || null
-  );
+function pad(n) {
+  return String(n).padStart(2, "0");
 }
 
-/**
- * Whether the doctor this OP will go to is actually in today.
- *
- * A warning, never a block: a walk-in still gets queued, and the front desk
- * decides whether to book them for another day. Silence would be worse — the
- * OP would sit in a queue nobody is there to call from.
- */
-function DoctorTodayNote({ doctor }) {
-  if (!doctor) return null;
-
-  const [text, tone] =
-    doctor.status === "on_duty"
-      ? [
-          doctor.available_until
-            ? `On duty now, until ${doctor.available_until}.`
-            : "On duty now.",
-          "bg-emerald-50 text-emerald-700",
-        ]
-      : doctor.status === "upcoming"
-        ? [`Not in yet — starts at ${doctor.available_from} today.`, "bg-brand-50 text-brand-700"]
-        : doctor.status === "finished"
-          ? ["Today's shift has finished.", "bg-amber-50 text-amber-700"]
-          : ["No shift scheduled today.", "bg-amber-50 text-amber-700"];
-
-  return (
-    <p className={`mt-1 flex flex-wrap items-center gap-x-2 rounded-lg px-3 py-2 text-xs font-semibold ${tone}`}>
-      <HiOutlineClock className="h-4 w-4 shrink-0" />
-      {text}
-      <Link
-        to="/dashboard/doctors/availability"
-        className="font-semibold underline underline-offset-2"
-      >
-        See the week
-      </Link>
-    </p>
-  );
+// Local calendar date, not `toISOString()` — that converts to UTC first,
+// which shifts the date near midnight in any timezone ahead of UTC.
+function dateStr(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-function CreateOpModal({ patients, appointments, preselectedPatientId, onClose, onCreated }) {
-  const [patientId, setPatientId] = useState(preselectedPatientId || "");
-  const [reason, setReason] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-  // Today's shift schedule for every doctor, fetched once when the modal opens rather
-  // than per patient selection — the list is small and the receptionist
-  // changes the patient dropdown far more often than the shift schedule changes.
-  const [availability, setAvailability] = useState([]);
-
-  useEffect(() => {
-    fetchDoctorAvailability()
-      .then((data) => setAvailability(data.items || []))
-      .catch(() => {
-        /* Advisory only. A failure here must not stop an OP being raised. */
-      });
-  }, []);
-
-  const inputClass =
-    "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
-
-  const patient = patients.find((p) => String(p.id) === String(patientId));
-  // The OP always goes to the assigned doctor's own department — a
-  // receptionist picking a different one would create an OP nobody could
-  // ever start (start_appointment requires both a department match and
-  // that the doctor is this exact patient's assigned_doctor).
-  const assignedDoctor = patient?.assigned_doctor;
-  const departmentId = assignedDoctor?.department_id;
-  const doctorToday = assignedDoctor
-    ? availability.find((d) => d.id === assignedDoctor.id)
-    : null;
-
-  // The same refusal the API makes, made here so the receptionist sees it
-  // while they are still looking at the patient they picked — the button
-  // going dead with the reason next to it beats submitting and being told no.
-  // The server is still the one that decides: this queue is a snapshot, and
-  // another receptionist may have registered the same arrival since it loaded.
-  const duplicateOf = recentOpFor(appointments, patientId);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!departmentId || duplicateOf) return;
-    setSaving(true);
-    setErrorMsg("");
-    try {
-      const appointment = await createAppointment({
-        patient_id: Number(patientId),
-        department_id: Number(departmentId),
-        reason: reason || undefined,
-      });
-      onCreated(appointment);
-    } catch (err) {
-      setErrorMsg(err.response?.data?.message || "Could not create OP.");
-    } finally {
-      setSaving(false);
-    }
+/** The {date_from, date_to} bounds for a period filter, today's date as the anchor. */
+function dateRangeFor(filter) {
+  const now = new Date();
+  if (filter === "week") {
+    const day = now.getDay(); // 0 = Sunday
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - ((day + 6) % 7));
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return { date_from: dateStr(monday), date_to: dateStr(sunday) };
   }
+  if (filter === "month") {
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return { date_from: dateStr(first), date_to: dateStr(last) };
+  }
+  const today = dateStr(now);
+  return { date_from: today, date_to: today };
+}
 
-  return (
-    <Modal title="Create OP" onClose={onClose}>
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600">Patient *</label>
-          <select
-            required
-            className={inputClass}
-            value={patientId}
-            onChange={(e) => setPatientId(e.target.value)}
-          >
-            <option value="">Select a patient</option>
-            {patients.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600">Department</label>
-          {!patientId ? (
-            <p className={`${inputClass} bg-slate-50 text-slate-400`}>Select a patient first</p>
-          ) : assignedDoctor?.department_id ? (
-            <>
-              <p className={`${inputClass} bg-slate-50 text-slate-700`}>
-                {assignedDoctor.department} — Dr. {assignedDoctor.name}
-                {assignedDoctor.specialization ? ` (${assignedDoctor.specialization})` : ""}
-              </p>
-              <DoctorTodayNote doctor={doctorToday} />
-            </>
-          ) : (
-            <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
-              {assignedDoctor
-                ? "This patient's assigned doctor has no department set — contact admin."
-                : "No doctor assigned to this patient yet — assign one from the Patients page first."}
-            </p>
-          )}
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600">
-            Reason for visit
-          </label>
-          <textarea
-            rows={2}
-            className={inputClass}
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="e.g. Follow-up on stomach pain"
-          />
-        </div>
-
-        {duplicateOf && (
-          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
-            {patient?.name} was queued in the last ten minutes and is
-            {duplicateOf.status === "in_progress"
-              ? " already in consultation"
-              : " still waiting to be called in"}
-            . Raising another OP would put the same patient in the queue twice — cancel the
-            existing one first if it was raised by mistake.
-          </p>
-        )}
-
-        {errorMsg && <p className="text-sm text-red-600">{errorMsg}</p>}
-
-        <button
-          type="submit"
-          disabled={saving || !departmentId || Boolean(duplicateOf)}
-          className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
-        >
-          {saving ? "Creating…" : "Create OP"}
-        </button>
-      </form>
-    </Modal>
-  );
+/** This doctor's current patient (if any) and waiting list, in queue order. */
+function groupByDoctor(appointments) {
+  const byDoctor = new Map();
+  for (const appointment of appointments) {
+    const doctor = appointment.patient_detail?.assigned_doctor;
+    if (!doctor) continue;
+    if (!byDoctor.has(doctor.id)) byDoctor.set(doctor.id, { current: null, waiting: [] });
+    const bucket = byDoctor.get(doctor.id);
+    if (appointment.status === "in_progress") bucket.current = appointment;
+    else if (appointment.status === "waiting") bucket.waiting.push(appointment);
+  }
+  return byDoctor;
 }
 
 export default function Appointments() {
@@ -214,22 +71,19 @@ export default function Appointments() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Raising an OP is front-desk work only. Not doctors (they would be
-  // queueing their own patients), and not admins — admin monitors the queue
-  // rather than calling patients in. `POST /appointments` enforces the same
-  // rule, so this only decides whether the control is worth drawing.
-  const canScheduleAppointments = canCreateOp(user?.role);
+  // A doctor's own queue is one department, already narrowed server-side —
+  // the flat card grid still fits that. Reception and admin see every
+  // department mixed together, which is what the doctor-grouped view below
+  // exists to sort back out; both already shared this "All departments"
+  // branch before the grouping existed; see the `description` text.
+  const isDoctorView = Boolean(user?.department);
 
   // Starting or resuming a consultation is the doctor's, and the server
   // narrows it further to the doctor the appointment belongs to.
   const canConsult = canRunConsultation(user?.role);
 
   const [appointments, setAppointments] = useState([]);
-  const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(
-    canScheduleAppointments && Boolean(searchParams.get("patient_id"))
-  );
   const [startingId, setStartingId] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -248,19 +102,15 @@ export default function Appointments() {
       if (!silent) setLoading(true);
       const listParams = {};
       if (ongoingOnly) listParams.status = "in_progress";
-      const requests = canScheduleAppointments
-        ? [fetchAppointments(listParams), fetchPatients("all")]
-        : [fetchAppointments(listParams)];
-      return Promise.all(requests)
-        .then(([a, p]) => {
+      return fetchAppointments(listParams)
+        .then((a) => {
           setAppointments(a);
-          if (p) setPatients(p);
           setErrorMsg("");
         })
         .catch(() => setErrorMsg("Could not load the appointment queue."))
         .finally(() => setLoading(false));
     },
-    [ongoingOnly, canScheduleAppointments]
+    [ongoingOnly]
   );
 
   // Re-runs when a filter changes, so clearing a chip refetches the
@@ -271,6 +121,45 @@ export default function Appointments() {
 
   // A patient being called in or finishing elsewhere changes this queue.
   useLiveRefresh(load);
+
+  // --- Doctor-grouped view (reception/admin only) ---------------------------
+
+  const [doctors, setDoctors] = useState([]);
+  const [dateFilter, setDateFilter] = useState("today");
+  const [periodAppointments, setPeriodAppointments] = useState([]);
+
+  useEffect(() => {
+    if (isDoctorView) return;
+    fetchDoctors()
+      .then(setDoctors)
+      .catch(() => setDoctors([]));
+  }, [isDoctorView]);
+
+  const loadPeriod = useCallback(() => {
+    if (isDoctorView) return undefined;
+    return fetchAppointments(dateRangeFor(dateFilter))
+      .then(setPeriodAppointments)
+      .catch(() => setPeriodAppointments([]));
+  }, [isDoctorView, dateFilter]);
+
+  useEffect(() => {
+    loadPeriod();
+  }, [loadPeriod]);
+
+  useLiveRefresh(loadPeriod);
+
+  const queueByDoctor = useMemo(() => groupByDoctor(appointments), [appointments]);
+  const periodCountByDoctor = useMemo(() => {
+    const counts = new Map();
+    for (const appointment of periodAppointments) {
+      const id = appointment.patient_detail?.assigned_doctor?.id;
+      if (id == null) continue;
+      counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    return counts;
+  }, [periodAppointments]);
+
+  const periodLabel = DATE_FILTERS.find((f) => f.key === dateFilter)?.label.toLowerCase();
 
   function clearFilter(key) {
     const next = new URLSearchParams(searchParams);
@@ -303,31 +192,12 @@ export default function Appointments() {
     }
   }
 
-  function closeModal() {
-    setShowModal(false);
-    if (searchParams.get("patient_id")) {
-      searchParams.delete("patient_id");
-      setSearchParams(searchParams, { replace: true });
-    }
-  }
-
   return (
     <div>
       <PageHeader
         icon={HiOutlineCalendarDays}
         title="Appointments"
         description="The outpatient queue, in the order patients should be called in. A card moves to Consultations once the doctor ends the visit."
-        action={
-          canScheduleAppointments && (
-            <button
-              onClick={() => setShowModal(true)}
-              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
-            >
-              <HiOutlinePlus className="h-4 w-4" />
-              Create OP
-            </button>
-          )
-        }
       />
 
       {/* flex-wrap: the counts line plus both filter chips overflow a
@@ -343,48 +213,75 @@ export default function Appointments() {
         )}
       </div>
 
+      {!isDoctorView && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {DATE_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setDateFilter(f.key)}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                dateFilter === f.key
+                  ? "bg-brand-600 text-white shadow-md"
+                  : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {errorMsg && (
         <p className="mt-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{errorMsg}</p>
       )}
 
       <div className="mt-6">
-        {loading ? (
+        {isDoctorView ? (
+          loading ? (
+            <RecordGridSkeleton count={3} />
+          ) : appointments.length === 0 ? (
+            <EmptyState icon={HiOutlineCalendarDays}>
+              {ongoingOnly
+                ? "No consultations are in progress right now."
+                : `The ${user?.department || "hospital"} queue is empty — nobody is waiting.`}
+            </EmptyState>
+          ) : (
+            <RecordGrid>
+              {appointments.map((a) => (
+                <AppointmentCard
+                  key={a.id}
+                  appointment={a}
+                  isNext={a.id === nextInQueueId}
+                  busy={startingId === a.id}
+                  canConsult={canConsult}
+                  onStart={(appt) => handleStart(appt.id)}
+                  onResume={(appt) => navigate(`/dashboard/consultations/${appt.consultation_id}`)}
+                />
+              ))}
+            </RecordGrid>
+          )
+        ) : loading ? (
           <RecordGridSkeleton count={3} />
-        ) : appointments.length === 0 ? (
-          <EmptyState icon={HiOutlineCalendarDays}>
-            {ongoingOnly
-              ? "No consultations are in progress right now."
-              : `The ${user?.department || "hospital"} queue is empty — nobody is waiting.`}
-          </EmptyState>
+        ) : doctors.length === 0 ? (
+          <EmptyState icon={HiOutlineCalendarDays}>No doctors are set up yet.</EmptyState>
         ) : (
           <RecordGrid>
-            {appointments.map((a) => (
-              <AppointmentCard
-                key={a.id}
-                appointment={a}
-                isNext={a.id === nextInQueueId}
-                busy={startingId === a.id}
-                canConsult={canConsult}
-                onStart={(appt) => handleStart(appt.id)}
-                onResume={(appt) => navigate(`/dashboard/consultations/${appt.consultation_id}`)}
-              />
-            ))}
+            {doctors.map((doctor) => {
+              const bucket = queueByDoctor.get(doctor.id) || { current: null, waiting: [] };
+              return (
+                <DoctorQueueCard
+                  key={doctor.id}
+                  doctor={doctor}
+                  current={bucket.current}
+                  waiting={bucket.waiting}
+                  periodCount={periodCountByDoctor.get(doctor.id) || 0}
+                  periodLabel={periodLabel}
+                />
+              );
+            })}
           </RecordGrid>
         )}
       </div>
-
-      {showModal && canScheduleAppointments && (
-        <CreateOpModal
-          patients={patients}
-          appointments={appointments}
-          preselectedPatientId={searchParams.get("patient_id")}
-          onClose={closeModal}
-          onCreated={() => {
-            closeModal();
-            load();
-          }}
-        />
-      )}
     </div>
   );
 }

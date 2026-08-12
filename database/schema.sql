@@ -49,6 +49,7 @@ CREATE TABLE `appointments` (
   `consultation_id` int DEFAULT NULL,
   `status` enum('waiting','in_progress','completed','cancelled') COLLATE utf8mb4_unicode_ci NOT NULL,
   `reason` text COLLATE utf8mb4_unicode_ci,
+  `payment_type` enum('cash','upi','card') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT (now()),
   PRIMARY KEY (`id`),
   KEY `consultation_id` (`consultation_id`),

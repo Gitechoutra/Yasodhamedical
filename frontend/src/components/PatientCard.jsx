@@ -1,12 +1,6 @@
 import { useState } from "react";
-import {
-  HiOutlineCalendarDays,
-  HiOutlineHeart,
-  HiOutlinePencilSquare,
-  HiOutlineTrash,
-} from "react-icons/hi2";
+import { HiOutlineHeart, HiOutlinePencilSquare, HiOutlineTrash } from "react-icons/hi2";
 import Avatar from "./Avatar";
-import OpStatusBadge from "./OpStatusBadge";
 import SurgeryStageBadge from "./SurgeryStageBadge";
 
 function Detail({ label, value }) {
@@ -74,11 +68,9 @@ export default function PatientCard({
   patient,
   doctors,
   canReassignDoctor,
-  canScheduleAppointments,
   canAssignNurse,
   canEditPatient,
   canDeletePatient,
-  onCreateOp,
   onAssignNurse,
   onEdit,
   onDelete,
@@ -94,7 +86,6 @@ export default function PatientCard({
           </p>
           <p className="truncate text-xs text-slate-400">{patient.code}</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <OpStatusBadge status={patient.op_status} />
             <SurgeryStageBadge
               stage={patient.surgery_stage}
               daysLeft={patient.observation_days_left}
@@ -115,15 +106,6 @@ export default function PatientCard({
       )}
 
       <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
-        {canScheduleAppointments && (
-          <button
-            onClick={onCreateOp}
-            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100"
-          >
-            <HiOutlineCalendarDays className="h-3.5 w-3.5 shrink-0" />
-            Create OP
-          </button>
-        )}
         {canAssignNurse && patient.surgery_stage === "required" && (
           <button
             onClick={onAssignNurse}

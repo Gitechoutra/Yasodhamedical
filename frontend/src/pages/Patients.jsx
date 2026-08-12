@@ -6,30 +6,19 @@ import {
   HiOutlineMagnifyingGlass,
   HiOutlineXMark,
 } from "react-icons/hi2";
+import AddOpModal from "../components/AddOpModal";
 import ConfirmDialog from "../components/ConfirmDialog";
-import Modal from "../components/Modal";
 import PatientCard from "../components/PatientCard";
 import AssignNurseModal from "../components/nursing/AssignNurseModal";
 import EditPatientModal from "../components/EditPatientModal";
 import { useAuth } from "../context/AuthContext";
-import { BLOOD_GROUPS } from "../constants/patient";
-import {
-  EMAIL_ERROR,
-  EMAIL_HINT,
-  PHONE_DIGITS,
-  PHONE_ERROR,
-  digitsOnly,
-  isPhoneIncomplete,
-  isValidEmail,
-} from "../utils/contact";
-import { canCreateOp, canReassignDoctor, canRegisterPatient } from "../utils/permissions";
+import { canReassignDoctor, canRegisterPatient } from "../utils/permissions";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDoctors } from "../services/doctorService";
 import {
   fetchPatient,
   fetchPatientCounts,
   fetchPatients,
-  createPatient,
   deletePatient,
   assignPatientDoctor,
 } from "../services/patientService";
@@ -39,222 +28,6 @@ import {
 // a search that matched everybody.
 const MIN_SEARCH_LENGTH = 2;
 
-// Only ever rendered for the front desk — see `canRegisterPatient`. The
-// treating doctor is therefore always chosen here rather than implied, which
-// is why the picker below is unconditional.
-function AddPatientModal({ onClose, onCreated, doctors }) {
-  const [form, setForm] = useState({
-    name: "",
-    gender: "",
-    dob: "",
-    phone: "",
-    email: "",
-    blood_group: "",
-    allergies: "",
-    medical_history: "",
-    assigned_doctor_id: "",
-    // Registering also raises the patient's OP, so the reason they have come
-    // in is collected here rather than on a second screen — it is what the
-    // doctor reads on the queue card before calling them through.
-    reason: "",
-  });
-  const [saving, setSaving] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-
-  function update(field) {
-    return (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
-  }
-
-  // Both optional on a patient record — somebody brought in unconscious has
-  // neither — but exact when given, and the same rule the staff form uses.
-  const phoneIncomplete = isPhoneIncomplete(form.phone);
-  const emailInvalid = !isValidEmail(form.email);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (phoneIncomplete) {
-      setErrorMsg(PHONE_ERROR);
-      return;
-    }
-    if (emailInvalid) {
-      setErrorMsg(EMAIL_ERROR);
-      return;
-    }
-    setSaving(true);
-    setErrorMsg("");
-    try {
-      const patient = await createPatient(form);
-      onCreated(patient);
-    } catch (err) {
-      setErrorMsg(err.response?.data?.message || "Could not create patient.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  const inputClass =
-    "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
-
-  return (
-    <Modal title="Add Patient" onClose={onClose}>
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600">Name *</label>
-          <input required className={inputClass} value={form.name} onChange={update("name")} />
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">
-              Date of Birth
-            </label>
-            {/* Age on the queue cards is derived from this — without it the
-                card can only show a dash. The min stops a mistyped year
-                (e.g. "0001") from producing an absurd age; the server
-                rejects out-of-range dates too. */}
-            <input
-              type="date"
-              min={`${new Date().getFullYear() - 130}-01-01`}
-              max={new Date().toISOString().slice(0, 10)}
-              className={inputClass}
-              value={form.dob}
-              onChange={update("dob")}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Phone</label>
-            {/* Sanitised as it is typed rather than validated on submit: a
-                pasted "+91 98765 43210" becomes usable instead of an error,
-                and a letter simply cannot be entered. Same rule as the staff
-                form — see utils/contact.js. */}
-            <input
-              type="tel"
-              inputMode="numeric"
-              autoComplete="tel"
-              maxLength={PHONE_DIGITS}
-              placeholder={`${PHONE_DIGITS} digits`}
-              className={`${inputClass} ${phoneIncomplete ? "border-red-300" : ""}`}
-              value={form.phone}
-              onChange={(e) => setForm((f) => ({ ...f, phone: digitsOnly(e.target.value) }))}
-            />
-            {phoneIncomplete && (
-              <p className="mt-1 text-xs text-red-600">
-                {form.phone.length} of {PHONE_DIGITS} digits
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Gender</label>
-            <select className={inputClass} value={form.gender} onChange={update("gender")}>
-              <option value="">Select</option>
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-              <option value="other">Other</option>
-            </select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Blood Group</label>
-            {/* A picker, not a text box. Typing this field is how "P+" and
-                "Z+" got into the record — there are eight answers and no
-                reason to let anyone write a ninth. Optional: reception often
-                registers a patient before anybody knows it. */}
-            <select
-              className={inputClass}
-              value={form.blood_group}
-              onChange={update("blood_group")}
-            >
-              <option value="">Not recorded</option>
-              {BLOOD_GROUPS.map((group) => (
-                <option key={group} value={group}>
-                  {group}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600">Email</label>
-          <input
-            type="email"
-            placeholder={EMAIL_HINT}
-            className={`${inputClass} ${emailInvalid ? "border-red-300" : ""}`}
-            value={form.email}
-            onChange={update("email")}
-          />
-          {emailInvalid && <p className="mt-1 text-xs text-red-600">{EMAIL_ERROR}</p>}
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600">Allergies</label>
-          <input className={inputClass} value={form.allergies} onChange={update("allergies")} />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600">Assign Doctor *</label>
-          {/* Chosen from the condition the patient presents with — this is
-              also what decides who can see the record afterwards. */}
-          <select
-            required
-            className={inputClass}
-            value={form.assigned_doctor_id}
-            onChange={update("assigned_doctor_id")}
-          >
-            <option value="">Select the treating doctor</option>
-            {doctors.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-                {d.specialization ? ` — ${d.specialization}` : ""}
-                {d.department ? ` (${d.department})` : ""}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-[11px] text-slate-400">
-            Only this doctor will be able to see this patient. Saving also puts
-            them in this doctor&apos;s queue — no separate OP needed.
-          </p>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600">
-            Reason for visit
-          </label>
-          {/* Goes onto the OP this registration raises, which is what the
-              doctor sees on the queue card. Same field, same wording as the
-              Create OP form on Appointments. */}
-          <textarea
-            className={inputClass}
-            rows={2}
-            value={form.reason}
-            onChange={update("reason")}
-            placeholder="e.g. Chest pain since this morning"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-semibold text-slate-600">Medical History</label>
-          <textarea
-            className={inputClass}
-            rows={2}
-            value={form.medical_history}
-            onChange={update("medical_history")}
-          />
-        </div>
-
-        {errorMsg && <p className="text-sm text-red-600">{errorMsg}</p>}
-
-        <button
-          type="submit"
-          disabled={saving || phoneIncomplete || emailInvalid}
-          className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
-        >
-          {saving ? "Saving…" : "Register & Add to Queue"}
-        </button>
-      </form>
-    </Modal>
-  );
-}
-
 export default function Patients() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -262,11 +35,6 @@ export default function Patients() {
   // whoever reception routes to them; they never register a patient — and the
   // server refuses the call, so this only decides whether to draw the button.
   const canRegister = canRegisterPatient(user?.role);
-  // Scheduling a patient into a department queue is front-desk/admin work —
-  // doctors just work whatever lands in their own Appointments queue.
-  // Front desk only — same rule as the Appointments page, from one place so
-  // the two cannot drift. Admin monitors; it does not raise visits.
-  const canScheduleAppointments = canCreateOp(user?.role);
   // Correcting a mis-routed patient. Front desk *and* admin, matching the
   // server's assignment route — wider than registration on purpose.
   const canReroute = canReassignDoctor(user?.role);
@@ -454,7 +222,7 @@ export default function Patients() {
             className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
           >
             <HiOutlinePlus className="h-4 w-4" />
-            Add Patient
+            ADD OP
           </button>
         )}
       </div>
@@ -604,11 +372,9 @@ export default function Patients() {
                 patient={p}
                 doctors={doctors}
                 canReassignDoctor={canReroute}
-                canScheduleAppointments={canScheduleAppointments}
                 canAssignNurse={canAssignNurse}
                 canEditPatient={canEditPatient}
                 canDeletePatient={canDeletePatient}
-                onCreateOp={() => navigate(`/dashboard/appointments?patient_id=${p.id}`)}
                 onAssignNurse={() => setNursePatient(p)}
                 onEdit={() => setEditPatient(p)}
                 onDelete={() => {
@@ -627,7 +393,7 @@ export default function Patients() {
       </div>
 
       {showAddModal && canRegister && (
-        <AddPatientModal
+        <AddOpModal
           doctors={doctors}
           onClose={() => setShowAddModal(false)}
           onCreated={(created) => {
