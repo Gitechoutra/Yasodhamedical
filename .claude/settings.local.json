@@ -141,7 +141,11 @@
       "Bash(node check_order.mjs)",
       "Bash(PYTHONPATH=. python -c ' *)",
       "Bash(rm -f C:/Users/Dell/AppData/Local/Temp/claude/d--MedAsst-Yasodha-Yasodhamedical/a2ce9eac-40d1-4ebd-a6e4-6ffd0f71c043/scratchpad/trigger_two.py C:/Users/Dell/AppData/Local/Temp/claude/d--MedAsst-Yasodha-Yasodhamedical/a2ce9eac-40d1-4ebd-a6e4-6ffd0f71c043/scratchpad/check_order.mjs C:/Users/Dell/AppData/Local/Temp/claude/d--MedAsst-Yasodha-Yasodhamedical/a2ce9eac-40d1-4ebd-a6e4-6ffd0f71c043/scratchpad/order_*.png)",
-      "Bash(rm -rf /tmp/build_check7)"
+      "Bash(rm -rf /tmp/build_check7)",
+      "Bash(Select-String -Pattern \"\")",
+      "Bash(Select-Object -Skip 189 -First 100)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('portal/routes/appointment_routes.py', encoding='utf-8'\\).read\\(\\)\\)\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\ADMIN\\Downloads\\AI_medical\\backend",
