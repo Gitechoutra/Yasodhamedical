@@ -1,0 +1,1 @@
+function e(e){return e===`receptionist`}function t(e){return e===`receptionist`}function n(e){return e===`receptionist`||e===`admin`}function r(e){return e===`doctor`}export{r as i,n,e as r,t};

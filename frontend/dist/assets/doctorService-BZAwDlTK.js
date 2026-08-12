@@ -1,1 +1,0 @@
-import{v as e}from"./index-BlyHw-1A.js";async function t(t){return(await e.get(`/doctors`,{params:t?{department_id:t}:void 0})).data.data}async function n(t){return(await e.post(`/doctors`,t)).data.data}export{t as n,n as t};

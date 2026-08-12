@@ -1,0 +1,1 @@
+import{H as e,ln as t,un as n}from"./index-DdUlkeAy.js";import{t as r}from"./PatientRecord-Bnu5KFRt.js";var i=e();function a(){let{id:e}=n(),a=t();return(0,i.jsx)(r,{assignmentId:e,backTo:`Back to my patients`,onBack:()=>a(`/nurse/patients`)})}export{a as default};

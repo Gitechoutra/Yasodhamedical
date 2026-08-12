@@ -52,6 +52,10 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
     allergies: "",
     medical_history: "",
     assigned_doctor_id: "",
+    // Registering also raises the patient's OP, so the reason they have come
+    // in is collected here rather than on a second screen — it is what the
+    // doctor reads on the queue card before calling them through.
+    reason: "",
   });
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -205,8 +209,25 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
             ))}
           </select>
           <p className="mt-1 text-[11px] text-slate-400">
-            Only this doctor will be able to see this patient.
+            Only this doctor will be able to see this patient. Saving also puts
+            them in this doctor&apos;s queue — no separate OP needed.
           </p>
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-semibold text-slate-600">
+            Reason for visit
+          </label>
+          {/* Goes onto the OP this registration raises, which is what the
+              doctor sees on the queue card. Same field, same wording as the
+              Create OP form on Appointments. */}
+          <textarea
+            className={inputClass}
+            rows={2}
+            value={form.reason}
+            onChange={update("reason")}
+            placeholder="e.g. Chest pain since this morning"
+          />
         </div>
 
         <div>
@@ -226,7 +247,7 @@ function AddPatientModal({ onClose, onCreated, doctors }) {
           disabled={saving || phoneIncomplete || emailInvalid}
           className="w-full rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 py-2.5 text-sm font-semibold text-white shadow-md transition hover:shadow-lg disabled:opacity-60"
         >
-          {saving ? "Saving…" : "Add Patient"}
+          {saving ? "Saving…" : "Register & Add to Queue"}
         </button>
       </form>
     </Modal>
@@ -295,6 +316,15 @@ export default function Patients() {
   // Arriving from the header search (or the back button) has to move the box,
   // which otherwise keeps whatever was last typed into it.
   useEffect(() => setSearchInput(searchTerm), [searchTerm]);
+
+  // The registration confirmation clears itself. It reports something that has
+  // already happened, so leaving it on screen would have it still claiming a
+  // patient was "just added" several patients later.
+  useEffect(() => {
+    if (!successMsg) return undefined;
+    const timer = setTimeout(() => setSuccessMsg(""), 6000);
+    return () => clearTimeout(timer);
+  }, [successMsg]);
 
   const query = searchTerm.trim();
   // Same floor as the API, which stops narrowing below it — one character
@@ -558,8 +588,19 @@ export default function Patients() {
         <AddPatientModal
           doctors={doctors}
           onClose={() => setShowAddModal(false)}
-          onCreated={() => {
+          onCreated={(created) => {
             setShowAddModal(false);
+            // Registering also raised the patient's OP, so say which queue they
+            // went into. Without it the desk has no confirmation that the half
+            // of the action they can't see from this page actually happened,
+            // and the habit of going to Appointments to "finish the job" — the
+            // step this change removes — is exactly what would persist.
+            const department = created?.appointment?.department;
+            setSuccessMsg(
+              department
+                ? `${created.name} registered and added to the ${department} queue.`
+                : `${created?.name || "Patient"} registered.`
+            );
             // A patient who has just been registered has no completed
             // consultation, so they belong to Awaiting. Switching to that tab
             // means the person who registered them sees them, instead of
