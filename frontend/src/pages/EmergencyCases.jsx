@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HiOutlineExclamationTriangle, HiOutlinePlus } from "react-icons/hi2";
-import EmergencyCaseCard, { STATUS_META } from "../components/EmergencyCaseCard";
+import EmergencyCaseCard from "../components/EmergencyCaseCard";
 import Modal from "../components/Modal";
+import PatientPicker from "../components/PatientPicker";
 import {
   EmptyState,
   PageHeader,
@@ -10,15 +11,18 @@ import {
   RecordGridSkeleton,
 } from "../components/RecordCard";
 import { useAuth } from "../context/AuthContext";
+import useEmergencyClaim from "../hooks/useEmergencyClaim";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDepartments } from "../services/departmentService";
 import { fetchDoctors } from "../services/doctorService";
+import { createEmergencyCase, fetchEmergencyCases } from "../services/emergencyService";
+import { createPatient } from "../services/patientService";
 import {
-  claimEmergencyCase,
-  createEmergencyCase,
-  fetchEmergencyCases,
-} from "../services/emergencyService";
-import { createPatient, fetchPatients } from "../services/patientService";
+  PHONE_DIGITS,
+  PHONE_ERROR,
+  digitsOnly,
+  isPhoneIncomplete,
+} from "../utils/contact";
 import { canCreateEmergencyCase, canTreatEmergencyCase } from "../utils/permissions";
 
 const STATUS_TABS = [
@@ -31,8 +35,6 @@ const SEVERITIES = ["critical", "serious", "stable"];
 
 function CreateEmergencyCaseModal({ onClose, onCreated }) {
   const [mode, setMode] = useState("existing"); // "existing" | "new"
-  const [search, setSearch] = useState("");
-  const [patients, setPatients] = useState([]);
   const [patientId, setPatientId] = useState("");
   const [reason, setReason] = useState("");
   const [severity, setSeverity] = useState("serious");
@@ -47,6 +49,9 @@ function CreateEmergencyCaseModal({ onClose, onCreated }) {
   const [newPhone, setNewPhone] = useState("");
   const [newDoctorId, setNewDoctorId] = useState("");
   const [doctors, setDoctors] = useState([]);
+  // The patient row a previous attempt already committed, if the case itself
+  // then failed — see handleSubmit.
+  const [registeredPatientId, setRegisteredPatientId] = useState(null);
 
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -71,26 +76,31 @@ function CreateEmergencyCaseModal({ onClose, onCreated }) {
       .catch(() => setDoctors([]));
   }, [mode]);
 
+  // Switching to "unknown arrival" abandons whoever was picked — otherwise a
+  // patient chosen and then thought better of would still be the one the case
+  // is logged against.
   useEffect(() => {
-    if (mode !== "existing" || search.trim().length < 2) {
-      setPatients([]);
-      return;
-    }
-    const id = setTimeout(() => {
-      fetchPatients("all", search.trim())
-        .then(setPatients)
-        .catch(() => setPatients([]));
-    }, 300);
-    return () => clearTimeout(id);
-  }, [mode, search]);
+    if (mode !== "existing") setPatientId("");
+  }, [mode]);
 
   const inputClass =
     "w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
+
+  // Optional on an emergency arrival — nobody has a number for an unconscious
+  // patient — but exact when given, the same rule every other phone field in
+  // the app follows. Checked here as well as being sanitised on the way in,
+  // because the server refuses a half-typed number and that refusal used to
+  // surface as "could not create the emergency case".
+  const phoneIncomplete = isPhoneIncomplete(newPhone);
 
   async function handleSubmit(e) {
     e.preventDefault();
     if (!reason.trim()) {
       setErrorMsg("Reason is required.");
+      return;
+    }
+    if (mode === "new" && phoneIncomplete) {
+      setErrorMsg(PHONE_ERROR);
       return;
     }
     setSaving(true);
@@ -104,13 +114,23 @@ function CreateEmergencyCaseModal({ onClose, onCreated }) {
           setSaving(false);
           return;
         }
-        const patient = await createPatient({
-          name: newName.trim(),
-          gender: newGender || undefined,
-          phone: newPhone || undefined,
-          assigned_doctor_id: newDoctorId,
-        });
-        resolvedPatientId = patient.id;
+        // Registering also raises an OP, and a second OP for the same patient
+        // inside ten minutes is refused as a double-registration — so a retry
+        // after the case itself failed would register a *second* arrival and
+        // then be rejected outright, leaving the emergency unloggable. The
+        // patient from the failed attempt is reused instead.
+        if (registeredPatientId) {
+          resolvedPatientId = registeredPatientId;
+        } else {
+          const patient = await createPatient({
+            name: newName.trim(),
+            gender: newGender || undefined,
+            phone: newPhone || undefined,
+            assigned_doctor_id: newDoctorId,
+          });
+          setRegisteredPatientId(patient.id);
+          resolvedPatientId = patient.id;
+        }
       }
 
       if (!resolvedPatientId) {
@@ -158,32 +178,19 @@ function CreateEmergencyCaseModal({ onClose, onCreated }) {
         </div>
 
         {mode === "existing" ? (
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">
-              Search patient *
-            </label>
-            <input
-              className={inputClass}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Name, patient ID or phone…"
-            />
-            {patients.length > 0 && (
-              <select
-                required
-                size={Math.min(patients.length, 5)}
-                className={`${inputClass} mt-2`}
-                value={patientId}
-                onChange={(e) => setPatientId(e.target.value)}
-              >
-                {patients.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.code})
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
+          // The same picker the rest of the app uses, so a name typed here
+          // finds the patient exactly as it would anywhere else. It also
+          // replaces the sized listbox that used to sit under the box: with
+          // one result visibly highlighted but nothing actually chosen, Log
+          // failed with "Select a patient" over a list plainly showing one.
+          // A chosen patient is now a chip, which is either there or not.
+          <PatientPicker
+            required
+            label="Search patient"
+            value={patientId}
+            onChange={(patient) => setPatientId(patient ? String(patient.id) : "")}
+            placeholder="Name, patient ID or phone…"
+          />
         ) : (
           <>
             <div>
@@ -208,7 +215,26 @@ function CreateEmergencyCaseModal({ onClose, onCreated }) {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Phone</label>
-                <input className={inputClass} value={newPhone} onChange={(e) => setNewPhone(e.target.value)} />
+                {/* Sanitised as it is typed rather than validated on submit: a
+                    number read out over the phone as "+91 98765 43210" becomes
+                    usable instead of an error, and a letter or a symbol simply
+                    cannot be entered. Same rule as ADD OP and the staff form —
+                    see utils/contact.js. */}
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  maxLength={PHONE_DIGITS}
+                  placeholder={`${PHONE_DIGITS} digits`}
+                  className={`${inputClass} ${phoneIncomplete ? "border-red-300" : ""}`}
+                  value={newPhone}
+                  onChange={(e) => setNewPhone(digitsOnly(e.target.value))}
+                />
+                {phoneIncomplete && (
+                  <p className="mt-1 text-xs text-red-600">
+                    {newPhone.length} of {PHONE_DIGITS} digits
+                  </p>
+                )}
               </div>
             </div>
             <div>
@@ -305,7 +331,6 @@ export default function EmergencyCases() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState("open");
   const [showCreate, setShowCreate] = useState(false);
-  const [claimingId, setClaimingId] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
 
   const load = useCallback(
@@ -313,7 +338,14 @@ export default function EmergencyCases() {
       if (!silent) setLoading(true);
       const params = tab === "open" ? {} : { status: tab };
       return fetchEmergencyCases(params)
-        .then(setCases)
+        .then((rows) => {
+          setCases(rows);
+          // An empty board is not a failure — it is the normal state most of
+          // the time. Clearing here is also what stops a banner from an
+          // earlier failed load outliving the failure and sitting above a
+          // list that has since loaded perfectly well.
+          setErrorMsg("");
+        })
         .catch(() => setErrorMsg("Could not load the emergency board."))
         .finally(() => setLoading(false));
     },
@@ -326,26 +358,25 @@ export default function EmergencyCases() {
 
   useLiveRefresh(load);
 
-  async function handleClaim(emergencyCase) {
-    setClaimingId(emergencyCase.id);
-    setErrorMsg("");
-    try {
-      await claimEmergencyCase(emergencyCase.id);
-      navigate(`/dashboard/emergency/${emergencyCase.id}`);
-    } catch (err) {
-      setErrorMsg(err.response?.data?.message || "Could not claim this case.");
-      load(true);
-    } finally {
-      setClaimingId(null);
-    }
-  }
+  // Shared with the Alerts page and the notification bell, so a case claimed
+  // from any of the three behaves the same way and lands in the same place.
+  const {
+    claim,
+    claimingId,
+    error: claimError,
+  } = useEmergencyClaim({
+    onSettled: (caseId, err) => {
+      // Refused — usually because another doctor claimed it a moment ago, so
+      // refetch and let the board show who has it now.
+      if (err) load(true);
+    },
+  });
 
   return (
     <div>
       <PageHeader
         icon={HiOutlineExclamationTriangle}
         title="Emergency Cases"
-        description="Patients whose treatment could not wait for the normal OP queue — logged separately, claimed by whoever is on duty."
         action={
           canCreate && (
             <button
@@ -375,19 +406,17 @@ export default function EmergencyCases() {
         ))}
       </div>
 
-      {errorMsg && (
-        <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{errorMsg}</p>
+      {(errorMsg || claimError) && (
+        <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
+          {errorMsg || claimError.message}
+        </p>
       )}
 
       <div className="mt-5">
         {loading ? (
           <RecordGridSkeleton count={3} />
         ) : cases.length === 0 ? (
-          <EmptyState icon={HiOutlineExclamationTriangle}>
-            {tab === "open"
-              ? "No open emergency cases right now."
-              : `No ${STATUS_META[tab]?.label.toLowerCase() || tab} cases.`}
-          </EmptyState>
+          <EmptyState icon={HiOutlineExclamationTriangle}>No emergency cases</EmptyState>
         ) : (
           <RecordGrid>
             {cases.map((c) => (
@@ -396,7 +425,7 @@ export default function EmergencyCases() {
                 emergencyCase={c}
                 canClaim={canClaim}
                 busy={claimingId === c.id}
-                onClaim={handleClaim}
+                onClaim={(ec) => claim(ec.id)}
                 onOpen={(ec) => navigate(`/dashboard/emergency/${ec.id}`)}
               />
             ))}

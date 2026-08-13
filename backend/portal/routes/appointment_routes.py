@@ -14,7 +14,8 @@ from portal.helpers.case_helper import (
 )
 from portal.helpers.broadcast import dashboard_changed
 from portal.helpers.decorators import role_required
-from portal.helpers.patient_access import can_access_patient, patient_scope
+from portal.helpers.patient_access import can_access_patient
+from portal.helpers.patient_search import code_clauses, patient_search_filter
 # The duplicate window and the OP-raising rules live in queue_helper, shared
 # with patient registration. Re-exported here because this module is where
 # they were first defined and other code imports them from it.
@@ -23,6 +24,7 @@ from portal.helpers.queue_helper import (  # noqa: F401
     op_department_for,
     raise_op,
     recent_duplicate_for,
+    scope_appointments,
 )
 from portal.helpers.response import error, success
 from portal.models.appointment import Appointment
@@ -47,8 +49,14 @@ def _op_document_path(appointment_id):
 # board, i.e. not yet completed or cancelled.
 OPEN_STATUSES = ("waiting", "in_progress")
 
-# Off the board for good — nothing can be started from one of these.
+# Off the board for good — nothing can be started from one of these. These are
+# exactly the statuses the history below lists: the queue and the history are
+# defined against the same constant, so an OP is always in one of the two and
+# never in both.
 CLOSED_STATUSES = ("completed", "cancelled")
+
+DEFAULT_PAGE_SIZE = 20
+MAX_PAGE_SIZE = 100
 
 
 def collapse_duplicates(appointments):
@@ -174,17 +182,11 @@ def list_appointments():
     if date_to:
         query = query.filter(Appointment.created_at < date_to + timedelta(days=1))
 
+    # A doctor's queue is strictly the OPs raised against them — see
+    # _scope_to_caller, shared with the history route and the dashboard.
     doctor = get_current_doctor()
-    # Explicit column, not filter_by: the query may already be joined to
-    # Consultation, and filter_by would bind to that entity instead.
-    if doctor:
-        # A doctor's queue is strictly the patients assigned to them, within
-        # their own department. Same rule as every other patient-facing route.
-        query = query.join(Patient, Appointment.patient_id == Patient.id).filter(
-            Appointment.department_id == doctor.department_id,
-            patient_scope(doctor),
-        )
-    else:
+    query = _scope_to_caller(query)
+    if not doctor:
         department_id = request.args.get("department_id", type=int)
         if department_id:
             query = query.filter(Appointment.department_id == department_id)
@@ -214,6 +216,106 @@ def list_appointments():
         payload.append(appointment.to_dict(queue_number=queue_number))
 
     return success(payload)
+
+
+def _scope_to_caller(query):
+    """Narrows an appointment query the way the caller is allowed to see it.
+
+    Thin wrapper over `scope_appointments`, which is shared with the dashboard
+    so the queue, the OP history and the count that links to them can never
+    disagree about whose OP is whose.
+    """
+    return scope_appointments(query, get_current_doctor())
+
+
+@appointment_bp.get("/history")
+@jwt_required()
+def appointment_history():
+    """Closed OPs — the ones that have left the queue — newest first.
+
+    The counterpart to `list_appointments`: that route is the work list of
+    patients still in the building, this one is the record of the ones who have
+    been seen and cleared. Nothing is deleted when a consultation ends; the OP
+    simply moves from one to the other, because `complete_appointment_for`
+    flips its status and the two routes select on opposite halves of that same
+    field.
+
+    Each row carries the visit it produced -- summary, prescription, report --
+    so a closed OP can be read here without hunting for its consultation.
+
+    Duplicate registrations are deliberately *not* collapsed the way the queue
+    collapses them. The queue hides a double-registration because it must draw
+    one card per patient waiting; the history is the record of what was
+    actually raised, and quietly dropping a row from it would make the desk's
+    own audit trail disagree with the database.
+    """
+    query = Appointment.query.outerjoin(
+        Consultation, Appointment.consultation_id == Consultation.id
+    ).filter(Appointment.status.in_(CLOSED_STATUSES))
+
+    status = request.args.get("status")
+    if status:
+        if status not in CLOSED_STATUSES:
+            allowed = ", ".join(CLOSED_STATUSES)
+            return error(f"status must be one of: {allowed}", status=422)
+        query = query.filter(Appointment.status == status)
+
+    date_from, date_from_error = _parse_range_date(request.args.get("date_from"), "date_from")
+    if date_from_error:
+        return error(date_from_error, status=422)
+    date_to, date_to_error = _parse_range_date(request.args.get("date_to"), "date_to")
+    if date_to_error:
+        return error(date_to_error, status=422)
+    if date_from:
+        query = query.filter(Appointment.created_at >= date_from)
+    if date_to:
+        query = query.filter(Appointment.created_at < date_to + timedelta(days=1))
+
+    query = _scope_to_caller(query)
+
+    # The patient join is already there for a doctor (see _scope_to_caller) but
+    # not for reception, and joining twice would alias the table into a
+    # cartesian product — so the patient half goes through the relationship,
+    # which expresses the same filter as a subquery either way. Half a name is
+    # enough, in any case, and "OP0123" finds the OP itself.
+    search = patient_search_filter(
+        request.args.get("search"),
+        columns=(Appointment.reason,),
+        extra=lambda term: code_clauses(term, "op", Appointment.id),
+        relationship=Appointment.patient,
+    )
+    if search is not None:
+        query = query.filter(search)
+
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(request.args.get("page_size", DEFAULT_PAGE_SIZE))
+    except (TypeError, ValueError):
+        page_size = DEFAULT_PAGE_SIZE
+    page_size = max(1, min(page_size, MAX_PAGE_SIZE))
+
+    total = query.order_by(None).count()
+    appointments = (
+        query.order_by(Appointment.created_at.desc(), Appointment.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    return success(
+        {
+            "items": [a.to_dict(include_consultation=True) for a in appointments],
+            "meta": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "pages": max(1, (total + page_size - 1) // page_size),
+            },
+        }
+    )
 
 
 @appointment_bp.post("")

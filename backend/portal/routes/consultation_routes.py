@@ -32,6 +32,7 @@ from portal.helpers.decorators import clinical_only
 from portal.helpers.formulary import formulary_payload, prescribable_for, resolve_medicine
 from portal.helpers.notify import notify, role_user_ids
 from portal.helpers.patient_access import can_access_patient
+from portal.helpers.patient_search import patient_search_filter
 from portal.helpers.queue_helper import (
     claim_appointment_for,
     complete_appointment_for,
@@ -93,23 +94,22 @@ def list_consultations():
             db.func.coalesce(Consultation.started_at, Consultation.created_at) >= since
         )
 
-    search = (request.args.get("search") or "").strip()
-    if search:
-        query = query.outerjoin(Patient, Consultation.patient_id == Patient.id).outerjoin(
+    # The patient (name, code, phone, email) or what was written up about the
+    # visit. Every typed word has to match one of them, so "arjun fever"
+    # narrows to Arjun's fever visits instead of returning every fever.
+    search = patient_search_filter(
+        request.args.get("search"),
+        columns=(
+            ConsultationSummary.possible_diagnosis,
+            ConsultationSummary.symptoms,
+            ConsultationSummary.summary,
+        ),
+        relationship=Consultation.patient,
+    )
+    if search is not None:
+        query = query.outerjoin(
             ConsultationSummary, ConsultationSummary.consultation_id == Consultation.id
-        )
-        like = f"%{search}%"
-        conditions = [
-            Patient.name.ilike(like),
-            ConsultationSummary.possible_diagnosis.ilike(like),
-            ConsultationSummary.symptoms.ilike(like),
-            ConsultationSummary.summary.ilike(like),
-        ]
-        # "PAT0004" / "4" should find that patient by id, not just by name.
-        digits = "".join(ch for ch in search if ch.isdigit())
-        if digits:
-            conditions.append(Patient.id == int(digits))
-        query = query.filter(db.or_(*conditions))
+        ).filter(search)
 
     consultations = (
         query.order_by(

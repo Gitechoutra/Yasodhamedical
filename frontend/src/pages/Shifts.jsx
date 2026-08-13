@@ -199,11 +199,7 @@ function MyShifts() {
 
   return (
     <div>
-      <PageHeader
-        icon={HiOutlineCalendarDays}
-        title="My shifts"
-        description="The shifts the hospital administrator has scheduled you for. Contact them if something here looks wrong — shifts are managed centrally."
-      />
+      <PageHeader icon={HiOutlineCalendarDays} title="My shifts" />
 
       <div className="mt-5">
         <RangePicker range={range} onChange={setRange} />
@@ -593,7 +589,6 @@ function ShiftManager() {
       <PageHeader
         icon={HiOutlineCalendarDays}
         title="Staff shifts"
-        description="The hospital shift schedule. Every shift a doctor, nurse, receptionist or pharmacist works is created and assigned here — staff see only their own and cannot change them."
         action={
           <button
             onClick={() => setEditing("new")}

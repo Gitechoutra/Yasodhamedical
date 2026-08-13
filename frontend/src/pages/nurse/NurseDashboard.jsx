@@ -9,7 +9,12 @@ import {
 import Avatar from "../../components/Avatar";
 import StatCard from "../../components/StatCard";
 import SurgeryStageBadge from "../../components/SurgeryStageBadge";
-import { CareTypeBadge, ComplianceBar, formatWhen } from "../../components/nursing/NursingBadges";
+import {
+  CareTypeBadge,
+  ComplianceBar,
+  EmergencyBadge,
+  formatWhen,
+} from "../../components/nursing/NursingBadges";
 import { useAuth } from "../../context/AuthContext";
 import useLiveNursing from "../../hooks/useLiveNursing";
 import { fetchNursingSummary } from "../../services/nursingService";
@@ -21,11 +26,19 @@ function daysLeft(endsAt) {
 
 export function AssignmentCard({ assignment, to }) {
   const remaining = daysLeft(assignment.ends_at);
+  const emergency = assignment.emergency;
 
   return (
     <Link
       to={to}
-      className="group block rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-teal-200 hover:shadow-md"
+      className={`group block rounded-2xl bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${
+        // An emergency admission is picked out of the ward list by the card
+        // itself, not just a badge on it — a nurse scanning a full shift's
+        // patients should not have to read each one to find them.
+        emergency
+          ? "border-2 border-red-200 hover:border-red-300"
+          : "border border-slate-100 hover:border-teal-200"
+      }`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
@@ -36,6 +49,7 @@ export function AssignmentCard({ assignment, to }) {
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+          <EmergencyBadge emergency={emergency} />
           <CareTypeBadge careType={assignment.care_type} status={assignment.status} />
           <SurgeryStageBadge
             stage={assignment.surgery_stage}
@@ -43,6 +57,12 @@ export function AssignmentCard({ assignment, to }) {
           />
         </div>
       </div>
+
+      {emergency?.reason && (
+        <p className="mt-2 line-clamp-2 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-800">
+          {emergency.reason}
+        </p>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
         <span>Dr: {assignment.doctor}</span>
@@ -108,9 +128,6 @@ export default function NurseDashboard() {
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
           {user?.name ? `Hello, ${user.name}` : "Your shift"}
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          The patients your doctors have put in your care
-        </p>
       </div>
 
       {errorMsg && (

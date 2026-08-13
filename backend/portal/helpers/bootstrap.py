@@ -36,7 +36,7 @@ Those are sample content, not startup requirements, and stay in
 `seeders/seed_core.py` behind an explicit command.
 """
 
-from sqlalchemy import inspect
+from sqlalchemy import Enum, inspect
 
 from portal.extensions import db
 from portal.models.department import DEFAULT_DEPARTMENTS, Department
@@ -86,6 +86,88 @@ def _report(app, label, added, total):
     else:
         app.logger.info("%s check: all %d present", label, total)
     return added
+
+
+def ensure_schema(app):
+    """Reports where the live database disagrees with the models. Read-only.
+
+    The one check here that changes nothing, because it cannot: adding a
+    column or widening an enum on a live table is a decision with data
+    behind it, and a server that quietly reshapes the schema it was pointed
+    at is worse than one that says what is wrong. It writes a warning and a
+    dated `.sql` in `database/changes/` is what actually applies the fix.
+
+    It exists because the symptom of drift is unreadable at the point it
+    bites. A missing column is a 1054 on every query that touches the table;
+    a missing enum value is a 1265 on one INSERT deep inside a transaction,
+    which rolls the whole thing back — the front desk sees "Could not create
+    this OP" and there is nothing wrong with anything they did. Both of those
+    shipped: `notifications.category` never gained `patient_assignment`, so
+    registering a patient failed at the notification and took the patient and
+    their OP down with it.
+
+    Nothing catches that earlier. There is no Alembic chain in this checkout
+    (see `database/changes/README.md`), the change scripts are applied by
+    hand, and a schema one ALTER behind starts, connects, serves the login
+    page and fails only on the flow that needed the missing piece. Two lines
+    in the startup log turn a support ticket into a script somebody runs.
+
+    Enum values and columns only: the mismatches that make a statement fail
+    outright. Types, lengths, defaults and indexes drift in ways MySQL
+    tolerates, and reporting those would bury the two that don't.
+    """
+    try:
+        with app.app_context():
+            insp = inspect(db.engine)
+            live_tables = set(insp.get_table_names())
+            if not live_tables:
+                app.logger.info(
+                    "Schema check: the database is empty -- nothing to compare yet."
+                )
+                return []
+
+            problems = []
+            for table in db.metadata.sorted_tables:
+                if table.name not in live_tables:
+                    problems.append(f"missing table '{table.name}'")
+                    continue
+                live_columns = {c["name"]: c for c in insp.get_columns(table.name)}
+                for column in table.columns:
+                    live = live_columns.get(column.name)
+                    if live is None:
+                        problems.append(f"{table.name}.{column.name} is missing")
+                        continue
+                    if isinstance(column.type, Enum):
+                        # Only values the models have and the column lacks. The
+                        # other direction is a value being retired, which every
+                        # existing row still reads back fine.
+                        absent = set(column.type.enums) - set(
+                            getattr(live["type"], "enums", None) or []
+                        )
+                        if absent:
+                            problems.append(
+                                f"{table.name}.{column.name} accepts no "
+                                f"{', '.join(sorted(absent))}"
+                            )
+
+            if not problems:
+                app.logger.info(
+                    "Schema check: all %d tables match the models",
+                    len(db.metadata.sorted_tables),
+                )
+                return []
+
+            app.logger.warning(
+                "Schema check: the database is behind the models -- %s. Apply the "
+                "pending scripts in database/changes/ (see its README); until then "
+                "any request touching these will fail.",
+                "; ".join(problems),
+            )
+            return problems
+
+    except Exception as exc:  # noqa: BLE001 - see the module docstring
+        app.logger.warning("Could not verify the schema at startup: %s", exc)
+        return []
 
 
 def ensure_departments(app):

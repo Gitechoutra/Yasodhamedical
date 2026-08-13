@@ -264,7 +264,6 @@ export default function DoctorAvailability() {
       <PageHeader
         icon={HiOutlineClock}
         title="Doctor availability"
-        description="When each doctor is in, taken from the hospital shift schedule. Check here before booking a patient in, so the OP goes to a doctor who will actually be at the desk."
         action={
           <Link
             to="/dashboard/doctors"

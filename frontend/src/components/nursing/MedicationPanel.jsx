@@ -1,7 +1,12 @@
 import { useState } from "react";
-import { HiOutlineBeaker, HiOutlinePlus } from "react-icons/hi2";
+import {
+  HiOutlineBeaker,
+  HiOutlineExclamationTriangle,
+  HiOutlinePlus,
+} from "react-icons/hi2";
 import Modal from "../Modal";
-import { DoseBadge, formatWhen } from "./NursingBadges";
+import { DoseFields, DoseInstructions, TONES } from "./PrescriptionList";
+import { DoseBadge, EMERGENCY_SEVERITY_LABELS, formatWhen } from "./NursingBadges";
 import {
   addMedicationOrder,
   isoToLocalInput,
@@ -331,12 +336,40 @@ export default function MedicationPanel({ assignment, canRecord, canManagePlan, 
   const activeOrders = assignment.medication_orders.filter((o) => o.is_active);
   const stoppedOrders = assignment.medication_orders.filter((o) => !o.is_active);
 
+  // For an emergency admission this schedule *is* the prescription — the
+  // claiming doctor entered it at the hand-off and there is no consultation
+  // for it to have come from. Marked as such throughout so a nurse holding a
+  // mixed ward list is never in doubt which orders they are looking at.
+  const emergency = assignment.emergency;
+  const tone = TONES[emergency ? "emergency" : "normal"];
+
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
+      <div
+        className={`rounded-2xl bg-white p-6 shadow-sm ${
+          emergency ? "border-2 border-red-200" : "border border-slate-100"
+        }`}
+      >
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold text-slate-900">Medication schedule</h2>
+            <h2
+              className={`flex items-center gap-2 text-base font-semibold ${
+                emergency ? "font-bold text-red-900" : "text-slate-900"
+              }`}
+            >
+              {emergency && <HiOutlineExclamationTriangle className="h-5 w-5" />}
+              {emergency ? "Emergency prescription" : "Medication schedule"}
+            </h2>
+            {emergency && (
+              <p className="mt-0.5 text-xs font-semibold text-red-600">
+                {emergency.code}
+                {emergency.severity
+                  ? ` · ${EMERGENCY_SEVERITY_LABELS[emergency.severity] || emergency.severity}`
+                  : ""}
+                {" · "}
+                {emergency.reason}
+              </p>
+            )}
             {today && (
               <p className="mt-0.5 text-sm text-slate-500">
                 {today.logged} of {today.expected || "—"} doses logged today
@@ -367,7 +400,13 @@ export default function MedicationPanel({ assignment, canRecord, canManagePlan, 
         {activeOrders.length === 0 ? (
           <p className="py-10 text-center text-sm text-slate-400">
             Nothing on the schedule yet.
-            {canManagePlan ? " Add the medicines this patient needs during recovery." : ""}
+            {canManagePlan
+              ? " Add the medicines this patient needs during recovery."
+              : emergency
+                ? // Silence on an emergency admission is worth chasing, not
+                  // waiting out: the doctor may still be on the case.
+                  " Message the doctor if you are expecting emergency orders."
+                : ""}
           </p>
         ) : (
           <div className="space-y-3">
@@ -376,80 +415,64 @@ export default function MedicationPanel({ assignment, canRecord, canManagePlan, 
               const remaining = progress?.remaining;
               const givenToday = todaysGivenDoses(assignment.administrations, order.id);
               return (
-                <div
-                  key={order.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 p-4"
-                >
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold text-slate-800">{order.medicine_name}</p>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                <div key={order.id} className={`rounded-xl border p-4 ${tone.card}`}>
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <p className={`text-base font-semibold ${tone.name}`}>
+                        {order.medicine_name}
+                      </p>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone.chip}`}
+                      >
                         {order.route_label}
                       </span>
                     </div>
-                    {/* One labelled line per field, only for what the doctor
-                        actually entered — nothing here is inferred. */}
-                    {order.dose || order.frequency || order.duration ? (
-                      <div className="mt-1 space-y-0.5 text-xs text-slate-500">
-                        {order.dose && (
-                          <p>
-                            <span className="font-medium text-slate-600">Dose:</span> {order.dose}
-                          </p>
-                        )}
-                        {order.frequency && (
-                          <p>
-                            <span className="font-medium text-slate-600">Frequency:</span>{" "}
-                            {order.frequency}
-                          </p>
-                        )}
-                        {order.duration && (
-                          <p>
-                            <span className="font-medium text-slate-600">Duration:</span>{" "}
-                            {order.duration}
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="mt-1 text-xs text-slate-400">No dosing details</p>
-                    )}
-                    {order.instructions && (
-                      <p className="mt-1 text-xs italic text-slate-500">{order.instructions}</p>
-                    )}
-                    {/* Doses actually given today, with their real logged
-                        times — not a predicted schedule, since the plan only
-                        ever says how many times a day, never the clock time. */}
-                    {givenToday.length > 0 && (
-                      <div className="mt-1.5 space-y-0.5 text-xs text-slate-500">
-                        <span className="font-medium text-slate-600">Given today:</span>
-                        {givenToday.map((d) => (
-                          <p key={d.id} className="pl-2">
-                            {d.dose || order.dose || "Dose"} —{" "}
-                            {formatWhen(d.administered_at || d.created_at, { withDate: false })}
-                          </p>
-                        ))}
-                      </div>
-                    )}
+
+                    <div className="flex shrink-0 items-center gap-3">
+                      <span
+                        className={`text-xs font-semibold ${
+                          remaining ? "text-amber-600" : "text-emerald-600"
+                        }`}
+                      >
+                        {order.times_per_day
+                          ? `${progress?.logged || 0} of ${order.times_per_day} given today`
+                          : "As needed"}
+                      </span>
+                      {canRecord && (
+                        <button
+                          onClick={() => setLogging({ order })}
+                          className="rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100"
+                        >
+                          Log dose
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`text-xs font-semibold ${
-                        remaining ? "text-amber-600" : "text-emerald-600"
-                      }`}
-                    >
-                      {order.times_per_day
-                        ? `${progress?.logged || 0}/${order.times_per_day} today`
-                        : "As needed"}
-                    </span>
-                    {canRecord && (
-                      <button
-                        onClick={() => setLogging({ order })}
-                        className="rounded-full bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-100"
-                      >
-                        Log dose
-                      </button>
-                    )}
-                  </div>
+                  {/* Every value labelled, and the same four the prescription
+                      itself shows — so cross-checking the schedule against
+                      what the doctor wrote is reading the same thing twice,
+                      not translating between two layouts. */}
+                  <DoseFields item={order} tone={tone} className="mt-3" />
+                  <DoseInstructions item={order} tone={tone} className="mt-3" />
+
+                  {/* Doses actually given today, with their real logged
+                      times — not a predicted schedule, since the plan only
+                      ever says how many times a day, never the clock time. */}
+                  {givenToday.length > 0 && (
+                    <div className="mt-3 border-t border-slate-100 pt-2 text-xs text-slate-500">
+                      <span className="font-semibold text-slate-600">Given today:</span>{" "}
+                      {givenToday
+                        .map(
+                          (d) =>
+                            `${d.dose || order.dose || "Dose"} at ${formatWhen(
+                              d.administered_at || d.created_at,
+                              { withDate: false }
+                            )}`
+                        )
+                        .join(" · ")}
+                    </div>
+                  )}
                 </div>
               );
             })}

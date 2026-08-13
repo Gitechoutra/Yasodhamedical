@@ -8,6 +8,7 @@ import {
 import AppointmentCard from "../components/AppointmentCard";
 import DoctorQueueCard, { buildQueueEntries } from "../components/DoctorQueueCard";
 import FilterChip from "../components/FilterChip";
+import OpHistoryCard from "../components/OpHistoryCard";
 import {
   EmptyState,
   PageHeader,
@@ -16,9 +17,14 @@ import {
 } from "../components/RecordCard";
 import { useAuth } from "../context/AuthContext";
 import useLiveRefresh from "../hooks/useLiveRefresh";
-import { fetchAppointments, startAppointment } from "../services/appointmentService";
+import {
+  fetchAppointmentHistory,
+  fetchAppointments,
+  startAppointment,
+} from "../services/appointmentService";
 import { fetchDoctors } from "../services/doctorService";
 import { canRunConsultation } from "../utils/permissions";
+import { matchesSearch } from "../utils/search";
 
 const DATE_FILTERS = [
   { key: "today", label: "Today" },
@@ -56,14 +62,21 @@ function dateRangeFor(filter) {
   return { date_from: today, date_to: today };
 }
 
+/** Whose queue an OP belongs in: the doctor it was raised against, and only
+ *  the patient's assigned doctor as a fallback for OPs raised before reception
+ *  started stamping the doctor onto the OP itself. */
+function doctorIdOf(appointment) {
+  return appointment.doctor_id ?? appointment.patient_detail?.assigned_doctor?.id ?? null;
+}
+
 /** This doctor's current patient (if any) and waiting list, in queue order. */
 function groupByDoctor(appointments) {
   const byDoctor = new Map();
   for (const appointment of appointments) {
-    const doctor = appointment.patient_detail?.assigned_doctor;
-    if (!doctor) continue;
-    if (!byDoctor.has(doctor.id)) byDoctor.set(doctor.id, { current: null, waiting: [] });
-    const bucket = byDoctor.get(doctor.id);
+    const doctorId = doctorIdOf(appointment);
+    if (doctorId == null) continue;
+    if (!byDoctor.has(doctorId)) byDoctor.set(doctorId, { current: null, waiting: [] });
+    const bucket = byDoctor.get(doctorId);
     if (appointment.status === "in_progress") bucket.current = appointment;
     else if (appointment.status === "waiting") bucket.waiting.push(appointment);
   }
@@ -93,6 +106,11 @@ export default function Appointments() {
 
   // Set by the "Active Consultations" card: only the patients in a room now.
   const ongoingOnly = searchParams.get("status") === "in_progress";
+
+  // Two views of the same OPs, split on the one thing that distinguishes them:
+  // the queue is every OP still open, the history is every OP that has closed.
+  // Kept in the URL so a history page survives a refresh and can be linked to.
+  const isHistory = searchParams.get("view") === "history";
 
   // The server orders ongoing first, then the queue oldest-first, so the
   // first waiting row is the patient to call in next.
@@ -126,6 +144,55 @@ export default function Appointments() {
   // A patient being called in or finishing elsewhere changes this queue.
   useLiveRefresh(load);
 
+  // --- History (closed OPs) -------------------------------------------------
+
+  const [history, setHistory] = useState([]);
+  const [historyMeta, setHistoryMeta] = useState(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState("");
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historySearchInput, setHistorySearchInput] = useState("");
+  const [historySearch, setHistorySearch] = useState("");
+
+  const loadHistory = useCallback(
+    (silent = false) => {
+      // Only fetched while the tab is open. The history only ever grows, and
+      // nobody looking at the live queue is waiting on it.
+      if (!isHistory) return undefined;
+      if (!silent) setHistoryLoading(true);
+      const params = { page: historyPage, page_size: 20 };
+      if (historySearch) params.search = historySearch;
+      return fetchAppointmentHistory(params)
+        .then((data) => {
+          setHistory(data.items || []);
+          setHistoryMeta(data.meta || null);
+          // An empty history is the normal state for a hospital that has not
+          // finished a consultation yet — not a failure, and not a banner.
+          setHistoryError("");
+        })
+        .catch(() => setHistoryError("Could not load the OP history."))
+        .finally(() => setHistoryLoading(false));
+    },
+    [isHistory, historyPage, historySearch]
+  );
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
+
+  // A consultation ending is exactly what moves an OP into this list.
+  useLiveRefresh(loadHistory);
+
+  function switchView(next) {
+    const params = new URLSearchParams(searchParams);
+    if (next === "history") params.set("view", "history");
+    else params.delete("view");
+    // The ongoing-only chip belongs to the queue; carrying it into the
+    // history would filter on a status the history never contains.
+    params.delete("status");
+    setSearchParams(params, { replace: true });
+  }
+
   // --- Doctor-grouped view (reception/admin only) ---------------------------
 
   const [doctors, setDoctors] = useState([]);
@@ -150,11 +217,11 @@ export default function Appointments() {
   }, [isDoctorView]);
 
   const loadPeriod = useCallback(() => {
-    if (isDoctorView) return undefined;
+    if (isDoctorView || isHistory) return undefined;
     return fetchAppointments(dateRangeFor(dateFilter))
       .then(setPeriodAppointments)
       .catch(() => setPeriodAppointments([]));
-  }, [isDoctorView, dateFilter]);
+  }, [isDoctorView, isHistory, dateFilter]);
 
   useEffect(() => {
     loadPeriod();
@@ -166,7 +233,7 @@ export default function Appointments() {
   const periodCountByDoctor = useMemo(() => {
     const counts = new Map();
     for (const appointment of periodAppointments) {
-      const id = appointment.patient_detail?.assigned_doctor?.id;
+      const id = doctorIdOf(appointment);
       if (id == null) continue;
       counts.set(id, (counts.get(id) || 0) + 1);
     }
@@ -182,14 +249,17 @@ export default function Appointments() {
   const selectedEntries = selectedBucket
     ? buildQueueEntries(selectedBucket.current, selectedBucket.waiting).entries
     : [];
-  const patientQuery = patientSearch.trim().toLowerCase();
-  const visiblePatientEntries = patientQuery
-    ? selectedEntries.filter(({ appointment }) => {
-        const name = appointment.patient || "";
-        const code = appointment.patient_detail?.code || "";
-        return name.toLowerCase().includes(patientQuery) || code.toLowerCase().includes(patientQuery);
-      })
-    : selectedEntries;
+  // Filtered here rather than through the API: this is one doctor's queue,
+  // already loaded and never long. The rule is the server's all the same
+  // (utils/search.js) — partial, case-insensitive, and every word narrowing —
+  // so "kum" finds Ravi Kumar here exactly as it does on the Patients page.
+  const visiblePatientEntries = selectedEntries.filter(({ appointment }) =>
+    matchesSearch(patientSearch, [
+      appointment.patient,
+      appointment.patient_detail?.code,
+      appointment.patient_detail?.phone,
+    ])
+  );
 
   function clearFilter(key) {
     const next = new URLSearchParams(searchParams);
@@ -224,26 +294,48 @@ export default function Appointments() {
 
   return (
     <div>
-      <PageHeader
-        icon={HiOutlineCalendarDays}
-        title="Appointments"
-        description="The outpatient queue, in the order patients should be called in. A card moves to Consultations once the doctor ends the visit."
-      />
+      <PageHeader icon={HiOutlineCalendarDays} title="Appointments" />
+
+      {/* The queue is the work list — only OPs still open. A completed OP is
+          not deleted, it moves to History, which is the other half of the same
+          set (see the backend's CLOSED_STATUSES). */}
+      <div className="mt-4 flex flex-wrap gap-2">
+        {[
+          ["queue", "Queue"],
+          ["history", "History"],
+        ].map(([value, label]) => (
+          <button
+            key={value}
+            onClick={() => switchView(value)}
+            className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+              (value === "history") === isHistory
+                ? "bg-brand-600 text-white shadow-md"
+                : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       {/* flex-wrap: the counts line plus both filter chips overflow a
           narrow viewport if they are forced onto one row. */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <p className="text-sm text-slate-500">
-          {user?.department ? `${user.department} queue` : "All departments"} ·{" "}
-          {appointments.length} OP{appointments.length === 1 ? "" : "s"} · {ongoingCount} in
-          consultation · {appointments.length - ongoingCount} waiting
+          {isHistory
+            ? `${historyMeta?.total ?? 0} closed OP${historyMeta?.total === 1 ? "" : "s"}`
+            : `${user?.department ? `${user.department} queue` : "All departments"} · ${
+                appointments.length
+              } OP${appointments.length === 1 ? "" : "s"} · ${ongoingCount} in consultation · ${
+                appointments.length - ongoingCount
+              } waiting`}
         </p>
-        {ongoingOnly && (
+        {!isHistory && ongoingOnly && (
           <FilterChip label="In consultation" onClear={() => clearFilter("status")} />
         )}
       </div>
 
-      {!isDoctorView && (
+      {!isDoctorView && !isHistory && (
         <div className="mt-4 flex flex-wrap gap-2">
           {DATE_FILTERS.map((f) => (
             <button
@@ -261,20 +353,89 @@ export default function Appointments() {
         </div>
       )}
 
-      {errorMsg && (
-        <p className="mt-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">{errorMsg}</p>
+      {(isHistory ? historyError : errorMsg) && (
+        <p className="mt-6 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
+          {isHistory ? historyError : errorMsg}
+        </p>
       )}
 
+      {isHistory ? (
+        <>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setHistoryPage(1);
+              setHistorySearch(historySearchInput.trim());
+            }}
+            className="mt-5 flex w-full items-center gap-2 sm:max-w-md"
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100">
+              <HiOutlineMagnifyingGlass className="h-4 w-4 shrink-0 text-slate-400" />
+              <input
+                value={historySearchInput}
+                onChange={(e) => setHistorySearchInput(e.target.value)}
+                aria-label="Search closed OPs"
+                placeholder="Patient name or reason…"
+                className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
+              />
+            </div>
+            <button
+              type="submit"
+              className="shrink-0 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-4 py-2 text-sm font-semibold text-white shadow-md transition hover:shadow-lg"
+            >
+              Search
+            </button>
+          </form>
+
+          <div className="mt-6">
+            {historyLoading ? (
+              <RecordGridSkeleton count={3} />
+            ) : history.length === 0 ? (
+              <EmptyState icon={HiOutlineCalendarDays}>
+                {historySearch ? "No closed OP matches that search." : "No OP history yet"}
+              </EmptyState>
+            ) : (
+              // align="start" so opening one card's details doesn't stretch
+              // its neighbours to match — same rule as every expandable grid.
+              <RecordGrid align="start">
+                {history.map((record) => (
+                  <OpHistoryCard key={record.id} record={record} />
+                ))}
+              </RecordGrid>
+            )}
+          </div>
+
+          {historyMeta && historyMeta.pages > 1 && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">
+                Page {historyMeta.page} of {historyMeta.pages}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                  disabled={historyPage <= 1}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setHistoryPage((p) => p + 1)}
+                  disabled={historyPage >= historyMeta.pages}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
       <div className="mt-6">
         {isDoctorView ? (
           loading ? (
             <RecordGridSkeleton count={3} />
           ) : appointments.length === 0 ? (
-            <EmptyState icon={HiOutlineCalendarDays}>
-              {ongoingOnly
-                ? "No consultations are in progress right now."
-                : `The ${user?.department || "hospital"} queue is empty — nobody is waiting.`}
-            </EmptyState>
+            <EmptyState icon={HiOutlineCalendarDays}>No appointments</EmptyState>
           ) : (
             <RecordGrid>
               {appointments.map((a) => (
@@ -314,6 +475,7 @@ export default function Appointments() {
           </RecordGrid>
         )}
       </div>
+      )}
 
       {/* A separate section, not a continuation of the doctor-card grid above
           — its own divider and heading, so it reads as an independent part
@@ -321,16 +483,11 @@ export default function Appointments() {
           stays mounted (rather than only appearing once a doctor is picked)
           so the page doesn't jump around as reception clicks between
           doctors — the same section just swaps its heading and contents. */}
-      {!isDoctorView && (
+      {!isDoctorView && !isHistory && (
         <div className="mt-10 border-t border-slate-200 pt-8">
           <PageHeader
             icon={HiOutlineUserGroup}
             title={selectedDoctor ? `${selectedDoctor.name} — Patient Queue` : "Patient Queue"}
-            description={
-              selectedDoctor
-                ? "This doctor's patients, in queue order."
-                : "Select a doctor above to view their patient queue."
-            }
             action={
               selectedDoctor && (
                 <button

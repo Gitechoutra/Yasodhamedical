@@ -445,7 +445,7 @@ CREATE TABLE `medicines` (
 CREATE TABLE `notifications` (
   `id` int NOT NULL AUTO_INCREMENT,
   `user_id` int NOT NULL,
-  `category` enum('appointment','consultation','report','nursing','pharmacy','shift','system') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'system',
+  `category` enum('appointment','consultation','report','nursing','patient_assignment','pharmacy','shift','system') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'system',
   `title` varchar(150) COLLATE utf8mb4_unicode_ci NOT NULL,
   `body` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `link` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
@@ -474,7 +474,8 @@ CREATE TABLE `nursing_assignments` (
   `nurse_id` int NOT NULL,
   `doctor_id` int NOT NULL,
   `consultation_id` int DEFAULT NULL,
-  `care_type` enum('observation','post_surgery','post_procedure','recovery') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `emergency_case_id` int DEFAULT NULL,
+  `care_type` enum('observation','post_surgery','post_procedure','recovery','icu') COLLATE utf8mb4_unicode_ci NOT NULL,
   `treatment_plan` text COLLATE utf8mb4_unicode_ci,
   `care_instructions` text COLLATE utf8mb4_unicode_ci,
   `starts_at` datetime NOT NULL,
@@ -489,6 +490,12 @@ CREATE TABLE `nursing_assignments` (
   KEY `patient_id` (`patient_id`),
   KEY `idx_nursing_assignments_doctor_status` (`doctor_id`,`status`),
   KEY `idx_nursing_assignments_nurse_status` (`nurse_id`,`status`),
+  -- No FOREIGN KEY here, unlike the live schema: this dump predates the
+  -- emergency module and has no `emergency_cases` table to point at, so the
+  -- constraint would fail when FOREIGN_KEY_CHECKS comes back on at the end.
+  -- The live database does carry it (see
+  -- database/changes/2026-08-13_nursing_emergency_link.sql).
+  KEY `idx_nursing_assignments_emergency` (`emergency_case_id`),
   CONSTRAINT `nursing_assignments_ibfk_1` FOREIGN KEY (`consultation_id`) REFERENCES `consultations` (`id`),
   CONSTRAINT `nursing_assignments_ibfk_2` FOREIGN KEY (`doctor_id`) REFERENCES `doctors` (`id`),
   CONSTRAINT `nursing_assignments_ibfk_3` FOREIGN KEY (`nurse_id`) REFERENCES `nurses` (`id`),

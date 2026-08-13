@@ -122,8 +122,7 @@ export default function StaffManagement() {
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Staff</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {data.total} accounts · {data.active} active. Each staff member gets their
-            own login and signs in with their username or email.
+            {data.total} accounts · {data.active} active
           </p>
         </div>
         <button

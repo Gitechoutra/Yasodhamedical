@@ -41,11 +41,6 @@ export default function Dashboard() {
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
           Welcome back, {user?.name}
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {summary?.scope === "front_desk"
-            ? "Registrations and today's queue"
-            : "Here's what's happening today"}
-        </p>
       </div>
 
       {errorMsg && (

@@ -57,6 +57,7 @@ export default function AssignNurseModal({
   defaultPlan = "",
   defaultCareType = "post_surgery",
   observationDays = DEFAULT_OBSERVATION_DAYS,
+  isEmergency = false,
   onClose,
   onAssigned,
 }) {
@@ -215,6 +216,18 @@ export default function AssignNurseModal({
             you both see on the assignment record — so the two of you are reading the same
             dosage instructions rather than a plan retyped from notes.
           </p>
+          {/* An emergency patient has no consultation, so nothing else the
+              doctor writes reaches the ward as a prescription — what is typed
+              here is the whole of it. Worth saying plainly at the point of
+              entry, because a row left half-filled here reaches the nurse as
+              a medicine with no frequency. */}
+          {isEmergency && (
+            <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-[11px] font-medium text-red-700">
+              This is the emergency prescription — an emergency patient has no consultation
+              to carry one over from, so these rows are the only medication instructions the
+              nurse receives. Fill in the dose, frequency and duration on each.
+            </p>
+          )}
           <div className="overflow-x-auto rounded-lg border border-slate-200">
             <table className="w-full min-w-2xl text-left text-sm">
               <thead>

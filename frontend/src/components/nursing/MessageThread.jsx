@@ -87,9 +87,6 @@ export default function MessageThread({ assignmentId, canMessage, counterpart })
         <h2 className="text-base font-semibold text-slate-900">
           Messages{counterpart ? ` with ${counterpart}` : ""}
         </h2>
-        <p className="mt-0.5 text-sm text-slate-500">
-          Medication changes, progress and follow-ups — kept on the patient&apos;s record
-        </p>
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto px-6 py-4">

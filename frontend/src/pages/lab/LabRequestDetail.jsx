@@ -431,7 +431,6 @@ export default function LabRequestDetail({ basePath = "/lab/requests" }) {
         <LabDiscussion
           requestId={request.id}
           canDiscuss={request.can_discuss}
-          patientName={request.patient}
           onPosted={load}
         />
       </div>

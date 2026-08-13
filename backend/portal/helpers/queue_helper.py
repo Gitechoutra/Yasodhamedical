@@ -26,9 +26,11 @@ from datetime import datetime, timedelta
 
 from portal.extensions import db
 from portal.helpers.audit import APPOINTMENT_CREATED, audit
-from portal.helpers.notify import department_doctor_user_ids, notify
+from portal.helpers.notify import notify
+from portal.helpers.patient_access import patient_scope
 from portal.helpers.response import error
 from portal.models.appointment import Appointment
+from portal.models.patient import Patient
 
 OPEN_STATUSES = ("waiting", "in_progress")
 
@@ -94,6 +96,14 @@ def op_department_for(patient):
 def raise_op(patient, *, reason=None, actor_user_id=None, now=None, payment_type=None):
     """Puts `patient` in their assigned doctor's queue.
 
+    The OP is written against that doctor (`doctor_id`), not just against their
+    department: the desk picked a treating doctor when it raised the OP, so the
+    appointment records who it belongs to from the moment it exists rather than
+    only once somebody presses Start. Reading the assignment off the patient
+    row instead — the way this used to work — left the OP itself saying nothing
+    about who was meant to see it, so reassigning the patient afterwards
+    rewrote every OP they had ever been queued for as the new doctor's.
+
     Returns (appointment, failure). `failure` is a ready-made error response
     when the OP cannot be raised, and the caller returns it unchanged.
 
@@ -108,6 +118,8 @@ def raise_op(patient, *, reason=None, actor_user_id=None, now=None, payment_type
     department, failure = op_department_for(patient)
     if failure:
         return None, failure
+    # Guaranteed non-None: op_department_for refuses a patient without one.
+    doctor = patient.assigned_doctor
 
     now = now or datetime.utcnow()
 
@@ -139,22 +151,26 @@ def raise_op(patient, *, reason=None, actor_user_id=None, now=None, payment_type
     appointment = Appointment(
         patient_id=patient.id,
         department_id=department.id,
+        doctor_id=doctor.id,
         reason=reason or None,
         payment_type=payment_type,
         status="waiting",
     )
     db.session.add(appointment)
 
-    # Every doctor in the department gets pinged — the appointment is queued
-    # to the department, not to one of them, so whoever is free picks it up.
-    notify(
-        department_doctor_user_ids(department.id),
-        title="New patient in your queue",
-        body=f"{patient.name} is waiting in {department.name}.",
-        category="appointment",
-        link="/dashboard/appointments",
-        exclude_user_id=actor_user_id,
-    )
+    # The doctor this OP was raised against, and nobody else. It used to ping
+    # every doctor in the department, which told them about a patient none of
+    # them could open: the queue has always been narrowed to the assigned
+    # doctor's own patients, so the other notifications led to an empty list.
+    if doctor.user_id:
+        notify(
+            [doctor.user_id],
+            title="New patient in your queue",
+            body=f"{patient.name} is waiting in {department.name}.",
+            category="appointment",
+            link="/dashboard/appointments",
+            exclude_user_id=actor_user_id,
+        )
 
     db.session.flush()  # assigns appointment.id for the audit row
     audit(
@@ -164,6 +180,60 @@ def raise_op(patient, *, reason=None, actor_user_id=None, now=None, payment_type
         detail=f"{patient.name} queued for {department.name} ({patient.op_status or 'unbilled'})",
     )
     return appointment, None
+
+
+def scope_appointments(query, doctor):
+    """Narrows an appointment query to what `doctor` may see. No-op for
+    reception and admin, who have no doctor profile and see every department.
+
+    The one definition of "whose OP is this", shared by the queue, the OP
+    history and the dashboard count that links to them — three places that
+    have to agree, and used not to because each carried its own copy.
+
+    An OP raised since `raise_op` started stamping `doctor_id` belongs to that
+    doctor outright. Rows raised before it have no doctor until they are
+    started, so they fall back to the older rule: this department, and a
+    patient assigned to this doctor.
+    """
+    if not doctor:
+        return query
+    # Explicit column, not filter_by: the query may already be joined to
+    # Consultation, and filter_by would bind department_id to that entity.
+    return query.join(Patient, Appointment.patient_id == Patient.id).filter(
+        db.or_(
+            Appointment.doctor_id == doctor.id,
+            db.and_(
+                Appointment.doctor_id.is_(None),
+                Appointment.department_id == doctor.department_id,
+                patient_scope(doctor),
+            ),
+        )
+    )
+
+
+def move_open_ops_to(patient, doctor):
+    """Re-points the patient's not-yet-started OPs at their new doctor.
+
+    Reassignment moves the patient; without this the OP they are currently
+    waiting on stays behind on the old doctor's queue — and if the new doctor
+    is in another department it lands in no queue at all, since the row keeps a
+    department that no longer matches anyone who can see the patient.
+
+    Only OPs nobody has picked up yet. One already linked to a consultation is
+    a visit in progress or finished, and belongs to the doctor who conducted
+    it. Returns how many were moved.
+    """
+    if not doctor or not doctor.department_id:
+        return 0
+    open_ops = Appointment.query.filter(
+        Appointment.patient_id == patient.id,
+        Appointment.consultation_id.is_(None),
+        Appointment.status == "waiting",
+    ).all()
+    for appointment in open_ops:
+        appointment.doctor_id = doctor.id
+        appointment.department_id = doctor.department_id
+    return len(open_ops)
 
 
 def claim_appointment_for(consultation, doctor, create_if_missing=True):

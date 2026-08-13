@@ -64,7 +64,6 @@ export default function CaseSummaryPanel({
   const consolidation = caseRecord.consolidation || {};
   const prescriptions = caseRecord.final_prescriptions || [];
   const verified = caseRecord.final_verified;
-  const sessionCount = caseRecord.completed_session_count;
 
   const filename = `${(caseRecord.patient || "patient").replace(/\s+/g, "_")}_full_medical_report.pdf`;
 
@@ -164,15 +163,10 @@ export default function CaseSummaryPanel({
 
   return (
     <div className="rounded-2xl border border-brand-100 bg-white p-6 shadow-sm ring-1 ring-brand-50">
-      <div className="mb-1 flex items-center gap-2">
+      <div className="mb-5 flex items-center gap-2">
         <HiOutlineSparkles className="h-5 w-5 text-brand-600" />
         <h2 className="text-base font-semibold text-slate-900">Consolidated Record</h2>
       </div>
-      <p className="mb-5 text-xs text-slate-400">
-        The whole course of treatment across {sessionCount} session
-        {sessionCount === 1 ? "" : "s"}, merged into one record. Each session above keeps its
-        own summary and prescription unchanged.
-      </p>
 
       <div className="space-y-5">
         <Section title="Overall Summary">

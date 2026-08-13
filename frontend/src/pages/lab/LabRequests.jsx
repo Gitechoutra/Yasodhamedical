@@ -158,11 +158,6 @@ export default function LabRequests({ basePath = "/lab/requests" }) {
       <PageHeader
         icon={HiOutlineBeaker}
         title="Lab tests"
-        description={
-          data.can_order
-            ? "Tests you have ordered for your patients, and where each one has got to. Open a test to read its report and talk to the lab about it."
-            : "Tests assigned to you, plus anything not yet claimed. Open a test to record progress, file the report, or ask the requesting doctor about it."
-        }
         action={
           data.can_order && (
             <button

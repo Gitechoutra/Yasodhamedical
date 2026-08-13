@@ -139,6 +139,11 @@ def create_emergency_case():
     # Whoever is on duty to see it: the department if reception knows one, the
     # whole doctor roster if not — plus admin, for monitoring. Unlike an OP,
     # there is no "the assigned doctor's own department" to narrow this to.
+    # The case id rides along in the link rather than pointing straight at
+    # `/dashboard/emergency/<id>`: the board is still the right landing page
+    # for anyone who taps the row (a doctor who lost the race to a colleague
+    # would 404 on the detail route), while `notification_routes` reads the
+    # id back out to offer Claim on the notification itself.
     notify(
         department_doctor_user_ids(department.id) + role_user_ids("admin")
         if department
@@ -146,7 +151,7 @@ def create_emergency_case():
         title=f"Emergency — {patient.name}",
         body=f"{reason} ({severity})" + (f" — {department.name}" if department else ""),
         category="appointment",
-        link="/dashboard/emergency",
+        link=f"/dashboard/emergency?case={case.id}",
         exclude_user_id=get_jwt_identity(),
     )
 
@@ -207,9 +212,38 @@ def claim_emergency_case(case_id):
     if case.status != "waiting":
         return error("This emergency case is already closed", status=409)
 
-    case.doctor_id = doctor.id
-    case.status = "in_progress"
-    case.assessed_at = datetime.utcnow()
+    # Compare-and-set rather than "check, then write". The guards above run on
+    # a row read a moment ago, so two doctors tapping Claim at the same instant
+    # both pass them, and the second write would silently take a case the first
+    # was already told they held. Repeating `status == "waiting"` inside the
+    # UPDATE hands that decision to the database: exactly one of the two
+    # updates a row, and the loser falls through to the 409 below.
+    claimed = EmergencyCase.query.filter(
+        EmergencyCase.id == case.id, EmergencyCase.status == "waiting"
+    ).update(
+        {
+            "doctor_id": doctor.id,
+            "status": "in_progress",
+            "assessed_at": datetime.utcnow(),
+        },
+        synchronize_session=False,
+    )
+    if not claimed:
+        db.session.rollback()
+        current = EmergencyCase.query.get(case_id)
+        if current and current.doctor_id == doctor.id:
+            return success(current.to_dict(), message="Already claimed by you")
+        holder = (
+            current.doctor.user.name
+            if current and current.doctor and current.doctor.user
+            else "another doctor"
+        )
+        return error(f"Already claimed by {holder}", status=409)
+
+    # `synchronize_session=False` left the in-session row holding its old
+    # values; everything below (and `to_dict`) reads the claimed ones.
+    db.session.refresh(case)
+
     if case.patient and not case.patient.assigned_doctor_id:
         case.patient.assigned_doctor_id = doctor.id
 

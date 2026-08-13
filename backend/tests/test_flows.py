@@ -15,6 +15,7 @@ What it covers, in the order a hospital day actually runs:
 
   registration    reception registers a patient and routes them to a doctor
   queue           an OP is raised, the doctor calls the patient in
+  emergency       an arrival who cannot wait is logged, claimed and resolved
   consultation    the session records, ends, and produces a prescription
   case            sessions gather under one case; sign-off locks the script
   surgery         the doctor marks, completes and discharges the pathway
@@ -257,6 +258,14 @@ check(
     auto_op,
 )
 check("a first-ever OP is billed as paid", auto_op.get("patient_op_status") == "paid", auto_op)
+# The doctor is on the OP itself, not only on the patient behind it -- reception
+# chose them when it raised the OP, so the row records it from the start rather
+# than waiting for somebody to press Start.
+check(
+    "the OP is assigned to the chosen doctor",
+    auto_op.get("doctor_id") == ids["doctor_profile"],
+    auto_op,
+)
 
 r = c.get("/api/appointments", headers=H["doctor"])
 queue = data_of(r) or []
@@ -280,7 +289,7 @@ r = c.get("/api/notifications", headers=H["doctor"])
 notes = data_of(r) or []
 notes = notes if isinstance(notes, list) else notes.get("items", [])
 check(
-    "the department's doctors are notified",
+    "the treating doctor is notified of the new OP",
     any("queue" in (n.get("title") or "").lower() for n in notes),
     notes,
 )
@@ -474,6 +483,353 @@ r = c.get("/api/patients?scope=awaiting", headers=H["doctor"])
 check(
     "a patient in the room is still 'awaiting'",
     any(p.get("id") == patient_id for p in (data_of(r) or [])),
+    data_of(r),
+)
+
+# ---------------------------------------------------------------------------
+section("emergency — the parallel entry point for an arrival who cannot wait")
+# ---------------------------------------------------------------------------
+
+# Reception logs an unknown arrival exactly as the Emergency screen does it:
+# register the patient first, then raise the case against them. The phone is
+# the same field the form now sanitises — a number that is not exactly ten
+# digits is refused here, and that refusal used to surface on the Emergency
+# screen as "could not create the emergency case".
+r = c.post(
+    "/api/patients",
+    json={
+        "name": "Unknown male, approx. 30s",
+        "gender": "male",
+        "phone": "6302827291545554",
+        "assigned_doctor_id": ids["other_doctor_profile"],
+    },
+    headers=H["reception"],
+)
+check("an over-long phone is refused at registration", r.status_code == 422, body(r))
+
+r = c.post(
+    "/api/patients",
+    json={
+        "name": "Unknown male, approx. 30s",
+        "gender": "male",
+        "phone": "63028272 91",
+        "assigned_doctor_id": ids["other_doctor_profile"],
+    },
+    headers=H["reception"],
+)
+check("a spaced phone is refused at registration", r.status_code == 422, body(r))
+
+r = c.post(
+    "/api/patients",
+    json={
+        "name": "Unknown male, approx. 30s",
+        "gender": "male",
+        "phone": "6302827291",
+        "assigned_doctor_id": ids["other_doctor_profile"],
+    },
+    headers=H["reception"],
+)
+check("an unknown arrival is registered with a ten-digit phone", r.status_code == 201, body(r))
+emergency_patient = data_of(r) or {}
+emergency_patient_id = emergency_patient.get("id")
+check("the number is stored as typed", emergency_patient.get("phone") == "6302827291", emergency_patient.get("phone"))
+
+r = c.post(
+    "/api/emergency",
+    json={"patient_id": emergency_patient_id, "reason": "Road accident", "severity": "serious"},
+    headers=H["doctor"],
+)
+check("a doctor cannot log an emergency case", r.status_code == 403, r.status_code)
+
+r = c.post(
+    "/api/emergency",
+    json={"patient_id": emergency_patient_id, "severity": "serious"},
+    headers=H["reception"],
+)
+check("a case with no reason is refused", r.status_code == 422, msg(r))
+
+r = c.post(
+    "/api/emergency",
+    json={"patient_id": emergency_patient_id, "reason": "Road accident", "severity": "urgent"},
+    headers=H["reception"],
+)
+check("an unknown severity is refused", r.status_code == 422, msg(r))
+
+r = c.post(
+    "/api/emergency",
+    json={"patient_id": 999999, "reason": "Road accident"},
+    headers=H["reception"],
+)
+check("an unknown patient is refused", r.status_code == 404, r.status_code)
+
+r = c.post(
+    "/api/emergency",
+    json={
+        "patient_id": emergency_patient_id,
+        "reason": "Road accident, unconscious on arrival",
+        "severity": "serious",
+        # A string, which is what the department <select> yields.
+        "department_id": str(ids["ortho"]),
+    },
+    headers=H["reception"],
+)
+check("reception logs the emergency case", r.status_code == 201, body(r))
+emergency_case = data_of(r) or {}
+emergency_case_id = emergency_case.get("id")
+check("it opens waiting and unclaimed", emergency_case.get("status") == "waiting" and emergency_case.get("doctor_id") is None, emergency_case)
+check("an emergency code is issued", bool(emergency_case.get("code")), emergency_case.get("code"))
+check("the department from the form is recorded", emergency_case.get("department_id") == ids["ortho"], emergency_case.get("department_id"))
+
+r = c.get("/api/emergency", headers=H["reception"])
+check(
+    "it appears on the open board",
+    any(e.get("id") == emergency_case_id for e in (data_of(r) or [])),
+    data_of(r),
+)
+
+# The notification is where a doctor actually hears about this, and it now
+# carries the case itself — that payload is what lets the bell and the Alerts
+# page draw a Claim button instead of sending the doctor off to find the
+# board. Present only while nobody holds the case, and only for a doctor,
+# since claiming is doctor-only.
+
+
+def emergency_notifications(who):
+    resp = c.get("/api/notifications", headers=H[who])
+    return [
+        n
+        for n in ((data_of(resp) or {}).get("items") or [])
+        if (n.get("emergency_case") or {}).get("id") == emergency_case_id
+    ]
+
+
+claimable = emergency_notifications("other_doctor")
+check("a doctor's notification carries the case to claim", bool(claimable), claimable)
+check(
+    "by both routes to it — the emergency ping, and the patient-assignment "
+    "one healing to the case that patient turned out to have",
+    {n.get("category") for n in claimable} == {"appointment", "patient_assignment"},
+    [n.get("category") for n in claimable],
+)
+check(
+    "with the patient and severity the button needs",
+    all(
+        n["emergency_case"].get("severity") == "serious"
+        and n["emergency_case"].get("patient") == "Unknown male, approx. 30s"
+        for n in claimable
+    ),
+    claimable,
+)
+check(
+    "and a link naming the case, still landing on the board",
+    all(n.get("link") == f"/dashboard/emergency?case={emergency_case_id}" for n in claimable),
+    [n.get("link") for n in claimable],
+)
+check("but never for a non-doctor", not emergency_notifications("admin"), "admin")
+
+r = c.post(f"/api/emergency/{emergency_case_id}/claim", headers=H["reception"])
+check("reception cannot claim a case", r.status_code == 403, r.status_code)
+
+r = c.post(f"/api/emergency/{emergency_case_id}/claim", headers=H["doctor"])
+check("any on-duty doctor can claim it", r.status_code == 200, body(r))
+check("claiming puts it in progress", (data_of(r) or {}).get("status") == "in_progress", data_of(r))
+check("and records who holds it", (data_of(r) or {}).get("doctor_id") == ids["doctor_profile"], data_of(r))
+
+r = c.post(f"/api/emergency/{emergency_case_id}/claim", headers=H["doctor"])
+check("re-claiming your own case is not an error", r.status_code == 200, body(r))
+
+r = c.post(f"/api/emergency/{emergency_case_id}/claim", headers=H["other_doctor"])
+check("a second doctor cannot take a claimed case", r.status_code == 409, r.status_code)
+
+# The other doctor's notification is still sitting in their bell, but the
+# case behind it is gone — the Claim button has to go with it, or two doctors
+# are looking at the same offer.
+check(
+    "a claimed case stops offering Claim to everyone else",
+    not emergency_notifications("other_doctor"),
+    "other_doctor",
+)
+
+r = c.patch(
+    f"/api/emergency/{emergency_case_id}",
+    json={"assessment_notes": "GCS 13, stable airway", "decision": "icu"},
+    headers=H["other_doctor"],
+)
+check("a doctor who does not hold it cannot write on it", r.status_code == 403, r.status_code)
+
+r = c.patch(
+    f"/api/emergency/{emergency_case_id}",
+    json={"assessment_notes": "GCS 13, stable airway", "decision": "icu"},
+    headers=H["doctor"],
+)
+check("the claiming doctor records the assessment", r.status_code == 200, body(r))
+check("the decision is kept", (data_of(r) or {}).get("decision") == "icu", data_of(r))
+
+r = c.patch(
+    f"/api/emergency/{emergency_case_id}",
+    json={"treatment_notes": "2 units O-neg, 1g paracetamol IV at 14:10"},
+    headers=H["doctor"],
+)
+check("and what was given before the ward", r.status_code == 200, body(r))
+
+# -- the emergency hand-off to a nurse ---------------------------------------
+#
+# The ICU/observation door into the nursing module, and the one path where the
+# prescription has no consultation to live on: the claiming doctor types the
+# medicines straight onto the assignment. Everything the nurse is told about
+# this patient therefore has to come through the assignment payload — there is
+# no /api/emergency route a nurse is allowed to call.
+r = c.post(
+    "/api/nursing/assignments",
+    json={
+        "patient_id": emergency_patient_id,
+        "nurse_id": ids["nurse_profile"],
+        "care_type": "icu",
+        "treatment_plan": "Hourly neuro obs, strict I/O chart",
+        "medications": [
+            {
+                "medicine_name": "Normal Saline 0.9%",
+                "route": "iv",
+                "dose": "500ml",
+                "frequency": "6 hourly",
+                "duration": "2 days",
+                "times_per_day": 4,
+                "instructions": "Slow — watch for fluid overload",
+            },
+            {
+                "medicine_name": "Paracetamol 650mg",
+                "route": "oral",
+                "dose": "1 tablet",
+                "frequency": "SOS for fever above 38.5",
+            },
+        ],
+    },
+    headers=H["doctor"],
+)
+check("an emergency patient can be handed to a nurse", r.status_code == 201, body(r))
+emergency_assignment = data_of(r) or {}
+emergency_assignment_id = emergency_assignment.get("id")
+check(
+    "the ICU care type is accepted",
+    emergency_assignment.get("care_type") == "icu",
+    emergency_assignment.get("care_type"),
+)
+check(
+    "the assignment records which emergency case it came from",
+    emergency_assignment.get("emergency_case_id") == emergency_case_id,
+    emergency_assignment.get("emergency_case_id"),
+)
+
+r = c.get(f"/api/nursing/assignments/{emergency_assignment_id}", headers=H["nurse"])
+check("the nurse can open the emergency patient's record", r.status_code == 200, body(r))
+emergency_record = data_of(r) or {}
+emergency_block = emergency_record.get("emergency") or {}
+check(
+    "the record tells the nurse this was an emergency arrival",
+    emergency_block.get("code") == emergency_case.get("code")
+    and emergency_block.get("severity") == "serious",
+    emergency_block,
+)
+check(
+    "with what the patient came in with",
+    emergency_block.get("reason") == "Road accident, unconscious on arrival",
+    emergency_block.get("reason"),
+)
+# The specific harm: a nurse who cannot see what casualty already gave has no
+# way to avoid giving it twice.
+check(
+    "and what was already given before the ward",
+    emergency_block.get("treatment_notes") == "2 units O-neg, 1g paracetamol IV at 14:10",
+    emergency_block.get("treatment_notes"),
+)
+check(
+    "and the doctor's assessment and decision",
+    emergency_block.get("assessment_notes") == "GCS 13, stable airway"
+    and emergency_block.get("decision") == "icu",
+    emergency_block,
+)
+
+emergency_orders = emergency_record.get("medication_orders") or []
+check(
+    "the emergency prescription arrives as the medication schedule",
+    len(emergency_orders) == 2,
+    emergency_orders,
+)
+saline = next(
+    (o for o in emergency_orders if o.get("medicine_name") == "Normal Saline 0.9%"), {}
+)
+# Every field the doctor filled in has to survive the hand-off: a schedule
+# missing the frequency or the instruction is not a prescription a nurse can
+# work from.
+check(
+    "with the dose, frequency, duration and route intact",
+    saline.get("dose") == "500ml"
+    and saline.get("frequency") == "6 hourly"
+    and saline.get("duration") == "2 days"
+    and saline.get("route_label") == "IV / Saline",
+    saline,
+)
+check(
+    "and the doses-per-day the schedule counts against",
+    saline.get("times_per_day") == 4,
+    saline.get("times_per_day"),
+)
+check(
+    "and the instruction for giving it",
+    saline.get("instructions") == "Slow — watch for fluid overload",
+    saline.get("instructions"),
+)
+prn = next(
+    (o for o in emergency_orders if o.get("medicine_name") == "Paracetamol 650mg"), {}
+)
+check(
+    "an as-needed medicine carries no daily target",
+    prn.get("times_per_day") is None,
+    prn.get("times_per_day"),
+)
+
+# The ward list, where a nurse picks this patient out from a full shift.
+r = c.get("/api/nursing/assignments", headers=H["nurse"])
+listed = next(
+    (a for a in (data_of(r) or []) if a.get("id") == emergency_assignment_id), {}
+)
+check(
+    "the ward list marks the emergency patient",
+    (listed.get("emergency") or {}).get("severity") == "serious",
+    listed.get("emergency"),
+)
+check(
+    "but leaves the clinical notes to the record itself",
+    "treatment_notes" not in (listed.get("emergency") or {}),
+    listed.get("emergency"),
+)
+
+# A routine post-op patient must not pick any of this up.
+r = c.get("/api/nursing/assignments", headers=H["doctor"])
+check(
+    "a non-emergency assignment carries no emergency block",
+    all(
+        a.get("emergency") is None
+        for a in (data_of(r) or [])
+        if a.get("id") != emergency_assignment_id
+    ),
+    data_of(r),
+)
+
+r = c.post(f"/api/emergency/{emergency_case_id}/resolve", json={"decision": "icu"}, headers=H["doctor"])
+check("the case resolves", (data_of(r) or {}).get("status") == "resolved", body(r))
+
+r = c.get("/api/emergency", headers=H["reception"])
+check(
+    "a resolved case leaves the open board",
+    all(e.get("id") != emergency_case_id for e in (data_of(r) or [])),
+    data_of(r),
+)
+
+r = c.get("/api/emergency?status=resolved", headers=H["reception"])
+check(
+    "and is found under the resolved tab",
+    any(e.get("id") == emergency_case_id for e in (data_of(r) or [])),
     data_of(r),
 )
 
@@ -1149,6 +1505,49 @@ check("a doctor cannot read a staff account's history", r.status_code == 403, r.
 
 r = c.get(f"/api/audit/entity/patient/{patient_id}", headers=H["nurse"])
 check("a nurse cannot read the audit trail at all", r.status_code == 403, r.status_code)
+
+# ---------------------------------------------------------------------------
+section("reassignment moves the waiting OP with the patient")
+# ---------------------------------------------------------------------------
+#
+# The OP belongs to the doctor it was raised against, so re-routing the patient
+# has to carry it across — otherwise it sits in the old doctor's queue for a
+# patient who is no longer theirs, and when the new doctor is in another
+# department (as here: cardiology -> orthopaedics) it belongs to no queue at
+# all, because the row keeps a department nobody who can see the patient works
+# in.
+r = c.post(
+    "/api/patients",
+    json={"name": "Routed Twice", "assigned_doctor_id": ids["doctor_profile"]},
+    headers=H["reception"],
+)
+rerouted = data_of(r) or {}
+rerouted_id = rerouted.get("id")
+rerouted_op_id = (rerouted.get("appointment") or {}).get("id")
+check("the OP is raised for the first doctor", bool(rerouted_op_id), rerouted)
+
+r = c.patch(
+    f"/api/patients/{rerouted_id}/assignment",
+    json={"assigned_doctor_id": ids["other_doctor_profile"]},
+    headers=H["reception"],
+)
+check("reception can re-route the patient", r.status_code == 200, msg(r))
+
+r = c.get("/api/appointments", headers=H["other_doctor"])
+moved_queue = data_of(r) or []
+check(
+    "the waiting OP follows them into the new doctor's queue",
+    any(a.get("id") == rerouted_op_id for a in moved_queue),
+    moved_queue,
+)
+
+r = c.get("/api/appointments", headers=H["doctor"])
+old_queue = data_of(r) or []
+check(
+    "and is gone from the previous doctor's queue",
+    all(a.get("id") != rerouted_op_id for a in old_queue),
+    old_queue,
+)
 
 # ---------------------------------------------------------------------------
 section("deletion protects medical records")

@@ -61,9 +61,6 @@ export default function LabDashboard() {
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
           {user?.name ? `Hello, ${user.name}` : "Laboratory"}
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          The tests doctors have sent to the lab for you
-        </p>
       </div>
 
       {errorMsg && (

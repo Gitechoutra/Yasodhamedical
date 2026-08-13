@@ -232,11 +232,7 @@ export default function Prescriptions() {
 
   return (
     <div>
-      <PageHeader
-        icon={HiOutlineClipboardDocumentList}
-        title="Prescriptions"
-        description="Every prescription written, and the medicines on it. Saved automatically when a consultation ends, and available for future consultations, reporting and AI-assisted suggestions."
-      />
+      <PageHeader icon={HiOutlineClipboardDocumentList} title="Prescriptions" />
 
       {/* The search form takes the whole row on a phone and shares it with the
           selects from `sm` up, rather than all four controls fighting over
@@ -334,7 +330,12 @@ export default function Prescriptions() {
               : "No prescriptions yet. One is saved here automatically each time a consultation ends with medicines prescribed."}
           </EmptyState>
         ) : (
-          <RecordGrid>
+          // align="start": each card owns its own `expanded` state, but on a
+          // stretched grid opening one card grows the whole row, and its
+          // neighbours are stretched to match — which reads as every card
+          // having expanded. Opting out of the stretch lets the opened card
+          // grow alone.
+          <RecordGrid align="start">
             {records.map((r) => (
               <PrescriptionCard key={r.consultation_id} record={r} />
             ))}

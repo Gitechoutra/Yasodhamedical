@@ -65,9 +65,6 @@ export default function Login() {
         <h1 className="mt-6 text-center text-xl font-bold text-slate-900">
           Welcome back
         </h1>
-        <p className="mt-1 text-center text-sm text-slate-500">
-          Sign in to your dashboard
-        </p>
 
         <form onSubmit={handleSubmit} className="mt-7 space-y-4">
           <div>

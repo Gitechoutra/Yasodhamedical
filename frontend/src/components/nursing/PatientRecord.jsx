@@ -10,7 +10,13 @@ import MessageThread from "./MessageThread";
 import NotesPanel from "./NotesPanel";
 import ObservationsPanel from "./ObservationsPanel";
 import SurgeryStageBadge from "../SurgeryStageBadge";
-import { CareTypeBadge, ComplianceBar, formatWhen } from "./NursingBadges";
+import {
+  CareTypeBadge,
+  ComplianceBar,
+  EmergencyBadge,
+  EMERGENCY_SEVERITY_LABELS,
+  formatWhen,
+} from "./NursingBadges";
 import useLiveNursing from "../../hooks/useLiveNursing";
 import { fetchAssignment } from "../../services/nursingService";
 
@@ -141,6 +147,9 @@ export default function PatientRecord({ assignmentId, backTo, onBack, headerExtr
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-bold text-slate-900">{assignment.patient}</h1>
+                {/* First badge, ahead of the care type: how the patient got
+                    here changes how everything below it is read. */}
+                <EmergencyBadge emergency={assignment.emergency} />
                 <CareTypeBadge careType={assignment.care_type} status={assignment.status} />
                 {/* Where the patient is on the surgical pathway — the nurse
                     needs to know whether they are watching someone waiting for
@@ -200,6 +209,35 @@ export default function PatientRecord({ assignmentId, backTo, onBack, headerExtr
             {headerExtra?.(assignment, handleChanged)}
           </div>
         </div>
+
+        {/* The admission in one line, on every tab. The full account lives on
+            the care plan, but a nurse logging a dose three tabs away still
+            needs to know they are treating an emergency arrival. */}
+        {assignment.emergency && (
+          <button
+            onClick={() => setTab("plan")}
+            className="mt-4 flex w-full items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-left text-sm text-red-800 transition hover:bg-red-100"
+          >
+            <HiOutlineExclamationTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              <span className="font-semibold">
+                Emergency admission ({assignment.emergency.code}
+                {assignment.emergency.severity
+                  ? ` · ${
+                      EMERGENCY_SEVERITY_LABELS[assignment.emergency.severity] ||
+                      assignment.emergency.severity
+                    }`
+                  : ""}
+                ):{" "}
+              </span>
+              {assignment.emergency.reason}
+              <span className="block text-xs text-red-600">
+                Arrived {formatWhen(assignment.emergency.arrived_at)} — open the care plan for
+                the assessment and what was already given.
+              </span>
+            </span>
+          </button>
+        )}
 
         {assignment.patient_detail?.allergies && (
           <p className="mt-4 flex items-start gap-2 rounded-xl bg-red-50 px-4 py-2.5 text-sm text-red-700">

@@ -18,7 +18,7 @@ import { formatWhen } from "./LabBits";
  * Status changes arrive in the same list as `system` entries, so the history
  * reads in one pass instead of forcing the reader to reconcile two timelines.
  */
-export default function LabDiscussion({ requestId, canDiscuss, patientName, onPosted }) {
+export default function LabDiscussion({ requestId, canDiscuss, onPosted }) {
   const { user } = useAuth();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -88,10 +88,6 @@ export default function LabDiscussion({ requestId, canDiscuss, patientName, onPo
           <HiOutlineChatBubbleLeftRight className="h-5 w-5 text-brand-600" />
           <h2 className="text-sm font-semibold text-slate-900">Discussion &amp; history</h2>
         </div>
-        <p className="mt-1 text-xs text-slate-400">
-          Between the requesting doctor and the assigned technician, about
-          {patientName ? ` ${patientName}'s` : " this"} test only. Kept with the request.
-        </p>
       </div>
 
       <div className="max-h-[28rem] min-h-40 space-y-3 overflow-y-auto px-5 py-4">

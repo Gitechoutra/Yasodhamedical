@@ -7,6 +7,14 @@ export async function fetchAppointments(params = {}) {
   return res.data.data;
 }
 
+// Closed OPs — completed and cancelled — with the consultation each one
+// produced. Paginated: unlike the queue this only grows, so it is never
+// fetched whole. Returns { items, meta }.
+export async function fetchAppointmentHistory(params = {}) {
+  const res = await api.get("/appointments/history", { params });
+  return res.data.data;
+}
+
 export async function createAppointment(payload) {
   const res = await api.post("/appointments", payload);
   return res.data.data;

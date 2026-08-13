@@ -28,6 +28,35 @@ const CARE_TYPE_LABELS = {
   post_surgery: "Post-surgery",
   post_procedure: "Post-procedure",
   recovery: "Recovery",
+  // The emergency hand-off's own care type. Missing here until now, so an
+  // ICU patient's badge read a raw "icu" — the one care type where the label
+  // mattering most is the one that had none.
+  icu: "ICU",
+};
+
+// How bad the patient was on arrival, in the emergency module's own words
+// (EmergencyCase.SEVERITIES). Red throughout rather than the alert palette's
+// amber middle: a "serious" arrival is not a warning, it is an emergency.
+const EMERGENCY_SEVERITY_LABELS = {
+  critical: "Critical",
+  serious: "Serious",
+  stable: "Stable",
+};
+
+const EMERGENCY_SEVERITY_STYLES = {
+  critical: "bg-red-600 text-white",
+  serious: "bg-red-100 text-red-700",
+  stable: "bg-amber-100 text-amber-700",
+};
+
+// What the claiming doctor decided the patient needed
+// (EmergencyCase.DECISIONS).
+const EMERGENCY_DECISION_LABELS = {
+  ot_surgery: "OT / Surgery",
+  icu: "ICU",
+  observation: "Observation",
+  discharge: "Discharge",
+  other: "Other treatment",
 };
 
 const ASSIGNMENT_STATUS_STYLES = {
@@ -66,6 +95,28 @@ export function CareTypeBadge({ careType, status }) {
   return (
     <span className={`${BASE} ${ASSIGNMENT_STATUS_STYLES[status] || ASSIGNMENT_STATUS_STYLES.active}`}>
       {CARE_TYPE_LABELS[careType] || careType}
+    </span>
+  );
+}
+
+/**
+ * Marks a patient who came in through the emergency door, on every screen a
+ * nurse might meet them on. Renders nothing for a routine admission, so it
+ * can be dropped in beside the care-type badge unconditionally.
+ */
+export function EmergencyBadge({ emergency, className = "" }) {
+  if (!emergency) return null;
+  const severity = emergency.severity;
+  return (
+    <span
+      className={`${BASE} gap-1 ${
+        EMERGENCY_SEVERITY_STYLES[severity] || EMERGENCY_SEVERITY_STYLES.serious
+      } ${className}`}
+      title={emergency.reason || undefined}
+    >
+      <span aria-hidden>🚑</span>
+      Emergency
+      {severity ? ` · ${EMERGENCY_SEVERITY_LABELS[severity] || severity}` : ""}
     </span>
   );
 }
@@ -111,4 +162,8 @@ export function formatWhen(iso, { withDate = true } = {}) {
   return isToday ? `Today ${time}` : `${date.toLocaleDateString()} ${time}`;
 }
 
-export { CARE_TYPE_LABELS };
+export {
+  CARE_TYPE_LABELS,
+  EMERGENCY_DECISION_LABELS,
+  EMERGENCY_SEVERITY_LABELS,
+};

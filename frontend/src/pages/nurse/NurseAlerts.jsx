@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { HiOutlineCheckCircle, HiOutlineUserPlus } from "react-icons/hi2";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  HiOutlineCheckCircle,
+  HiOutlineExclamationTriangle,
+  HiOutlineUserPlus,
+} from "react-icons/hi2";
+import EmergencyCaseCard from "../../components/EmergencyCaseCard";
+import { RecordGrid } from "../../components/RecordCard";
 import {
   AlertStatusBadge,
   SeverityBadge,
   formatWhen,
 } from "../../components/nursing/NursingBadges";
 import { useAuth } from "../../context/AuthContext";
+import useEmergencyClaim from "../../hooks/useEmergencyClaim";
 import useLiveNursing from "../../hooks/useLiveNursing";
+import { fetchEmergencyCases } from "../../services/emergencyService";
 import { fetchAlerts } from "../../services/nursingService";
 import { fetchNotifications, markNotificationRead } from "../../services/notificationService";
 import { onDashboardChanged } from "../../services/socket";
@@ -28,12 +36,12 @@ const FILTERS = [
  */
 export default function NurseAlerts({ basePath = "/nurse/patients", title = "Alerts" }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [status, setStatus] = useState("open");
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
-  const isNurse = user?.role === "nurse";
   // A patient registered or routed to a doctor isn't a nursing escalation —
   // it has no assignment to hang a ClinicalAlert off — so it's kept as its
   // own list, sourced from the notification it already sends, rather than
@@ -41,6 +49,25 @@ export default function NurseAlerts({ basePath = "/nurse/patients", title = "Ale
   // target of "a patient was assigned to you".
   const isDoctor = user?.role === "doctor";
   const [patientNotifications, setPatientNotifications] = useState([]);
+
+  // An unclaimed emergency is the most urgent thing this page can show, and
+  // it used to be the one thing a doctor could not act on from here: the
+  // notification said an emergency had been logged, and claiming it meant
+  // finding the bell, opening the row and walking over to the board. The
+  // board's own card is reused verbatim so Claim behaves identically in both
+  // places. Doctor-only, like the claim endpoint itself — a nurse reading
+  // this same page has nothing to claim.
+  const [emergencyCases, setEmergencyCases] = useState([]);
+
+  const loadEmergencyCases = useCallback(() => {
+    if (!isDoctor) return undefined;
+    // The board endpoint already narrows itself per doctor to "unclaimed,
+    // plus whatever I hold"; the unclaimed half is the actionable part, and
+    // a case claimed by anyone drops out of this list on the next refresh.
+    return fetchEmergencyCases()
+      .then((rows) => setEmergencyCases(rows.filter((c) => c.status === "waiting")))
+      .catch(() => {});
+  }, [isDoctor]);
 
   const load = useCallback(
     (silent = false) => {
@@ -74,17 +101,29 @@ export default function NurseAlerts({ basePath = "/nurse/patients", title = "Ale
 
   useEffect(() => {
     loadPatientNotifications();
-  }, [loadPatientNotifications]);
+    loadEmergencyCases();
+  }, [loadPatientNotifications, loadEmergencyCases]);
 
-  // Patient assignment pings the dashboard channel (create_patient,
-  // reassign_patient), not the nursing one below -- it isn't nursing
-  // activity, so it would never otherwise refresh this list live.
+  // Patient assignment and emergency cases ping the dashboard channel
+  // (create_patient, reassign_patient, emergency_case_created/claimed), not
+  // the nursing one below -- neither is nursing activity, so they would never
+  // otherwise refresh these lists live. It is also what retires a Claim
+  // button here the moment another doctor takes the case.
   useEffect(() => {
     if (!isDoctor) return undefined;
-    return onDashboardChanged(() => loadPatientNotifications());
-  }, [isDoctor, loadPatientNotifications]);
+    return onDashboardChanged(() => {
+      loadPatientNotifications();
+      loadEmergencyCases();
+    });
+  }, [isDoctor, loadPatientNotifications, loadEmergencyCases]);
 
   useLiveNursing(load);
+
+  const {
+    claim,
+    claimingId,
+    error: claimError,
+  } = useEmergencyClaim({ onSettled: () => loadEmergencyCases() });
 
   // Opening one reads it, same as the bell menu — but it stays in this list
   // either way. Only the "new" dot goes away; a doctor scrolling back
@@ -101,11 +140,6 @@ export default function NurseAlerts({ basePath = "/nurse/patients", title = "Ale
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">{title}</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {isNurse
-              ? "What you've flagged, and what the doctor said back"
-              : "Raised by the nurses looking after your patients"}
-          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           {FILTERS.map((f) => (
@@ -123,6 +157,32 @@ export default function NurseAlerts({ basePath = "/nurse/patients", title = "Ale
           ))}
         </div>
       </div>
+
+      {isDoctor && emergencyCases.length > 0 && (
+        <div className="mt-6 space-y-2">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-red-700">
+            <HiOutlineExclamationTriangle className="h-4 w-4" />
+            Emergency cases waiting to be claimed
+          </h2>
+          {claimError && (
+            <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600">
+              {claimError.message}
+            </p>
+          )}
+          <RecordGrid>
+            {emergencyCases.map((c) => (
+              <EmergencyCaseCard
+                key={c.id}
+                emergencyCase={c}
+                canClaim
+                busy={claimingId === c.id}
+                onClaim={(ec) => claim(ec.id)}
+                onOpen={(ec) => navigate(`/dashboard/emergency/${ec.id}`)}
+              />
+            ))}
+          </RecordGrid>
+        </div>
+      )}
 
       {isDoctor && patientNotifications.length > 0 && (
         <div className="mt-6 space-y-2">
@@ -163,10 +223,11 @@ export default function NurseAlerts({ basePath = "/nurse/patients", title = "Ale
           ))}
         </div>
       ) : alerts.length === 0 ? (
-        // Silent when the patient-assignment list above already has
-        // something on screen — "nothing needs attention" would contradict
-        // it — but still a proper empty state the rest of the time.
-        !(isDoctor && patientNotifications.length > 0) && (
+        // Silent when the emergency or patient-assignment lists above already
+        // have something on screen — "nothing needs attention" would
+        // contradict them — but still a proper empty state the rest of the
+        // time.
+        !(isDoctor && (emergencyCases.length > 0 || patientNotifications.length > 0)) && (
           <div className="mt-6 rounded-2xl border border-dashed border-slate-200 bg-white py-16 text-center">
             <HiOutlineCheckCircle className="mx-auto h-8 w-8 text-emerald-400" />
             <p className="mt-2 text-sm font-medium text-slate-600">

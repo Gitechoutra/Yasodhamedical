@@ -5,11 +5,11 @@ import Avatar from "./Avatar";
 import { useAuth } from "../context/AuthContext";
 import { fetchDoctors } from "../services/doctorService";
 import { fetchPatients } from "../services/patientService";
+import { MIN_SEARCH_LENGTH } from "../utils/search";
 
-// Matches the server's own floor (helpers/search.py). Below it the API stops
-// narrowing and answers with the whole list, which would read as "the search
-// found everyone" — so a single character waits for the second instead.
-const MIN_TERM_LENGTH = 2;
+// MIN_SEARCH_LENGTH matches the server's own floor (helpers/search.py). Below
+// it the API stops narrowing and answers with the whole list, which would read
+// as "the search found everyone" — so a single character waits for the second.
 
 // Long enough that typing a name is one request rather than eight.
 const DEBOUNCE_MS = 250;
@@ -54,7 +54,7 @@ export default function GlobalSearch() {
   const ticket = useRef(0);
 
   const query = term.trim();
-  const ready = query.length >= MIN_TERM_LENGTH;
+  const ready = query.length >= MIN_SEARCH_LENGTH;
 
   useEffect(() => {
     if (!ready) {
@@ -213,7 +213,7 @@ export default function GlobalSearch() {
         >
           {!ready ? (
             <p className="px-3 py-2.5 text-sm text-slate-400">
-              Keep typing — at least {MIN_TERM_LENGTH} characters.
+              Keep typing — at least {MIN_SEARCH_LENGTH} characters.
             </p>
           ) : loading ? (
             <p className="px-3 py-2.5 text-sm text-slate-400">Searching…</p>

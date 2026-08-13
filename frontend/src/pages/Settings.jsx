@@ -57,7 +57,6 @@ export default function Settings() {
   return (
     <div className="max-w-2xl">
       <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Settings</h1>
-      <p className="mt-1 text-sm text-slate-500">Manage your account</p>
 
       <div className="mt-6 rounded-2xl border border-slate-100 bg-white p-6 shadow-sm">
         <div className="flex items-start justify-between gap-4">

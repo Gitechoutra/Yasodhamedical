@@ -109,11 +109,7 @@ export default function Consultations() {
 
   return (
     <div>
-      <PageHeader
-        icon={HiOutlineChatBubbleLeftRight}
-        title="Consultations"
-        description="Every completed visit, with the AI summary, the medicines prescribed and the report. A consultation still in progress stays in Appointments until the doctor ends it."
-      />
+      <PageHeader icon={HiOutlineChatBubbleLeftRight} title="Consultations" />
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <form

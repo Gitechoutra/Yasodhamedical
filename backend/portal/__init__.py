@@ -106,9 +106,16 @@ class InitApp:
             ensure_departments,
             ensure_medicines,
             ensure_roles,
+            ensure_schema,
             ensure_usernames,
         )
 
+        # First, and read-only: a database missing a column or an enum value
+        # the models use fails at the statement, not at startup, so the checks
+        # below would come up clean and the failure would surface later as a
+        # 500 on whichever flow needed it. Reported, never applied -- see
+        # ensure_schema.
+        ensure_schema(app)
         ensure_roles(app)
         ensure_admin(app)
         # After the admin exists, so the account this check just created gets

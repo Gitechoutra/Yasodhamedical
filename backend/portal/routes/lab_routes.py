@@ -32,6 +32,7 @@ from portal.helpers.broadcast import dashboard_changed
 from portal.helpers.decorators import current_role, role_required
 from portal.helpers.notify import notify
 from portal.helpers.patient_access import has_active_emergency_claim
+from portal.helpers.patient_search import patient_search_filter
 from portal.helpers.response import error, success
 from portal.helpers.uploads import upload_dir
 from portal.models.consultation import Consultation
@@ -249,16 +250,17 @@ def list_requests():
         except ValueError:
             return error("patient_id must be a number", status=422)
 
-    term = (request.args.get("search") or "").strip()
-    if term:
-        like = f"%{term}%"
-        query = query.join(Patient, LabRequest.patient_id == Patient.id).filter(
-            db.or_(
-                Patient.name.ilike(like),
-                Patient.code.ilike(like),
-                LabRequest.test_name.ilike(like),
-            )
-        )
+    # `Patient.code` is derived from the id rather than stored, so it cannot be
+    # filtered on directly — matching it was raising on every search typed into
+    # this page. The shared filter reads the code back to an id instead, and
+    # brings partial, case-insensitive, multi-word name matching with it.
+    search = patient_search_filter(
+        request.args.get("search"),
+        columns=(LabRequest.test_name,),
+        relationship=LabRequest.patient,
+    )
+    if search is not None:
+        query = query.filter(search)
 
     rows = query.order_by(LabRequest.created_at.desc(), LabRequest.id.desc()).all()
     return success(

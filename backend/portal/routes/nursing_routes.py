@@ -341,11 +341,16 @@ def create_assignment():
     # door in is an open Emergency Case — ICU/observation care that never
     # goes anywhere near the surgical pathway still needs a nurse assigned
     # immediately, not after someone marks a surgery that isn't happening.
-    has_open_emergency = (
-        EmergencyCase.query.filter_by(patient_id=patient.id, status="in_progress").first()
-        is not None
+    #
+    # Kept as the case itself, not a boolean: it is also what the assignment
+    # records as its origin, so the nurse's record can say this patient came
+    # in through the emergency door and show the orders as emergency orders.
+    open_emergency = (
+        EmergencyCase.query.filter_by(patient_id=patient.id, status="in_progress")
+        .order_by(EmergencyCase.arrived_at.desc())
+        .first()
     )
-    if not patient.is_surgical and not has_open_emergency:
+    if not patient.is_surgical and not open_emergency:
         return error(
             f"A nurse is assigned for surgery cases only. Mark {patient.name}'s case "
             "as requiring surgery first.",
@@ -407,6 +412,11 @@ def create_assignment():
         nurse_id=nurse.id,
         doctor_id=doctor.id,
         consultation_id=consultation.id if consultation else None,
+        # A surgical patient who also has an emergency case open arrived
+        # through the emergency door for this episode, so the link is
+        # recorded either way — it is where the patient came from, not an
+        # alternative to the surgical pathway.
+        emergency_case_id=open_emergency.id if open_emergency else None,
         care_type=care_type,
         treatment_plan=_text(payload, "treatment_plan"),
         care_instructions=_text(payload, "care_instructions"),
@@ -429,13 +439,21 @@ def create_assignment():
 
     notify(
         [nurse.user_id],
-        title="New patient assigned to you",
+        # An emergency admission says so in the title: it is the one thing the
+        # nurse needs before they open anything, and a bell that reads like
+        # every other hand-off buries it.
+        title=(
+            f"Emergency patient assigned to you ({open_emergency.severity})"
+            if open_emergency
+            else "New patient assigned to you"
+        ),
         body=(
             f"{doctor.user.name} assigned {patient.name} to you for "
             f"{care_type.replace('_', ' ')} care."
             if doctor.user
             else f"{patient.name} has been assigned to you."
-        ),
+        )
+        + (f" Emergency {open_emergency.code}: {open_emergency.reason}" if open_emergency else ""),
         category="nursing",
         link=f"/nurse/patients/{assignment.id}",
         exclude_user_id=get_jwt_identity(),

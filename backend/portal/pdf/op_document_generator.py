@@ -34,7 +34,11 @@ from portal.pdf.report_generator import (
 def generate_op_document_pdf(appointment, output_path):
     """Renders one OP's registration slip into a hospital-letterhead PDF."""
     patient = appointment.patient
-    doctor = patient.assigned_doctor if patient else None
+    # The doctor this OP was raised against, which is what the slip in the
+    # patient's hand names. Only OPs raised before reception stamped the doctor
+    # onto the appointment fall back to the patient's current assignment — for
+    # those there is nothing else to print.
+    doctor = appointment.doctor or (patient.assigned_doctor if patient else None)
 
     config = get_config()
     hospital = config.HOSPITAL

@@ -211,11 +211,6 @@ export default function MedicineRequests() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Medicine requests</h1>
-          <p className="mt-1 max-w-2xl text-sm text-slate-500">
-            Medicines doctors added while prescribing. They are already in the catalogue and
-            searchable — what they still need from you is the commercial detail a
-            prescription cannot carry: category, manufacturer, price and dosage form.
-          </p>
         </div>
         {pendingCount > 0 && (
           <span className="rounded-full bg-amber-100 px-3.5 py-2 text-sm font-bold text-amber-800">

@@ -25,6 +25,7 @@ import Logo from "./Logo";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import useLiveNursing from "../hooks/useLiveNursing";
+import { fetchEmergencyCases } from "../services/emergencyService";
 import { fetchNursingSummary } from "../services/nursingService";
 import { fetchNotifications } from "../services/notificationService";
 import { onDashboardChanged } from "../services/socket";
@@ -175,6 +176,12 @@ export default function Sidebar() {
   // is ever the target of "a patient was assigned to you") so this badge is
   // the one place a doctor can tell at a glance that something on this page
   // needs a look, same as the nursing escalations it already covers.
+  //
+  // An unclaimed emergency is counted the same way and for the same reason:
+  // the page now offers Claim on one, and a badge that stayed quiet while a
+  // claimable emergency sat on the page it points at would be the one number
+  // a doctor most needs it not to miss. Counted as critical too, so it takes
+  // the red treatment rather than blending in with routine escalations.
   const [alertCounts, setAlertCounts] = useState({ open: 0, critical: 0 });
   const canSeeAlerts = user?.role !== "receptionist";
   const isDoctor = user?.role === "doctor";
@@ -186,13 +193,15 @@ export default function Sidebar() {
       isDoctor
         ? fetchNotifications({ category: "patient_assignment", unread: true, limit: 100 })
         : Promise.resolve({ items: [] }),
+      isDoctor ? fetchEmergencyCases() : Promise.resolve([]),
     ])
-      .then(([summary, notifications]) =>
+      .then(([summary, notifications, emergencyCases]) => {
+        const unclaimed = (emergencyCases || []).filter((c) => c.status === "waiting").length;
         setAlertCounts({
-          open: (summary?.open_alerts || 0) + (notifications?.items?.length || 0),
-          critical: summary?.critical_alerts || 0,
-        })
-      )
+          open: (summary?.open_alerts || 0) + (notifications?.items?.length || 0) + unclaimed,
+          critical: (summary?.critical_alerts || 0) + unclaimed,
+        });
+      })
       .catch(() => {});
   }, [canSeeAlerts, isDoctor]);
 

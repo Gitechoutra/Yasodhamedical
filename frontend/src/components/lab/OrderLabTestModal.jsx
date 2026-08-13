@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import Modal from "../Modal";
+import PatientPicker from "../PatientPicker";
 import { createLabRequest, fetchLabOptions } from "../../services/labService";
-import { fetchPatients } from "../../services/patientService";
 
 const inputClass =
   "w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:border-brand-400 focus:ring-2 focus:ring-brand-100";
@@ -16,7 +16,6 @@ const inputClass =
  */
 export default function OrderLabTestModal({ patientId, consultationId, onClose, onCreated }) {
   const [options, setOptions] = useState({ catalogue: [], technicians: [] });
-  const [patients, setPatients] = useState([]);
   const [form, setForm] = useState({
     patient_id: patientId ? String(patientId) : "",
     test_name: "",
@@ -33,15 +32,7 @@ export default function OrderLabTestModal({ patientId, consultationId, onClose, 
     fetchLabOptions()
       .then(setOptions)
       .catch(() => setErrorMsg("Could not load the test catalogue."));
-    // Only patients the caller may order for; the server scopes this the same
-    // way it scopes the order itself, so the picker cannot offer a patient
-    // the request would then be refused for.
-    if (!patientId) {
-      fetchPatients("all")
-        .then(setPatients)
-        .catch(() => setErrorMsg("Could not load your patients."));
-    }
-  }, [patientId]);
+  }, []);
 
   const update = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
@@ -88,22 +79,18 @@ export default function OrderLabTestModal({ patientId, consultationId, onClose, 
     <Modal title="Order a lab test" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-3">
         {!patientId && (
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-slate-600">Patient *</label>
-            <select
-              required
-              className={inputClass}
-              value={form.patient_id}
-              onChange={update("patient_id")}
-            >
-              <option value="">Select a patient</option>
-              {patients.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} — {p.code}
-                </option>
-              ))}
-            </select>
-          </div>
+          // Searched rather than picked off a list of everybody: the doctor
+          // knows the name, and the endpoint behind it only ever offers
+          // patients this caller may order for — the same scoping the order
+          // itself gets, so the picker cannot suggest one the request would
+          // then be refused for.
+          <PatientPicker
+            required
+            value={form.patient_id}
+            onChange={(patient) =>
+              setForm((f) => ({ ...f, patient_id: patient ? String(patient.id) : "" }))
+            }
+          />
         )}
 
         <div>

@@ -27,9 +27,9 @@ from portal.helpers.case_helper import session_context
 from portal.helpers.decorators import clinical_only
 from portal.helpers.formulary import prescribable_for, resolve_medicine
 from portal.helpers.notify import notify, role_user_ids
+from portal.helpers.patient_search import code_clauses, patient_search_filter
 from portal.helpers.response import error, success
 from portal.models.case_prescription import CasePrescription
-from portal.models.patient import Patient
 from portal.models.patient_case import PatientCase
 
 case_bp = Blueprint("cases", __name__)
@@ -71,17 +71,18 @@ def list_cases():
     if doctor:
         query = query.filter(PatientCase.doctor_id == doctor.id)
 
-    search = (request.args.get("search") or "").strip()
-    if search:
-        query = query.outerjoin(Patient, PatientCase.patient_id == Patient.id)
-        like = f"%{search}%"
-        conditions = [Patient.name.ilike(like), PatientCase.reason.ilike(like)]
-        # "PAT0004", "CASE0007" or a bare number should all find the record.
-        digits = "".join(ch for ch in search if ch.isdigit())
-        if digits:
-            conditions.append(Patient.id == int(digits))
-            conditions.append(PatientCase.id == int(digits))
-        query = query.filter(db.or_(*conditions))
+    # Name, patient code, phone, email or the reason the case was opened —
+    # every typed word matching at least one of them, so half a name finds the
+    # case and a second word narrows rather than widens. "CASE0007" and a bare
+    # "7" find the case itself.
+    search = patient_search_filter(
+        request.args.get("search"),
+        columns=(PatientCase.reason,),
+        extra=lambda term: code_clauses(term, "case", PatientCase.id),
+        relationship=PatientCase.patient,
+    )
+    if search is not None:
+        query = query.filter(search)
 
     cases = (
         query.order_by(

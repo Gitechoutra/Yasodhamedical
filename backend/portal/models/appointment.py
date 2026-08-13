@@ -10,7 +10,10 @@ class Appointment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     patient_id = db.Column(db.Integer, db.ForeignKey("patients.id"), nullable=False)
     department_id = db.Column(db.Integer, db.ForeignKey("departments.id"), nullable=False)
-    # Unassigned until a doctor from that department picks it up (start_appointment).
+    # The treating doctor the front desk raised this OP against (raise_op), or
+    # the one who picked it up if it was started from elsewhere. Nullable only
+    # for rows raised before reception assigned the doctor at creation time —
+    # see queue_helper.scope_appointments, which still reads those.
     doctor_id = db.Column(db.Integer, db.ForeignKey("doctors.id"), nullable=True)
     consultation_id = db.Column(db.Integer, db.ForeignKey("consultations.id"), nullable=True)
     status = db.Column(
@@ -36,9 +39,15 @@ class Appointment(db.Model):
         """Human-facing OP number, e.g. OP0123."""
         return f"OP{self.id:04d}"
 
-    def to_dict(self, queue_number=None):
+    def to_dict(self, queue_number=None, include_consultation=False):
+        """`include_consultation` attaches the visit this OP produced — the AI
+        summary, the medicines prescribed and the report — which is what makes
+        a closed OP in the history readable on its own. Deliberately off by
+        default: the live queue draws none of it, and loading a summary and a
+        prescription per card would make the queue pay for a page it never
+        renders."""
         patient = self.patient
-        return {
+        data = {
             "id": self.id,
             "code": self.code,
             "patient_id": self.patient_id,
@@ -83,6 +92,10 @@ class Appointment(db.Model):
             ),
             "department_id": self.department_id,
             "department": self.department.name if self.department else None,
+            # Who the OP was raised against — set by reception when the OP is
+            # created, not left blank until somebody starts it. The front desk
+            # groups its queue by this.
+            "doctor_id": self.doctor_id,
             "doctor": self.doctor.user.name if self.doctor and self.doctor.user else None,
             "consultation_id": self.consultation_id,
             "status": self.status,
@@ -93,6 +106,16 @@ class Appointment(db.Model):
             "queue_number": queue_number,
             "created_at": to_utc_iso(self.created_at),
         }
+
+        if include_consultation:
+            # None for an OP that was cancelled before anyone called the
+            # patient in — there is no visit to show, and the card falls back
+            # to the OP's own details.
+            data["consultation"] = (
+                self.consultation.to_dict(include_summary=True) if self.consultation else None
+            )
+
+        return data
 
     def __repr__(self):
         return f"<Appointment {self.id} {self.status}>"

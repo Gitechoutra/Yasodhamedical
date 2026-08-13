@@ -4,9 +4,9 @@ from flask_jwt_extended import jwt_required
 from portal.helpers.auth_helper import get_current_doctor, get_current_nurse
 from portal.helpers.datetime_helper import local_day_bounds
 from portal.helpers.decorators import current_role
-from portal.helpers.patient_access import patient_scope, scope_patients
+from portal.helpers.patient_access import scope_patients
+from portal.helpers.queue_helper import scope_appointments
 from portal.helpers.response import success
-from portal.models.appointment import Appointment
 from portal.models.consultation import Consultation
 from portal.models.nursing_assignment import NursingAssignment
 from portal.models.patient import Patient
@@ -85,17 +85,11 @@ def summary():
     nursing_query = NursingAssignment.query.filter_by(status="active")
 
     if doctor:
-        # Explicit columns: the appointments query is joined to Consultation,
-        # so filter_by would bind department_id to the wrong entity. The
-        # patient join + scope has to match list_appointments exactly, or this
-        # count would include patients assigned to another doctor and disagree
-        # with the rows the card links to.
-        appointments_query = appointments_query.join(
-            Patient, Appointment.patient_id == Patient.id
-        ).filter(
-            Appointment.department_id == doctor.department_id,
-            patient_scope(doctor),
-        )
+        # The same helper list_appointments uses, not a second copy of the
+        # rule: this count links straight to that page, so anything it decides
+        # differently shows up as a card reading one number over a list of
+        # another.
+        appointments_query = scope_appointments(appointments_query, doctor)
         consultations_query = consultations_query.filter(Consultation.doctor_id == doctor.id)
         recent_query = recent_query.filter(Consultation.doctor_id == doctor.id)
         nursing_query = nursing_query.filter(NursingAssignment.doctor_id == doctor.id)

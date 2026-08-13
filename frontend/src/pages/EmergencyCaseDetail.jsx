@@ -270,10 +270,6 @@ export default function EmergencyCaseDetail() {
           {user?.role !== "receptionist" && (
           <form onSubmit={handleSaveNotes} className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
             <h2 className="text-base font-semibold text-slate-900">Assessment &amp; treatment</h2>
-            <p className="mt-1 text-xs text-slate-400">
-              Recorded directly on the emergency case — not a full consultation, so nothing here
-              waits on a recorded conversation.
-            </p>
 
             <div className="mt-3">
               <label className={labelClass}>Assessment notes</label>
@@ -491,6 +487,7 @@ export default function EmergencyCaseDetail() {
           patientName={patient.name}
           defaultPlan={treatmentNotes}
           defaultCareType={decision === "icu" ? "icu" : "observation"}
+          isEmergency
           onClose={() => setAssigningNurse(false)}
           onAssigned={(assignment) => {
             setAssigningNurse(false);

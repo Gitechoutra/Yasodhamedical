@@ -22,6 +22,7 @@ import {
 import {
   CareTypeBadge,
   ComplianceBar,
+  EmergencyBadge,
   formatWhen,
 } from "../components/nursing/NursingBadges";
 import useLiveNursing from "../hooks/useLiveNursing";
@@ -38,6 +39,9 @@ function AssignmentCard({ assignment: a, remaining }) {
         />
 
         <RecordCardBadges>
+          {/* The doctor's monitor and the nurse's ward list render the same
+              record, so they mark an emergency admission the same way. */}
+          <EmergencyBadge emergency={a.emergency} />
           <CareTypeBadge careType={a.care_type} status={a.status} />
           <SurgeryStageBadge stage={a.surgery_stage} daysLeft={a.observation_days_left} />
           {a.open_alerts > 0 && (
@@ -126,9 +130,6 @@ export default function NursingMonitor() {
           on server pushes, tab focus and a slow poll. */}
       <div className="min-w-0">
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Nursing care</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Patients you&apos;ve assigned to a nurse for observation or recovery
-        </p>
       </div>
 
       {summary && (summary.open_alerts > 0 || summary.missed_today > 0) && (

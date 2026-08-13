@@ -13,6 +13,7 @@ import AssignNurseModal from "../components/nursing/AssignNurseModal";
 import EditPatientModal from "../components/EditPatientModal";
 import { useAuth } from "../context/AuthContext";
 import { canReassignDoctor, canRegisterPatient } from "../utils/permissions";
+import { MIN_SEARCH_LENGTH } from "../utils/search";
 import useLiveRefresh from "../hooks/useLiveRefresh";
 import { fetchDoctors } from "../services/doctorService";
 import {
@@ -23,10 +24,9 @@ import {
   assignPatientDoctor,
 } from "../services/patientService";
 
-// Matches the API's own floor (helpers/search.py). Below it the server stops
-// narrowing and answers with the whole list, which would read on this page as
-// a search that matched everybody.
-const MIN_SEARCH_LENGTH = 2;
+// MIN_SEARCH_LENGTH matches the API's own floor (helpers/search.py). Below it
+// the server stops narrowing and answers with the whole list, which would read
+// on this page as a search that matched everybody.
 
 export default function Patients() {
   const navigate = useNavigate();
@@ -198,15 +198,6 @@ export default function Patients() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Patients</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {patientIdParam
-              ? "Viewing a specific patient"
-              : searching
-                ? `Matching “${query}” — every patient, consulted or not`
-                : isDoctor || scope === "consulted"
-                  ? "Patients whose consultation is complete"
-                  : "Registered or in Appointments — not yet consulted"}
-          </p>
           {patientIdParam && (
             <button
               onClick={clearPatientIdParam}

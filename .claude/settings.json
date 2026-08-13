@@ -23,7 +23,8 @@
       "Bash(./venv/Scripts/python.exe -c \"import google.genai, httpx; print\\(google.genai.__version__\\); print\\(httpx.__version__\\)\")",
       "Bash(./venv/Scripts/.bin/ffmpeg.exe -version)",
       "Bash(./venv/Scripts/python.exe -c \"import imageio_ffmpeg;print\\(imageio_ffmpeg.get_ffmpeg_exe\\(\\)\\)\")",
-      "Bash(./venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/9963afa3-bdce-4b12-b8df-e54597be2d94/scratchpad/verify.py\")"
+      "Bash(./venv/Scripts/python.exe \"C:/Users/Mahesh/AppData/Local/Temp/claude/c--Users-Mahesh-OneDrive-Desktop-Medical/9963afa3-bdce-4b12-b8df-e54597be2d94/scratchpad/verify.py\")",
+      "PowerShell(Stop-Process -Id 6860,5828 -Force)"
     ]
   }
 }

@@ -173,12 +173,6 @@ export default function KnowledgeBase() {
         <HiOutlineAcademicCap className="h-6 w-6 text-brand-600" />
         <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Knowledge Base</h1>
       </div>
-      <p className="mt-1 max-w-3xl text-sm text-slate-500">
-        Cases this hospital's doctors have personally approved. When a patient presents the
-        same way, these are put in front of the treating doctor as a suggested treatment —
-        always for review, never applied on their own. Entries appear here only when a doctor
-        verifies a prescription, and are withdrawn if that sign-off is retracted.
-      </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Approved cases in use" value={stats?.active_precedents ?? "—"} />

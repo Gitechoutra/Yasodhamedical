@@ -86,9 +86,6 @@ export default function NursingUpdates() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Nursing updates</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Everything your nurses have logged, newest first
-          </p>
         </div>
         <div className="flex gap-2">
           {FILTERS.map((f) => (

@@ -8,11 +8,13 @@ import {
   HiOutlineClock,
   HiOutlineDocumentChartBar,
   HiOutlineExclamationTriangle,
+  HiOutlineHandRaised,
   HiOutlineHeart,
   HiOutlineInformationCircle,
   HiOutlineXMark,
 } from "react-icons/hi2";
 import useDismissable from "../hooks/useDismissable";
+import useEmergencyClaim from "../hooks/useEmergencyClaim";
 import { useAuth } from "../context/AuthContext";
 import { onDashboardChanged } from "../services/socket";
 import {
@@ -50,6 +52,42 @@ function isCriticalAlert(notification) {
 }
 
 /**
+ * An unclaimed emergency case attached to this notification, or null.
+ *
+ * Set by `notification_routes._present` and only for a doctor, and only while
+ * the case is genuinely still unclaimed — so this is also the answer to "may
+ * this reader claim it?", and the button below never has to guess.
+ */
+function claimableCase(notification) {
+  return notification?.emergency_case || null;
+}
+
+/**
+ * Anything that should not quietly scroll past: a critical nursing alert, or
+ * an emergency nobody has picked up yet. Both get the red treatment, and a
+ * toast carrying either stays on screen until it is dealt with — a Claim
+ * button that disappears after three seconds is no better than the walk to
+ * the board it replaces.
+ */
+function isUrgent(notification) {
+  return isCriticalAlert(notification) || Boolean(claimableCase(notification));
+}
+
+/** The one Claim control, drawn the same in the toast and in the panel. */
+function ClaimEmergencyButton({ busy, onClaim }) {
+  return (
+    <button
+      onClick={onClaim}
+      disabled={busy}
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-60"
+    >
+      <HiOutlineHandRaised className="h-3.5 w-3.5" />
+      {busy ? "Claiming…" : "Claim"}
+    </button>
+  );
+}
+
+/**
  * Where each role's own copy of a shared screen lives.
  *
  * Nursing, pharmacy and the laboratory are separate route trees, each guarded
@@ -75,19 +113,20 @@ function timeAgo(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
-function Toast({ notification, onDismiss, onClick }) {
-  const critical = isCriticalAlert(notification);
+function Toast({ notification, onDismiss, onClick, onClaim, claiming, claimError }) {
+  const urgent = isUrgent(notification);
+  const emergencyCase = claimableCase(notification);
 
-  // A critical alert stays until someone actually looks at it — the whole
+  // An urgent one stays until someone actually deals with it — the whole
   // complaint this is fixing is a doctor missing one among routine pings
   // that vanish after three seconds on their own.
   useEffect(() => {
-    if (critical) return undefined;
+    if (urgent) return undefined;
     const t = setTimeout(onDismiss, TOAST_DURATION_MS);
     return () => clearTimeout(t);
-  }, [onDismiss, critical]);
+  }, [onDismiss, urgent]);
 
-  const Icon = critical
+  const Icon = urgent
     ? HiOutlineExclamationTriangle
     : CATEGORY_ICONS[notification.category] || CATEGORY_ICONS.system;
 
@@ -98,45 +137,57 @@ function Toast({ notification, onDismiss, onClick }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, x: 48, scale: 0.95, transition: { duration: 0.18 } }}
       transition={{ duration: 0.25, ease: "easeOut" }}
-      className={`pointer-events-auto flex w-full items-start gap-3 rounded-2xl border p-4 shadow-2xl ${
-        critical
+      className={`pointer-events-auto w-full rounded-2xl border p-4 shadow-2xl ${
+        urgent
           ? "border-red-200 bg-red-50 shadow-red-900/10"
           : "border-slate-100 bg-white shadow-slate-900/10"
       }`}
     >
-      <button
-        onClick={onClick}
-        className="flex min-w-0 flex-1 items-start gap-3 text-left"
-      >
-        <span
-          className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full ${
-            critical ? "bg-red-100 text-red-600" : "bg-brand-100 text-brand-600"
-          }`}
+      <div className="flex items-start gap-3">
+        <button
+          onClick={onClick}
+          className="flex min-w-0 flex-1 items-start gap-3 text-left"
         >
-          <Icon className="h-4 w-4" />
-        </span>
-        <span className="min-w-0 flex-1">
           <span
-            className={`block truncate text-sm font-semibold ${
-              critical ? "text-red-900" : "text-slate-900"
+            className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full ${
+              urgent ? "bg-red-100 text-red-600" : "bg-brand-100 text-brand-600"
             }`}
           >
-            {notification.title}
+            <Icon className="h-4 w-4" />
           </span>
-          {notification.body && (
-            <span className="mt-0.5 block line-clamp-2 text-xs leading-relaxed text-slate-500">
-              {notification.body}
+          <span className="min-w-0 flex-1">
+            <span
+              className={`block truncate text-sm font-semibold ${
+                urgent ? "text-red-900" : "text-slate-900"
+              }`}
+            >
+              {notification.title}
             </span>
-          )}
-        </span>
-      </button>
-      <button
-        onClick={onDismiss}
-        aria-label="Dismiss notification"
-        className="shrink-0 rounded-full p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
-      >
-        <HiOutlineXMark className="h-4 w-4" />
-      </button>
+            {notification.body && (
+              <span className="mt-0.5 block line-clamp-2 text-xs leading-relaxed text-slate-500">
+                {notification.body}
+              </span>
+            )}
+          </span>
+        </button>
+        <button
+          onClick={onDismiss}
+          aria-label="Dismiss notification"
+          className="shrink-0 rounded-full p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+        >
+          <HiOutlineXMark className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* The claim, right where the doctor first hears about the emergency —
+          nested outside the row's own button rather than inside it, so the
+          two actions stay distinguishable to a screen reader as well. */}
+      {emergencyCase && (
+        <div className="mt-3 flex items-center gap-2 pl-11">
+          <ClaimEmergencyButton busy={claiming} onClaim={onClaim} />
+          {claimError && <span className="text-xs text-red-600">{claimError}</span>}
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -255,6 +306,39 @@ export default function NotificationMenu() {
     if (notification.link) navigate(resolveLink(notification.link, user?.role));
   }
 
+  // Claiming from a notification is the same act as claiming from the board
+  // or the Alerts page — same hook, so the case is assigned server-side and
+  // the doctor lands on it identically. Only the cleanup is local: the row
+  // and its toast have been acted on, so they go.
+  const {
+    claim,
+    claimingId,
+    error: claimError,
+  } = useEmergencyClaim({
+    onSettled: (caseId, err) => {
+      // Refused (somebody else got there first, most likely) — refetch so
+      // the now-meaningless Claim button goes away with it.
+      if (err) load();
+    },
+  });
+
+  async function handleClaimEmergency(notification) {
+    const emergencyCase = claimableCase(notification);
+    if (!emergencyCase) return;
+    if (!(await claim(emergencyCase.id))) return;
+
+    setToasts((t) => t.filter((x) => x.notification.id !== notification.id));
+    setItems((rows) => rows.filter((r) => r.id !== notification.id));
+    setUnreadCount((c) => Math.max(0, c - 1));
+    close();
+    try {
+      const { unread_count: unread } = await markNotificationRead(notification.id);
+      setUnreadCount(unread);
+    } catch {
+      load();
+    }
+  }
+
   async function handleMarkAllRead() {
     setItems([]);
     setUnreadCount(0);
@@ -282,6 +366,13 @@ export default function NotificationMenu() {
               notification={t.notification}
               onDismiss={() => dismissToast(t.toastId)}
               onClick={() => handleToastClick(t.notification)}
+              onClaim={() => handleClaimEmergency(t.notification)}
+              claiming={claimingId === t.notification.emergency_case?.id}
+              claimError={
+                claimError?.caseId === t.notification.emergency_case?.id
+                  ? claimError.message
+                  : ""
+              }
             />
           ))}
         </AnimatePresence>
@@ -340,50 +431,69 @@ export default function NotificationMenu() {
                 </p>
               ) : (
                 items.map((n) => {
-                  const critical = isCriticalAlert(n);
-                  const Icon = critical
+                  const urgent = isUrgent(n);
+                  const emergencyCase = claimableCase(n);
+                  const Icon = urgent
                     ? HiOutlineExclamationTriangle
                     : CATEGORY_ICONS[n.category] || CATEGORY_ICONS.system;
                   return (
-                    <button
+                    <div
                       key={n.id}
-                      onClick={() => handleOpenNotification(n)}
-                      className={`flex w-full items-start gap-3 border-b border-slate-50 px-4 py-3 text-left transition hover:bg-slate-50 ${
-                        critical ? "bg-red-50" : "bg-brand-50/50"
+                      className={`border-b border-slate-50 ${
+                        urgent ? "bg-red-50" : "bg-brand-50/50"
                       }`}
                     >
-                      <span
-                        className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full ${
-                          critical ? "bg-red-100 text-red-600" : "bg-brand-100 text-brand-600"
-                        }`}
+                      <button
+                        onClick={() => handleOpenNotification(n)}
+                        className="flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-slate-50"
                       >
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2">
-                          <span
-                            className={`truncate text-sm font-semibold ${
-                              critical ? "text-red-900" : "text-slate-900"
-                            }`}
-                          >
-                            {n.title}
+                        <span
+                          className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-full ${
+                            urgent ? "bg-red-100 text-red-600" : "bg-brand-100 text-brand-600"
+                          }`}
+                        >
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-2">
+                            <span
+                              className={`truncate text-sm font-semibold ${
+                                urgent ? "text-red-900" : "text-slate-900"
+                              }`}
+                            >
+                              {n.title}
+                            </span>
+                            <span
+                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                urgent ? "bg-red-500" : "bg-brand-500"
+                              }`}
+                            />
                           </span>
-                          <span
-                            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                              critical ? "bg-red-500" : "bg-brand-500"
-                            }`}
+                          {n.body && (
+                            <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
+                              {n.body}
+                            </span>
+                          )}
+                          <span className="mt-1 block text-[11px] text-slate-400">
+                            {timeAgo(n.created_at)}
+                          </span>
+                        </span>
+                      </button>
+
+                      {/* Claim without leaving the bell: opening the row and
+                          walking over to the board was the whole delay. */}
+                      {emergencyCase && (
+                        <div className="flex flex-wrap items-center gap-2 pb-3 pl-15 pr-4">
+                          <ClaimEmergencyButton
+                            busy={claimingId === emergencyCase.id}
+                            onClaim={() => handleClaimEmergency(n)}
                           />
-                        </span>
-                        {n.body && (
-                          <span className="mt-0.5 block text-xs leading-relaxed text-slate-500">
-                            {n.body}
-                          </span>
-                        )}
-                        <span className="mt-1 block text-[11px] text-slate-400">
-                          {timeAgo(n.created_at)}
-                        </span>
-                      </span>
-                    </button>
+                          {claimError?.caseId === emergencyCase.id && (
+                            <span className="text-xs text-red-600">{claimError.message}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   );
                 })
               )}

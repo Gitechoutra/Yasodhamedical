@@ -31,6 +31,14 @@ class NursingAssignment(db.Model):
     consultation_id = db.Column(
         db.Integer, db.ForeignKey("consultations.id"), nullable=True
     )
+    # The emergency episode this hand-off came out of, when there was one. An
+    # emergency patient never has a Consultation (see `EmergencyCase`'s module
+    # docstring), so without this the nurse's record has no way to say where
+    # the patient came from or why — and the medicines on the schedule read as
+    # an ordinary post-op course rather than emergency orders.
+    emergency_case_id = db.Column(
+        db.Integer, db.ForeignKey("emergency_cases.id"), nullable=True
+    )
 
     care_type = db.Column(
         db.Enum(*CARE_TYPES, name="nursing_care_type"),
@@ -72,6 +80,7 @@ class NursingAssignment(db.Model):
     nurse = db.relationship("Nurse")
     doctor = db.relationship("Doctor")
     consultation = db.relationship("Consultation")
+    emergency_case = db.relationship("EmergencyCase")
 
     medication_orders = db.relationship(
         "MedicationOrder",
@@ -218,6 +227,50 @@ class NursingAssignment(db.Model):
             "rate": round(given / total * 100) if total else None,
         }
 
+    def emergency_context(self, include_detail=False):
+        """The emergency episode behind this assignment, or None.
+
+        Served inside the assignment payload rather than left to the nurse's
+        screen to fetch, because `/emergency/<id>` is doctor/reception/admin
+        only — a nurse has no route of their own to the case. What they need
+        from it is exactly what a handover would say out loud: what came in,
+        how bad, when, and what the doctor decided to do about it.
+
+        The detail half (the doctor's own assessment and what was given before
+        the patient reached the ward) is only on the record view; a ward list
+        card has no room for it and would only truncate it misleadingly.
+        """
+        case = self.emergency_case
+        if not case:
+            return None
+
+        context = {
+            "id": case.id,
+            "code": case.code,
+            "severity": case.severity,
+            "status": case.status,
+            "reason": case.reason,
+            "decision": case.decision,
+            "arrived_at": to_utc_iso(case.arrived_at),
+        }
+        if include_detail:
+            context.update(
+                {
+                    "department": case.department.name if case.department else None,
+                    "doctor": (
+                        case.doctor.user.name if case.doctor and case.doctor.user else None
+                    ),
+                    "registered_by": (
+                        case.registered_by.name if case.registered_by else None
+                    ),
+                    "assessment_notes": case.assessment_notes,
+                    "treatment_notes": case.treatment_notes,
+                    "assessed_at": to_utc_iso(case.assessed_at),
+                    "resolved_at": to_utc_iso(case.resolved_at),
+                }
+            )
+        return context
+
     def to_dict(self, include_detail=False, viewer_id=None, for_doctor=False):
         """`viewer_id` adds that user's unread message count -- the badge is
         per-person, so it can't be baked into a shared payload.
@@ -237,6 +290,11 @@ class NursingAssignment(db.Model):
             "doctor_id": self.doctor_id,
             "doctor": self.doctor.user.name if self.doctor and self.doctor.user else None,
             "consultation_id": self.consultation_id,
+            "emergency_case_id": self.emergency_case_id,
+            # Present on the list payload too: a nurse's ward list mixes
+            # emergency admissions in with routine post-op patients, and
+            # which is which has to be readable without opening the card.
+            "emergency": self.emergency_context(),
             "care_type": self.care_type,
             # Where the patient is on the surgical pathway. Carried on the
             # assignment because both ward lists render from this payload and
@@ -263,6 +321,7 @@ class NursingAssignment(db.Model):
         }
 
         if include_detail:
+            data["emergency"] = self.emergency_context(include_detail=True)
             data["patient_detail"] = self.patient.to_dict() if self.patient else None
             data["treatment_plan"] = self.treatment_plan
             data["care_instructions"] = self.care_instructions

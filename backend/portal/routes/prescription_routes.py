@@ -26,11 +26,13 @@ from portal.extensions import db
 from portal.helpers.auth_helper import get_current_doctor
 from portal.helpers.decorators import clinical_only
 from portal.helpers.formulary import department_brands
+from portal.helpers.patient_search import patient_search_filter
 from portal.helpers.response import error, success
 from portal.models.consultation import Consultation
 from portal.models.consultation_summary import ConsultationSummary
+from portal.models.doctor import Doctor
 from portal.models.generated_prescription import GeneratedPrescription
-from portal.models.patient import Patient
+from portal.models.user import User
 
 prescription_bp = Blueprint("prescriptions", __name__)
 
@@ -201,26 +203,28 @@ def list_prescriptions():
             db.func.coalesce(Consultation.ended_at, Consultation.created_at) >= since
         )
 
-    search = (request.args.get("search") or "").strip()
-    if search:
-        like = f"%{search}%"
-        query = (
-            query.outerjoin(Patient, Consultation.patient_id == Patient.id)
-            .outerjoin(
-                ConsultationSummary,
-                ConsultationSummary.consultation_id == Consultation.id,
-            )
-            .filter(
-                db.or_(
-                    Patient.name.ilike(like),
-                    ConsultationSummary.symptoms.ilike(like),
-                    ConsultationSummary.possible_diagnosis.ilike(like),
-                    # Searching by medicine is the reason a pharmacist or
-                    # doctor opens this page: "who else did we give this to".
-                    GeneratedPrescription.medicine_name.ilike(like),
-                )
-            )
-        )
+    # Patient, doctor or medicine — what the box on this page promises. The
+    # medicine is the reason a pharmacist opens it at all ("who else did we
+    # give this to"); the doctor was named in the placeholder but never
+    # actually searched until now.
+    search = patient_search_filter(
+        request.args.get("search"),
+        columns=(
+            ConsultationSummary.symptoms,
+            ConsultationSummary.possible_diagnosis,
+            GeneratedPrescription.medicine_name,
+        ),
+        # A doctor's name is on their user account, not the doctor row.
+        extra=lambda term: [
+            Consultation.doctor.has(Doctor.user.has(User.name.ilike(f"%{term}%")))
+        ],
+        relationship=Consultation.patient,
+    )
+    if search is not None:
+        query = query.outerjoin(
+            ConsultationSummary,
+            ConsultationSummary.consultation_id == Consultation.id,
+        ).filter(search)
 
     try:
         page = max(1, int(request.args.get("page", 1)))

@@ -22,9 +22,9 @@ from portal.helpers.contact import normalize_email, normalize_phone
 from portal.helpers.decorators import FRONT_DESK_ROLES, role_required
 from portal.helpers.notify import notify
 from portal.helpers.patient_access import can_access_patient, scope_patients
-from portal.helpers.queue_helper import raise_op
+from portal.helpers.queue_helper import move_open_ops_to, raise_op
 from portal.helpers.response import error, success
-from portal.helpers.search import id_from_term, matches_all, terms_from
+from portal.helpers.patient_search import patient_search_filter
 from portal.helpers.surgery import refresh_surgery_stages
 from portal.helpers.uploads import ImageUploadError, delete_image, save_image, upload_dir
 from portal.models.appointment import Appointment
@@ -115,32 +115,6 @@ def _in_appointments():
 def _has_completed_consultation():
     return db.session.query(Consultation.patient_id).filter(
         Consultation.status == "completed"
-    )
-
-
-def patient_search_filter(raw):
-    """`?search=` as a filter over the patient table, or None if nothing typed.
-
-    The fields somebody actually has to hand when they are looking for a
-    patient: the name, the code on their card, the number they gave at the
-    desk, their address. Deliberately *not* the medical history or the
-    allergies -- searching "arjun" must not return a stranger whose notes
-    happen to mention an Arjun.
-    """
-    terms = terms_from(raw)
-    if not terms:
-        return None
-
-    def by_id(term):
-        # "PAT0004", "pat4" and a bare "4" all mean the same record. A ten
-        # digit string is a phone number and is left to the column above.
-        patient_id = id_from_term(term, "pat")
-        return [Patient.id == patient_id] if patient_id else []
-
-    return matches_all(
-        terms,
-        (Patient.name, Patient.phone, Patient.email),
-        extra=by_id,
     )
 
 
@@ -541,11 +515,18 @@ def reassign_patient(patient_id):
 
     patient.assigned_doctor_id = doctor.id
 
+    # The OP they are waiting on moves with them. Left behind it would sit in
+    # the previous doctor's queue for a patient who is no longer theirs, and if
+    # the new doctor is in another department it would belong to no queue at
+    # all. Consultations already under way are not touched.
+    moved = move_open_ops_to(patient, doctor)
+
     if doctor.user_id:
         notify(
             [doctor.user_id],
             title="New patient assigned to you",
-            body=f"{patient.name} ({patient.code}) was routed to you.",
+            body=f"{patient.name} ({patient.code}) was routed to you."
+            + (" Their open OP is now in your queue." if moved else ""),
             category="patient_assignment",
             link=_patient_assignment_link(patient),
             exclude_user_id=get_jwt_identity(),

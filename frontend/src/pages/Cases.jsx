@@ -172,11 +172,7 @@ export default function Cases() {
 
   return (
     <div>
-      <PageHeader
-        icon={HiOutlineFolderOpen}
-        title="Cases"
-        description="Courses of treatment, each holding one or more consultation sessions. This is where a doctor picks an ongoing treatment back up, and where a finished one gets its single consolidated report."
-      />
+      <PageHeader icon={HiOutlineFolderOpen} title="Cases" />
 
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <form
