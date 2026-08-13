@@ -7,6 +7,7 @@ import {
   RecordCardFooter,
   RecordCardHeader,
   RecordDetail,
+  cardLinkClass,
 } from "./RecordCard";
 
 const STATUS_META = {
@@ -33,6 +34,10 @@ const STARTABLE_STATUSES = ["waiting", "scheduled", "confirmed"];
  * a receptionist and for an admin, who both read this queue for their own
  * reasons without ever running the visit. They still see the card, its
  * status and its position — the card is the queue, not the action.
+ *
+ * `onViewDetails` is optional and adds the way through to the patient's own
+ * page. Omitted on screens that are already about one patient, so the button
+ * never links to where you are.
  */
 export default function AppointmentCard({
   appointment,
@@ -40,6 +45,7 @@ export default function AppointmentCard({
   canConsult = false,
   onStart,
   onResume,
+  onViewDetails,
   busy,
 }) {
   const patient = appointment.patient_detail || {};
@@ -104,37 +110,47 @@ export default function AppointmentCard({
           time on the right — so a card without the action button keeps the
           same shape rather than leaving a hole where it was. For a viewer
           who cannot consult, the left slot is the status label, which is the
-          same fallback an already-completed appointment has always used. */}
+          same fallback an already-completed appointment has always used.
+          "View details" sits alongside whichever of those is showing, which
+          is why the left slot is a row rather than a single child. */}
       <RecordCardFooter>
-        {ongoing && canConsult ? (
-          <button
-            onClick={() => onResume(appointment)}
-            className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:shadow-md"
-          >
-            <HiOutlineArrowRightCircle className="h-4 w-4" />
-            Resume consultation
-          </button>
-        ) : canStart ? (
-          <button
-            onClick={() => onStart(appointment)}
-            disabled={busy}
-            className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:shadow-md disabled:opacity-60"
-          >
-            {busy ? (
-              <>
-                <HiOutlineClock className="h-4 w-4" />
-                Starting…
-              </>
-            ) : (
-              <>
-                <HiOutlinePlay className="h-4 w-4" />
-                Start consultation
-              </>
-            )}
-          </button>
-        ) : (
-          <span className="text-xs font-semibold text-slate-400">{status.label}</span>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {ongoing && canConsult ? (
+            <button
+              onClick={() => onResume(appointment)}
+              className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:shadow-md"
+            >
+              <HiOutlineArrowRightCircle className="h-4 w-4" />
+              Resume consultation
+            </button>
+          ) : canStart ? (
+            <button
+              onClick={() => onStart(appointment)}
+              disabled={busy}
+              className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:shadow-md disabled:opacity-60"
+            >
+              {busy ? (
+                <>
+                  <HiOutlineClock className="h-4 w-4" />
+                  Starting…
+                </>
+              ) : (
+                <>
+                  <HiOutlinePlay className="h-4 w-4" />
+                  Start consultation
+                </>
+              )}
+            </button>
+          ) : (
+            <span className="text-xs font-semibold text-slate-400">{status.label}</span>
+          )}
+
+          {onViewDetails && (
+            <button onClick={() => onViewDetails(appointment)} className={cardLinkClass}>
+              View details
+            </button>
+          )}
+        </div>
 
         <span className="text-xs text-slate-400">{appointmentTime}</span>
       </RecordCardFooter>

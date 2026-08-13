@@ -28,6 +28,11 @@ const Terms = lazy(() => import("../pages/legal/Terms"));
 const Dashboard = lazy(() => import("../pages/Dashboard"));
 const Patients = lazy(() => import("../pages/Patients"));
 const Appointments = lazy(() => import("../pages/Appointments"));
+// The two screens the doctor cards on Appointments lead into: one doctor's
+// queue, then one patient's record. Pages rather than panels expanded in
+// place, so each has a URL that can be refreshed, bookmarked and linked to.
+const DoctorPatientQueue = lazy(() => import("../pages/DoctorPatientQueue"));
+const PatientDetails = lazy(() => import("../pages/PatientDetails"));
 const EmergencyCases = lazy(() => import("../pages/EmergencyCases"));
 const EmergencyCaseDetail = lazy(() => import("../pages/EmergencyCaseDetail"));
 const Consultations = lazy(() => import("../pages/Consultations"));
@@ -262,6 +267,8 @@ export default function AppRouter() {
               <Route index element={<Dashboard />} />
               <Route path="patients" element={<Patients />} />
               <Route path="appointments" element={<Appointments />} />
+              <Route path="appointments/doctors/:doctorId" element={<DoctorPatientQueue />} />
+              <Route path="appointments/patients/:patientId" element={<PatientDetails />} />
               {/* Same tree as Appointments, unwrapped by either RoleRoute:
                   reception, doctor and admin all need to see the board, just
                   with different actions gated inside the page itself. */}
