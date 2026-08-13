@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { HiOutlineCalendarDays } from "react-icons/hi2";
+import {
+  HiOutlineCalendarDays,
+  HiOutlineMagnifyingGlass,
+  HiOutlineUserGroup,
+} from "react-icons/hi2";
 import AppointmentCard from "../components/AppointmentCard";
-import DoctorQueueCard from "../components/DoctorQueueCard";
+import DoctorQueueCard, { buildQueueEntries } from "../components/DoctorQueueCard";
 import FilterChip from "../components/FilterChip";
 import {
   EmptyState,
@@ -128,6 +132,16 @@ export default function Appointments() {
   const [dateFilter, setDateFilter] = useState("today");
   const [periodAppointments, setPeriodAppointments] = useState([]);
 
+  // Which doctor's patients are shown in the queue section below the doctor
+  // cards, and the search filter within that section.
+  const [selectedDoctorId, setSelectedDoctorId] = useState(null);
+  const [patientSearch, setPatientSearch] = useState("");
+
+  function handleViewPatients(doctor) {
+    setSelectedDoctorId(doctor.id);
+    setPatientSearch("");
+  }
+
   useEffect(() => {
     if (isDoctorView) return;
     fetchDoctors()
@@ -160,6 +174,22 @@ export default function Appointments() {
   }, [periodAppointments]);
 
   const periodLabel = DATE_FILTERS.find((f) => f.key === dateFilter)?.label.toLowerCase();
+
+  const selectedDoctor = doctors.find((d) => d.id === selectedDoctorId) || null;
+  const selectedBucket = selectedDoctor
+    ? queueByDoctor.get(selectedDoctor.id) || { current: null, waiting: [] }
+    : null;
+  const selectedEntries = selectedBucket
+    ? buildQueueEntries(selectedBucket.current, selectedBucket.waiting).entries
+    : [];
+  const patientQuery = patientSearch.trim().toLowerCase();
+  const visiblePatientEntries = patientQuery
+    ? selectedEntries.filter(({ appointment }) => {
+        const name = appointment.patient || "";
+        const code = appointment.patient_detail?.code || "";
+        return name.toLowerCase().includes(patientQuery) || code.toLowerCase().includes(patientQuery);
+      })
+    : selectedEntries;
 
   function clearFilter(key) {
     const next = new URLSearchParams(searchParams);
@@ -276,12 +306,96 @@ export default function Appointments() {
                   waiting={bucket.waiting}
                   periodCount={periodCountByDoctor.get(doctor.id) || 0}
                   periodLabel={periodLabel}
+                  selected={doctor.id === selectedDoctorId}
+                  onViewPatients={handleViewPatients}
                 />
               );
             })}
           </RecordGrid>
         )}
       </div>
+
+      {/* A separate section, not a continuation of the doctor-card grid above
+          — its own divider and heading, so it reads as an independent part
+          of the page rather than more rows appended to Appointments. It
+          stays mounted (rather than only appearing once a doctor is picked)
+          so the page doesn't jump around as reception clicks between
+          doctors — the same section just swaps its heading and contents. */}
+      {!isDoctorView && (
+        <div className="mt-10 border-t border-slate-200 pt-8">
+          <PageHeader
+            icon={HiOutlineUserGroup}
+            title={selectedDoctor ? `${selectedDoctor.name} — Patient Queue` : "Patient Queue"}
+            description={
+              selectedDoctor
+                ? "This doctor's patients, in queue order."
+                : "Select a doctor above to view their patient queue."
+            }
+            action={
+              selectedDoctor && (
+                <button
+                  onClick={() => setSelectedDoctorId(null)}
+                  className="text-xs font-semibold text-slate-500 transition hover:text-slate-700"
+                >
+                  Clear selection
+                </button>
+              )
+            }
+          />
+
+          {!selectedDoctor ? (
+            <div className="mt-6">
+              <EmptyState icon={HiOutlineUserGroup}>
+                Select a doctor to view their patient queue.
+              </EmptyState>
+            </div>
+          ) : (
+            <>
+              <div className="mt-4 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 focus-within:border-brand-400 focus-within:ring-2 focus-within:ring-brand-100 sm:max-w-md">
+                <HiOutlineMagnifyingGlass className="h-4 w-4 shrink-0 text-slate-400" />
+                <input
+                  value={patientSearch}
+                  onChange={(e) => setPatientSearch(e.target.value)}
+                  aria-label="Search this doctor's queue"
+                  placeholder="Search by patient name or ID…"
+                  className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
+                />
+              </div>
+
+              <div className="mt-5">
+                {selectedEntries.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-slate-400">
+                    Nobody in this doctor's queue right now.
+                  </p>
+                ) : visiblePatientEntries.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-slate-400">
+                    No patient in this queue matches “{patientSearch.trim()}”.
+                  </p>
+                ) : (
+                  // Same card the flat queue uses, one per patient, in this
+                  // doctor's own queue order — just re-numbered per doctor
+                  // instead of the appointment's global position. Reception
+                  // never consults from here (canConsult is always false for
+                  // this view), so every card falls back to its plain status
+                  // label rather than offering Start/Resume.
+                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                    {visiblePatientEntries.map(({ appointment, queueNumber, isNext }) => (
+                      <AppointmentCard
+                        key={appointment.id}
+                        appointment={{ ...appointment, queue_number: queueNumber }}
+                        isNext={isNext}
+                        canConsult={false}
+                        onStart={() => {}}
+                        onResume={() => {}}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
